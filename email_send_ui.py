@@ -8,6 +8,7 @@ Thay đổi so với bản cũ:
   - Hỗ trợ nhiều SMTP account (smtp_accounts JSON array trong config.ini)
   - Hỗ trợ rotating proxy (smtp_proxies JSON array)
   - Gửi đồng thời qua ThreadPoolExecutor (send_report_email_bulk)
+  - Dropdown chọn account: "Tất cả (đồng loạt)" hoặc 1 account cụ thể
   - Hiển thị bảng kết quả per-account sau khi gửi
 """
 
@@ -48,29 +49,48 @@ def render_send_email_ui(path: str, cfg: dict, key_prefix: str):
         )
         return
 
-    # --- Hiển thị tóm tắt account + proxy ---
-    n_acc = len(accounts)
-    n_proxy = len(proxies)
     st.write(f"**To:** {parsed['to']}")
     st.write(f"**Subject:** {parsed['subject']}")
-    with st.expander(f"📋 {n_acc} tài khoản sẽ gửi đồng loạt  |  {n_proxy} proxy {'(xoay vòng)' if n_proxy else '(không dùng proxy)'}"):
-        rows = []
-        for i, acc in enumerate(accounts):
-            proxy = proxies[i % len(proxies)] if proxies else "—"
-            rows.append({"#": i + 1, "Tài khoản": acc.get("username", "?"), "Proxy": proxy})
-        st.table(pd.DataFrame(rows))
+
+    # --- Dropdown chọn account ---
+    account_labels = [f"{acc.get('username','?')} ({acc.get('host','?')}:{acc.get('port','?')})" for acc in accounts]
+    options = ["🚀 Tất cả tài khoản (đồng loạt)"] + account_labels
+    selected = st.selectbox(
+        "Gửi từ tài khoản:",
+        options=options,
+        key=f"{key_prefix}_account_select_{filename}",
+    )
+
+    # Hiển thị tóm tắt proxy nếu có
+    n_proxy = len(proxies)
+    if n_proxy:
+        with st.expander(f"🔄 Proxy: {n_proxy} proxy xoay vòng"):
+            st.table(pd.DataFrame([{"#": i+1, "Proxy": p} for i, p in enumerate(proxies)]))
 
     result_key = f"{key_prefix}_send_results_{filename}"
 
-    if st.button(
-        f"🚀 Gửi đồng loạt ({n_acc} tài khoản)",
-        key=f"{key_prefix}_send_{filename}",
-        type="primary",
-    ):
-        with st.spinner(f"Đang gửi từ {n_acc} tài khoản đồng thời..."):
-            results = pt.send_report_email_bulk(parsed["to"], parsed["subject"], parsed["body"], cfg)
+    # Xác định mode gửi
+    is_bulk = selected.startswith("🚀")
+    if is_bulk:
+        btn_label = f"🚀 Gửi đồng loạt ({len(accounts)} tài khoản)"
+    else:
+        acc_idx = options.index(selected) - 1  # trừ 1 vì options[0] là "Tất cả"
+        chosen_account = accounts[acc_idx]
+        chosen_proxy = proxies[acc_idx % len(proxies)] if proxies else None
+        btn_label = f"📨 Gửi từ {chosen_account.get('username','?')}"
 
-        # Ghi sent_log.csv cho mỗi account
+    if st.button(btn_label, key=f"{key_prefix}_send_{filename}", type="primary"):
+        with st.spinner("Đang gửi..."):
+            if is_bulk:
+                results = pt.send_report_email_bulk(parsed["to"], parsed["subject"], parsed["body"], cfg)
+            else:
+                r = pt.send_report_email_single(
+                    parsed["to"], parsed["subject"], parsed["body"],
+                    chosen_account, chosen_proxy
+                )
+                results = [r]
+
+        # Ghi sent_log.csv
         ts = datetime.now(timezone.utc).isoformat()
         for r in results:
             try:
@@ -86,17 +106,16 @@ def render_send_email_ui(path: str, cfg: dict, key_prefix: str):
             except Exception as e:
                 st.warning(f"Ghi sent_log.csv lỗi (không ảnh hưởng việc gửi): {e}")
 
-        # Lưu kết quả vào session_state để không biến mất khi Streamlit rerun
         st.session_state[result_key] = results
 
-    # Hiển thị kết quả (đọc từ session_state nên tồn tại qua mọi rerun)
+    # Hiển thị kết quả
     if result_key in st.session_state:
         results = st.session_state[result_key]
         n_ok = sum(1 for r in results if r["success"])
         n_fail = len(results) - n_ok
 
         if n_fail == 0:
-            st.success(f"✅ Đã gửi thành công từ tất cả {n_ok} tài khoản")
+            st.success(f"✅ Đã gửi thành công từ {n_ok} tài khoản")
         elif n_ok == 0:
             st.error(f"❌ Tất cả {n_fail} tài khoản đều thất bại")
         else:
@@ -104,10 +123,11 @@ def render_send_email_ui(path: str, cfg: dict, key_prefix: str):
 
         df = pd.DataFrame([
             {
-                "Tài khoản": r["account"],
-                "Proxy": r["proxy"],
+                "Tài khoản": r.get("account", "?"),
+                "Proxy": r.get("proxy", "—"),
                 "Kết quả": "✅ OK" if r["success"] else "❌ Lỗi",
                 "Chi tiết": r.get("error") or "",
+                "Sent folder": r.get("imap_note") or ("Tự lưu (Gmail)" if "gmail" in r.get("account","").lower() else "✅ Đã lưu"),
             }
             for r in results
         ])

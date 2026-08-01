@@ -30,6 +30,7 @@ import argparse
 import concurrent.futures
 import configparser
 import csv
+import imaplib
 import json
 import os
 import re
@@ -1497,16 +1498,67 @@ class _SMTPWithProxy(smtplib.SMTP):
         return sock
 
 
+def _imap_save_sent(account: dict, raw_msg: bytes) -> str | None:
+    """Lưu 1 bản copy email đã gửi vào thư mục Sent trên IMAP server.
+
+    Chỉ chạy khi account có `imap_host` (hoặc dùng chung `host`), không raise —
+    lỗi trả về chuỗi mô tả lỗi, thành công trả về None.
+    Gmail tự lưu Sent khi gửi qua SMTP nên không cần — hàm này dành cho mail server
+    tự host (vd. mail.camellrp.com) không tự động làm điều đó.
+    """
+    # Ưu tiên imap_host riêng, fallback dùng chung host với SMTP
+    imap_host = account.get("imap_host") or account.get("host", "")
+    imap_port = int(account.get("imap_port", 993))
+    username = account.get("username", "")
+    password = account.get("password", "")
+
+    # Không làm gì với Gmail — Gmail tự lưu Sent qua SMTP
+    if "gmail.com" in imap_host.lower():
+        return None
+
+    try:
+        mail = imaplib.IMAP4_SSL(imap_host, imap_port)
+        mail.login(username, password)
+
+        # Tìm thư mục Sent — các mail server dùng tên khác nhau
+        sent_folder = None
+        _, folders = mail.list()
+        for folder_line in (folders or []):
+            name = folder_line.decode("utf-8", errors="ignore") if isinstance(folder_line, bytes) else str(folder_line)
+            name_lower = name.lower()
+            for candidate in ("sent", "sent items", "sent messages", "sent mail", "gesendete", "enviados"):
+                if f'"{candidate}"' in name_lower or f"/{candidate}" in name_lower or name_lower.endswith(candidate):
+                    # Trích tên folder thực từ chuỗi IMAP LIST response
+                    parts = name.rsplit('"', 1)
+                    sent_folder = parts[-1].strip().strip('"') if len(parts) > 1 else candidate
+                    break
+            if sent_folder:
+                break
+        if not sent_folder:
+            sent_folder = "Sent"  # fallback mặc định
+
+        # APPEND email vào Sent folder với flag \Seen
+        now = imaplib.Time2Internaldate(datetime.now().timestamp())
+        mail.append(sent_folder, r"\Seen", now, raw_msg)
+        mail.logout()
+        return None
+    except Exception as e:
+        return str(e)
+
+
 def _send_via_account(account: dict, proxy_str: str | None, to: str, subject: str, body: str) -> dict:
     """Gửi email qua 1 SMTP account cụ thể, tùy chọn qua proxy.
 
-    Được gọi từ send_report_email_bulk() — mỗi thread trong ThreadPoolExecutor xử lý 1 account.
-    Trả về dict {"account", "proxy", "success", "error"} — không raise, để caller tổng hợp kết quả.
+    Tự detect mode:
+    - port 465 hoặc ssl=true  → smtplib.SMTP_SSL (SSL/TLS ngay từ đầu, dùng cho mail.camellrp.com)
+    - port 587 (mặc định)     → smtplib.SMTP + starttls() (STARTTLS, dùng cho Gmail)
+    Không raise — trả về dict {"account", "proxy", "success", "error"}.
     """
     username = account.get("username", "")
     host = account.get("host", "smtp.gmail.com")
     port = int(account.get("port", 587))
     password = account.get("password", "")
+    use_ssl = bool(account.get("ssl", False)) or port == 465
     proxy_label = proxy_str or "—"
     try:
         msg = MIMEText(body, "plain", "utf-8")
@@ -1514,7 +1566,6 @@ def _send_via_account(account: dict, proxy_str: str | None, to: str, subject: st
         msg["From"] = username
         msg["To"] = to
 
-        # split "addr1, addr2" → ["addr1", "addr2"] cho SMTP RCPT TO
         to_list = [a.strip() for a in to.split(",") if a.strip()]
 
         if proxy_str:
@@ -1524,15 +1575,26 @@ def _send_via_account(account: dict, proxy_str: str | None, to: str, subject: st
             if proxy_info is None:
                 raise RuntimeError(f"Không parse được proxy: {proxy_str}")
             server_ctx = _SMTPWithProxy(host, port, proxy_info, timeout=15)
+            with server_ctx as server:
+                if not use_ssl:
+                    server.starttls()
+                server.login(username, password)
+                server.sendmail(username, to_list, msg.as_string())
+        elif use_ssl:
+            with smtplib.SMTP_SSL(host, port, timeout=15) as server:
+                server.login(username, password)
+                server.sendmail(username, to_list, msg.as_string())
         else:
-            server_ctx = smtplib.SMTP(host, port, timeout=15)
+            with smtplib.SMTP(host, port, timeout=15) as server:
+                server.starttls()
+                server.login(username, password)
+                server.sendmail(username, to_list, msg.as_string())
 
-        with server_ctx as server:
-            server.starttls()
-            server.login(username, password)
-            server.sendmail(username, to_list, msg.as_string())
+        # Lưu copy vào Sent folder qua IMAP (không làm gì với Gmail — tự lưu)
+        imap_err = _imap_save_sent(account, msg.as_bytes())
+        imap_note = f" (IMAP Sent: {imap_err})" if imap_err else ""
 
-        return {"account": username, "proxy": proxy_label, "success": True, "error": None}
+        return {"account": username, "proxy": proxy_label, "success": True, "error": None, "imap_note": imap_note}
     except Exception as e:
         return {"account": username, "proxy": proxy_label, "success": False, "error": str(e)}
 
@@ -1567,6 +1629,14 @@ def send_report_email_bulk(to: str, subject: str, body: str, cfg: dict) -> list:
         for future in concurrent.futures.as_completed(futures):
             indexed[futures[future]] = future.result()
     return [indexed[i] for i in sorted(indexed)]
+
+
+def send_report_email_single(to: str, subject: str, body: str, account: dict, proxy_str: str | None = None) -> dict:
+    """Gửi email qua 1 account chỉ định (dùng khi UI cho phép chọn account cụ thể — P3).
+
+    Trả về dict {"account", "proxy", "success", "error"} — không raise.
+    """
+    return _send_via_account(account, proxy_str, to, subject, body)
 
 # file khi ghi sent_log.csv, không liên quan gì tới parse_draft_email() bên dưới.
 _DRAFT_FILENAME_SUFFIXES = [
