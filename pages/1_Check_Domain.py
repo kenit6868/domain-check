@@ -425,9 +425,15 @@ if "check_domain_result" in st.session_state:
     # 5. Registrar ────────────────────────────────────────────────────────────
     if who.get("registrar"):
         with st.expander(f"5️⃣  Registrar: {who['registrar']}", expanded=True):
-            abuse_emails = who.get("emails")
-            if abuse_emails:
-                st.markdown(f"**Abuse contact:** `{abuse_emails}`")
+            abuse_email_source = result.get("registrar_abuse_email_source")
+            abuse_email_used = result.get("registrar_abuse_email_used")
+            if abuse_email_source == "whois":
+                st.markdown(f"**Abuse contact (từ WHOIS):** `{abuse_email_used}`")
+            elif abuse_email_source == "static_table":
+                st.markdown(f"**Abuse contact (fallback từ bảng tĩnh):** `{abuse_email_used}`")
+                st.caption("⚠️ WHOIS không trả về email — email trên được tra từ bảng tĩnh theo tên registrar. Đã ghi vào draft.")
+            else:
+                st.warning("Không tìm được abuse email — tra thủ công tại https://lookup.icann.org/")
             show_draft_block(find_draft("_registrar_report.txt"), "registrar")
 
     # 6. Registry ccTLD ───────────────────────────────────────────────────────

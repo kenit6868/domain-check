@@ -200,6 +200,72 @@ CCTLD_REGISTRY_CONTACTS = {
     "co": {"registry": "GoDaddy Registry", "abuse_email": "abuse@godaddy.com", "note": None},
 }
 
+# Bảng tĩnh abuse email của các registrar phổ biến — dùng làm fallback khi WHOIS không trả về email.
+# Match theo "contains" case-insensitive với tên registrar từ WHOIS (xem lookup_registrar_abuse_email).
+REGISTRAR_ABUSE_EMAILS = {
+    "namecheap":           "abuse@namecheap.com",
+    "godaddy":             "abuse@godaddy.com",
+    "tucows":              "domainabuse@tucows.com",
+    "opensrs":             "domainabuse@tucows.com",
+    "enom":                "abuse@enom.com",
+    "porkbun":             "abuse@porkbun.com",
+    "gandi":               "abuse@support.gandi.net",
+    "ovh":                 "abuse@ovh.net",
+    "cloudflare":          "registrar-abuse@cloudflare.com",
+    "google domains":      "registrar-abuse@google.com",
+    "squarespace":         "registrar-abuse@google.com",
+    "markmonitor":         "abusecomplaints@markmonitor.com",
+    "alibaba":             "DomainAbuse@service.aliyun.com",
+    "aliyun":              "DomainAbuse@service.aliyun.com",
+    "huaweicloud":         "abuse@huaweicloud.com",
+    "reg.ru":              "abuse@reg.ru",
+    "namesilo":            "abuse@namesilo.com",
+    "hostinger":           "abuse@hostinger.com",
+    "hostgator":           "abuse@hostgator.com",
+    "bluehost":            "abuse@bluehost.com",
+    "dynadot":             "abuse@dynadot.com",
+    "1api":                "abuse@1api.net",
+    "internetbs":          "abuse@internet.bs",
+    "cheapnames":          "abuse@cheapnames.com",
+    "bigrock":             "abuse@bigrock.com",
+    "crazydomains":        "abuse@crazydomains.com",
+    "name.com":            "abuse@name.com",
+    "rebel.com":           "abuse@rebel.com",
+    "ionos":               "abuse@ionos.com",
+    "1&1":                 "abuse@ionos.com",
+    "netim":               "abuse@netim.com",
+    "spaceship":           "abuse@spaceship.com",
+    "epik":                "abuse@epik.com",
+    "key-systems":         "abuse@key-systems.net",
+    "inwx":                "abuse@inwx.com",
+    "regtons":             "abuse@regtons.com",
+    "publicdomainregistry": "abuse@publicdomainregistry.com",
+    "withheldforprivacy":  "abuse@withheldforprivacy.com",
+    "domainsbyproxy":      "abuse@domainsbyproxy.com",
+    "whoisguard":          "compliance@namecheap.com",
+    "resellerclub":        "abuse-staff@resellerclub.com",
+    "netearth":            "abuse@netearth.net",
+    "nicenic":             "abuse@nicenic.net",
+    "west263":             "abuse@west263.com",
+    "net-chinese":         "abuse@net-chinese.com.tw",
+    "hichina":             "DomainAbuse@service.aliyun.com",
+    "wix":                 "abuse@wix.com",
+    "wordpress":           "abuse@automattic.com",
+    "shopify":             "trust@shopify.com",
+}
+
+
+def lookup_registrar_abuse_email(registrar: str) -> str | None:
+    """Tra bảng tĩnh REGISTRAR_ABUSE_EMAILS theo tên registrar (contains match, case-insensitive).
+    Trả về abuse email nếu tìm được, None nếu không."""
+    if not registrar:
+        return None
+    r_lower = registrar.lower()
+    for key, email in REGISTRAR_ABUSE_EMAILS.items():
+        if key in r_lower:
+            return email
+    return None
+
 
 # --------------------------------------------------------------------------
 # Config
@@ -1213,12 +1279,25 @@ def generate_email_drafts(domain, cert, who, vt, cfg):
     if isinstance(abuse_emails, list):
         abuse_emails = ", ".join(e for e in abuse_emails if e)
 
+    # Fallback: nếu WHOIS không trả về email, tra bảng tĩnh theo tên registrar
+    abuse_email_source = "whois"
+    if not abuse_emails and registrar:
+        fallback = lookup_registrar_abuse_email(registrar)
+        if fallback:
+            abuse_emails = fallback
+            abuse_email_source = "static_table"
+
     if registrar:
         path = os.path.join(REPORTS_DIR, f"{domain}_registrar_report.txt")
+        fallback_note = (
+            "\n[NOTE: Abuse email looked up from static registrar table — WHOIS did not return an email."
+            " Please verify this is correct before sending.]\n"
+            if abuse_email_source == "static_table" else ""
+        )
         with open(path, "w", encoding="utf-8") as f:
             f.write(f"""To: {abuse_emails or '[TRA ABUSE EMAIL TẠI https://lookup.icann.org/]'}
 Subject: Phishing Abuse Report - {domain}
-
+{fallback_note}
 Dear {registrar} Abuse Team,
 
 We are writing to report the domain {domain} for active phishing activity
@@ -1856,9 +1935,25 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
     try:
         drafts = generate_email_drafts(domain, cert, who, vt, cfg)
         drafts_error = None
+        # Tính toán nguồn email registrar để UI có thể hiển thị (whois vs static_table)
+        _who_emails = who.get("emails") if isinstance(who, dict) else None
+        if isinstance(_who_emails, list):
+            _who_emails = ", ".join(e for e in _who_emails if e)
+        _registrar = who.get("registrar") if isinstance(who, dict) else None
+        if _who_emails:
+            registrar_abuse_email_source = "whois"
+            registrar_abuse_email_used = _who_emails
+        elif _registrar and lookup_registrar_abuse_email(_registrar):
+            registrar_abuse_email_source = "static_table"
+            registrar_abuse_email_used = lookup_registrar_abuse_email(_registrar)
+        else:
+            registrar_abuse_email_source = None
+            registrar_abuse_email_used = None
     except Exception as e:
         drafts = []
         drafts_error = str(e)
+        registrar_abuse_email_source = None
+        registrar_abuse_email_used = None
 
     try:
         apwg_draft = generate_apwg_draft(domain, vt, cfg)
@@ -1918,6 +2013,8 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
         "log_error": log_error,
         "drafts": drafts,
         "drafts_error": drafts_error,
+        "registrar_abuse_email_source": registrar_abuse_email_source,
+        "registrar_abuse_email_used": registrar_abuse_email_used,
     }
 
 
