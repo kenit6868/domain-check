@@ -1,0 +1,6 @@
+config.ini
+case_log.csv
+sent_log.csv
+reports/
+__pycache__/
+*.pyc

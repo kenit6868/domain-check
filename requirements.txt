@@ -1,0 +1,9 @@
+requests
+python-whois
+cryptography
+dnstwist
+dnspython
+ipwhois
+streamlit
+pandas
+PySocks
