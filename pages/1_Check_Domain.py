@@ -180,23 +180,18 @@ if "check_domain_result" in st.session_state:
             st.markdown("**📧 MX Records**")
             st.success("✅ Không có MX record — domain này không được cấu hình để gửi email.")
 
-    col_ssl, col_whois = st.columns(2)
-    with col_ssl:
-        st.subheader("🔒 SSL Certificate")
+    tab_whois, tab_ssl, tab_vt, tab_gsb = st.tabs(["📋 WHOIS", "🔒 SSL Certificate", "🦠 VirusTotal", "🛡️ Safe Browsing"])
+    with tab_whois:
+            if "error" in who:
+                st.error(who["error"])
+            else:
+                show_dict(who)
+    with tab_ssl:
         if "error" in cert:
             st.error(cert["error"])
         else:
             show_dict(cert)
-    with col_whois:
-        st.subheader("📋 WHOIS")
-        if "error" in who:
-            st.error(who["error"])
-        else:
-            show_dict(who)
-
-    col_vt, col_gsb = st.columns(2)
-    with col_vt:
-        st.subheader("🦠 VirusTotal")
+    with tab_vt:
         if "error" in vt:
             st.error(vt["error"])
         elif "skipped" in vt:
@@ -205,8 +200,7 @@ if "check_domain_result" in st.session_state:
             show_dict(vt)
         if result["virustotal_submit"]:
             st.info(result["virustotal_submit"])
-    with col_gsb:
-        st.subheader("🛡️ Google Safe Browsing")
+    with tab_gsb:
         if "error" in gsb:
             st.error(gsb["error"])
         elif "skipped" in gsb:
@@ -236,134 +230,131 @@ if "check_domain_result" in st.session_state:
     st.divider()
 
     # ── A3: URLScan.io ────────────────────────────────────────────────────────
-    st.subheader("📸 URLScan.io — Screenshot & Phân tích trang")
-    st.caption("Screenshot trang không cần truy cập thủ công — dùng làm bằng chứng đính kèm abuse report. Scan mất ~30 giây.")
-
     urlscan_key = f"urlscan_{domain}"
-
-    col_us1, col_us2 = st.columns([1, 3])
-    with col_us1:
-        use_http = st.checkbox("Dùng http:// (nếu https bị từ chối)", key=f"urlscan_http_{domain}")
-        if st.button("🔍 Submit URLScan", key=f"urlscan_submit_{domain}", type="primary"):
-            with st.spinner("Đang submit lên URLScan.io..."):
-                sub = pt.urlscan_submit(domain, cfg.get("urlscan_api_key", ""), use_http=use_http)
-            if "warning" in sub:
-                st.warning(sub["warning"])
-                st.info("💡 Thử tick **'Dùng http://'** rồi submit lại, hoặc domain này đã down.")
-            elif "error" in sub:
-                st.error(sub["error"])
-            else:
-                st.session_state[urlscan_key] = sub
-                st.success(f"Đã submit! Scan ID: `{sub['scan_id']}`")
-
-        if urlscan_key in st.session_state and st.session_state[urlscan_key].get("scan_id"):
-            scan_id = st.session_state[urlscan_key]["scan_id"]
-            if st.button("🔄 Lấy kết quả", key=f"urlscan_fetch_{domain}"):
-                with st.spinner("Đang lấy kết quả (~30 giây sau khi submit)..."):
-                    res_data = pt.urlscan_result(scan_id, cfg.get("urlscan_api_key", ""))
-                if res_data.get("status") == "pending":
-                    st.warning("Scan chưa xong — đợi thêm ~15 giây rồi thử lại.")
-                elif "error" in res_data:
-                    st.error(res_data["error"])
+    _urlscan_done = (
+        f"{urlscan_key}_result" in st.session_state
+        and st.session_state[f"{urlscan_key}_result"].get("status") == "done"
+    )
+    with st.expander("📸 URLScan.io — Screenshot & Phân tích trang", expanded=_urlscan_done):
+        st.caption("Screenshot trang không cần truy cập thủ công — dùng làm bằng chứng đính kèm abuse report. Scan mất ~30 giây.")
+        col_us1, col_us2 = st.columns([1, 3])
+        with col_us1:
+            use_http = st.checkbox("Dùng http:// (nếu https bị từ chối)", key=f"urlscan_http_{domain}")
+            if st.button("🔍 Submit URLScan", key=f"urlscan_submit_{domain}", type="primary"):
+                with st.spinner("Đang submit lên URLScan.io..."):
+                    sub = pt.urlscan_submit(domain, cfg.get("urlscan_api_key", ""), use_http=use_http)
+                if "warning" in sub:
+                    st.warning(sub["warning"])
+                    st.info("💡 Thử tick **'Dùng http://'** rồi submit lại, hoặc domain này đã down.")
+                elif "error" in sub:
+                    st.error(sub["error"])
                 else:
-                    st.session_state[f"{urlscan_key}_result"] = res_data
+                    st.session_state[urlscan_key] = sub
+                    st.success(f"Đã submit! Scan ID: `{sub['scan_id']}`")
 
-    with col_us2:
-        result_data = st.session_state.get(f"{urlscan_key}_result")
-        pending_data = st.session_state.get(urlscan_key)
-
-        if result_data and result_data.get("status") == "done":
-            rc1, rc2, rc3 = st.columns(3)
-            rc1.metric("URLScan Verdict", "🚨 Malicious" if result_data.get("malicious") else "✅ Not flagged")
-            rc2.metric("Score", result_data.get("score", 0))
-            rc3.metric("Page IP", result_data.get("page_ip") or "N/A")
-
-            tags = result_data.get("tags") or []
-            brands = result_data.get("brands") or []
-            if tags:
-                st.markdown(f"**Tags:** {', '.join(tags)}")
-            if brands:
-                st.markdown(f"**Brands detected:** {', '.join(brands)}")
-
-            screenshot_url = result_data.get("screenshot_url")
-            result_url = result_data.get("result_url")
-            if screenshot_url:
-                st.image(screenshot_url, caption="Screenshot từ URLScan.io", use_container_width=True)
-
-            # Block copy-ready evidence để paste vào form/email
-            st.markdown("**📋 Copy bằng chứng — paste vào bất kỳ email/form nào:**")
-            evidence_text = (
-                f"Evidence (URLScan.io):\n"
-                f"- Screenshot: {screenshot_url}\n"
-                f"- Full analysis: {result_url}\n"
-                f"- Verdict: {'MALICIOUS' if result_data.get('malicious') else 'Not flagged'} "
-                f"(score: {result_data.get('score', 0)})"
-            )
-            st.code(evidence_text, language=None)
-
-            # Nút append bằng chứng vào tất cả draft emails đã sinh
-            append_key = f"{urlscan_key}_appended"
-            if append_key not in st.session_state:
-                if st.button("📎 Thêm bằng chứng URLScan vào tất cả draft emails", key=f"urlscan_append_{domain}", type="primary"):
-                    updated = pt.append_urlscan_evidence_to_drafts(result.get("drafts", []), result_data)
-                    if updated:
-                        st.session_state[append_key] = updated
-                        st.rerun()
+            if urlscan_key in st.session_state and st.session_state[urlscan_key].get("scan_id"):
+                scan_id = st.session_state[urlscan_key]["scan_id"]
+                if st.button("🔄 Lấy kết quả", key=f"urlscan_fetch_{domain}"):
+                    with st.spinner("Đang lấy kết quả (~30 giây sau khi submit)..."):
+                        res_data = pt.urlscan_result(scan_id, cfg.get("urlscan_api_key", ""))
+                    if res_data.get("status") == "pending":
+                        st.warning("Scan chưa xong — đợi thêm ~15 giây rồi thử lại.")
+                    elif "error" in res_data:
+                        st.error(res_data["error"])
                     else:
-                        st.warning("Không tìm thấy draft file nào để cập nhật.")
-            else:
-                st.success(f"✅ Bằng chứng đã được thêm vào {len(st.session_state[append_key])} draft files.")
-        elif pending_data and pending_data.get("scan_id"):
-            st.info(f"Scan đã submit — bấm **'Lấy kết quả'** sau ~30 giây.  \n"
-                    f"Link kết quả: {pending_data.get('result_url')}")
+                        st.session_state[f"{urlscan_key}_result"] = res_data
 
-    st.divider()
+        with col_us2:
+            result_data = st.session_state.get(f"{urlscan_key}_result")
+            pending_data = st.session_state.get(urlscan_key)
+
+            if result_data and result_data.get("status") == "done":
+                rc1, rc2, rc3 = st.columns(3)
+                rc1.metric("URLScan Verdict", "🚨 Malicious" if result_data.get("malicious") else "✅ Not flagged")
+                rc2.metric("Score", result_data.get("score", 0))
+                rc3.metric("Page IP", result_data.get("page_ip") or "N/A")
+
+                tags = result_data.get("tags") or []
+                brands = result_data.get("brands") or []
+                if tags:
+                    st.markdown(f"**Tags:** {', '.join(tags)}")
+                if brands:
+                    st.markdown(f"**Brands detected:** {', '.join(brands)}")
+
+                screenshot_url = result_data.get("screenshot_url")
+                result_url = result_data.get("result_url")
+                if screenshot_url:
+                    st.image(screenshot_url, caption="Screenshot từ URLScan.io", use_container_width=True)
+
+                st.markdown("**📋 Copy bằng chứng — paste vào bất kỳ email/form nào:**")
+                evidence_text = (
+                    f"Evidence (URLScan.io):\n"
+                    f"- Screenshot: {screenshot_url}\n"
+                    f"- Full analysis: {result_url}\n"
+                    f"- Verdict: {'MALICIOUS' if result_data.get('malicious') else 'Not flagged'} "
+                    f"(score: {result_data.get('score', 0)})"
+                )
+                st.code(evidence_text, language=None)
+
+                append_key = f"{urlscan_key}_appended"
+                if append_key not in st.session_state:
+                    if st.button("📎 Thêm bằng chứng URLScan vào tất cả draft emails", key=f"urlscan_append_{domain}", type="primary"):
+                        updated = pt.append_urlscan_evidence_to_drafts(result.get("drafts", []), result_data)
+                        if updated:
+                            st.session_state[append_key] = updated
+                            st.rerun()
+                        else:
+                            st.warning("Không tìm thấy draft file nào để cập nhật.")
+                else:
+                    st.success(f"✅ Bằng chứng đã được thêm vào {len(st.session_state[append_key])} draft files.")
+            elif pending_data and pending_data.get("scan_id"):
+                st.info(f"Scan đã submit — bấm **'Lấy kết quả'** sau ~30 giây.  \n"
+                        f"Link kết quả: {pending_data.get('result_url')}")
 
     # ── B3: Wayback Machine Archive ───────────────────────────────────────────
-    st.subheader("🗄️ Wayback Machine — Lưu bằng chứng tĩnh")
-    st.caption("Archive trang phishing ngay bây giờ — link tĩnh tồn tại mãi kể cả khi domain bị gỡ. Nên archive trước khi report.")
-
     wayback_key = f"wayback_{domain}"
-    wb_col1, wb_col2 = st.columns([1, 3])
-    with wb_col1:
-        if st.button("📦 Archive trên Wayback Machine", key=f"wayback_submit_{domain}", type="primary"):
-            with st.spinner("Đang gửi yêu cầu archive (~15–30 giây)..."):
-                wb_res = pt.wayback_archive(domain)
-            if "error" in wb_res:
-                st.error(f"❌ {wb_res['error']}")
-                if wb_res.get("manual_url"):
-                    st.link_button("🔍 Tra snapshot thủ công trên Wayback", wb_res["manual_url"])
-            else:
-                st.session_state[wayback_key] = wb_res
-                if wb_res.get("status") == "existing_snapshot":
-                    st.success("✅ Tìm thấy snapshot có sẵn!")
-                elif wb_res.get("status") == "save_failed":
-                    st.warning("⚠️ Archive lỗi — link ước tính bên dưới (cần verify thủ công).")
+    _wayback_done = wayback_key in st.session_state and "archive_url" in st.session_state[wayback_key]
+    with st.expander("🗄️ Wayback Machine — Lưu bằng chứng tĩnh", expanded=_wayback_done):
+        st.caption("Archive trang phishing ngay bây giờ — link tĩnh tồn tại mãi kể cả khi domain bị gỡ. Nên archive trước khi report.")
+        wb_col1, wb_col2 = st.columns([1, 3])
+        with wb_col1:
+            if st.button("📦 Archive trên Wayback Machine", key=f"wayback_submit_{domain}", type="primary"):
+                with st.spinner("Đang gửi yêu cầu archive (~15–30 giây)..."):
+                    wb_res = pt.wayback_archive(domain)
+                if "error" in wb_res:
+                    st.error(f"❌ {wb_res['error']}")
+                    if wb_res.get("manual_url"):
+                        st.link_button("🔍 Tra snapshot thủ công trên Wayback", wb_res["manual_url"])
                 else:
-                    st.success("✅ Archive thành công!")
-
-    with wb_col2:
-        wb_data = st.session_state.get(wayback_key)
-        if wb_data and "archive_url" in wb_data:
-            st.markdown(f"**🔗 Link archive:**")
-            archive_url = wb_data["archive_url"]
-            st.code(archive_url, language=None)
-            if wb_data.get("note"):
-                st.caption(f"_{wb_data['note']}_")
-            st.link_button("🌐 Mở link archive", archive_url)
-
-            # Append vào tất cả draft emails
-            wb_append_key = f"{wayback_key}_appended"
-            if wb_append_key not in st.session_state:
-                if st.button("📎 Thêm link archive vào tất cả draft emails", key=f"wayback_append_{domain}", type="primary"):
-                    updated = pt.append_wayback_evidence_to_drafts(result.get("drafts", []), wb_data)
-                    if updated:
-                        st.session_state[wb_append_key] = updated
-                        st.rerun()
+                    st.session_state[wayback_key] = wb_res
+                    if wb_res.get("status") == "existing_snapshot":
+                        st.success("✅ Tìm thấy snapshot có sẵn!")
+                    elif wb_res.get("status") == "save_failed":
+                        st.warning("⚠️ Archive lỗi — link ước tính bên dưới (cần verify thủ công).")
                     else:
-                        st.warning("Không tìm thấy draft file nào để cập nhật.")
-            else:
-                st.success(f"✅ Link archive đã được thêm vào {len(st.session_state[wb_append_key])} draft files.")
+                        st.success("✅ Archive thành công!")
+
+        with wb_col2:
+            wb_data = st.session_state.get(wayback_key)
+            if wb_data and "archive_url" in wb_data:
+                archive_url = wb_data["archive_url"]
+                st.markdown("**🔗 Link archive:**")
+                st.code(archive_url, language=None)
+                if wb_data.get("note"):
+                    st.caption(f"_{wb_data['note']}_")
+                st.link_button("🌐 Mở link archive", archive_url)
+
+                wb_append_key = f"{wayback_key}_appended"
+                if wb_append_key not in st.session_state:
+                    if st.button("📎 Thêm link archive vào tất cả draft emails", key=f"wayback_append_{domain}", type="primary"):
+                        updated = pt.append_wayback_evidence_to_drafts(result.get("drafts", []), wb_data)
+                        if updated:
+                            st.session_state[wb_append_key] = updated
+                            st.rerun()
+                        else:
+                            st.warning("Không tìm thấy draft file nào để cập nhật.")
+                else:
+                    st.success(f"✅ Link archive đã được thêm vào {len(st.session_state[wb_append_key])} draft files.")
 
     st.divider()
 
@@ -405,7 +396,7 @@ if "check_domain_result" in st.session_state:
                     st.link_button(f"🔗 Mở form {name.title()} Abuse", info["report_url"])
 
     # 3. Cộng đồng bảo mật (VirusTotal / PhishTank / APWG / Netcraft) ─────────
-    with st.expander("3️⃣  Cộng đồng bảo mật — VirusTotal · PhishTank · APWG · Netcraft", expanded=True):
+    with st.expander("3️⃣  Cộng đồng bảo mật — VirusTotal · PhishTank · APWG · Netcraft", expanded=False):
         vt_link = result.get("virustotal_submit") or vt.get("link")
         if vt_link:
             st.link_button("🔗 Xem/Submit VirusTotal", vt_link)
@@ -419,7 +410,7 @@ if "check_domain_result" in st.session_state:
     # 4. CA (Certificate Authority) ───────────────────────────────────────────
     if ca_note:
         ca_title = f"4️⃣  CA: {ca_note['ca']}"
-        with st.expander(ca_title, expanded=True):
+        with st.expander(ca_title, expanded=False):
             st.info(ca_note["note"])
             if ca_note.get("report_url"):
                 # Nếu là URL thật thì link_button, không phải email address
@@ -432,7 +423,7 @@ if "check_domain_result" in st.session_state:
 
     # 5. Registrar ────────────────────────────────────────────────────────────
     if who.get("registrar"):
-        with st.expander(f"5️⃣  Registrar: {who['registrar']}", expanded=True):
+        with st.expander(f"5️⃣  Registrar: {who['registrar']}", expanded=False):
             abuse_email_source = result.get("registrar_abuse_email_source")
             abuse_email_used = result.get("registrar_abuse_email_used")
             if abuse_email_source == "whois":
@@ -447,7 +438,7 @@ if "check_domain_result" in st.session_state:
     # 6. Registry ccTLD ───────────────────────────────────────────────────────
     registry_contact = result["registry_contact"]
     if registry_contact.get("source") != "not_found":
-        with st.expander("6️⃣  Registry (ccTLD) — leo thang khi registrar không phản hồi", expanded=True):
+        with st.expander("6️⃣  Registry (ccTLD) — leo thang khi registrar không phản hồi", expanded=False):
             if registry_contact["source"] == "static_table":
                 st.markdown(f"**Registry:** {registry_contact.get('registry')}")
                 st.markdown(f"**Abuse email:** `{registry_contact.get('abuse_email')}`")
@@ -458,11 +449,11 @@ if "check_domain_result" in st.session_state:
                 st.caption("Tra abuse email trong nội dung WHOIS thô bên dưới draft.")
             show_draft_block(find_draft("_registry_report.txt"), "registry")
     else:
-        with st.expander(f"6️⃣  Registry (ccTLD) — TLD `.{domain.rsplit('.', 1)[-1]}` chưa hỗ trợ tự động", expanded=True):
+        with st.expander(f"6️⃣  Registry (ccTLD) — TLD `.{domain.rsplit('.', 1)[-1]}` chưa hỗ trợ tự động", expanded=False):
             st.link_button("🔗 Tra thủ công tại IANA", f"https://www.iana.org/domains/root/db/{domain.rsplit('.', 1)[-1]}.html")
 
     # 7. VNCERT ───────────────────────────────────────────────────────────────
-    with st.expander("7️⃣  VNCERT (chỉ gửi nếu domain nhắm vào nạn nhân Việt Nam)", expanded=True):
+    with st.expander("7️⃣  VNCERT (chỉ gửi nếu domain nhắm vào nạn nhân Việt Nam)", expanded=False):
         st.warning("Tool không tự xác định được nạn nhân là người VN hay không — xác minh thủ công trước khi gửi.")
         show_draft_block(find_draft("_vncert_report.txt"), "vncert")
 
@@ -474,7 +465,7 @@ if "check_domain_result" in st.session_state:
     if origin_ip_whois:
         ip, ipw = next(iter(origin_ip_whois.items()))
         org = ipw.get("org") or "N/A"
-        with st.expander(f"8️⃣  Hosting/ISP — IP gốc {ip} ({org})", expanded=True):
+        with st.expander(f"8️⃣  Hosting/ISP — IP gốc {ip} ({org})", expanded=False):
             if "error" in ipw:
                 st.error(f"Lỗi tra IP WHOIS: {ipw['error']}")
             else:
@@ -490,11 +481,7 @@ if "check_domain_result" in st.session_state:
                 ))
             show_draft_block(find_draft("_hosting_report.txt"), "hosting")
     else:
-        with st.expander("8️⃣  Hosting/ISP — không phát hiện IP gốc", expanded=True):
-            st.info(
-                "Không tìm thấy IP gốc qua subdomain scan. Có thể domain không dùng CDN, "
-                "hoặc IP gốc không lộ qua các subdomain thông dụng (mail, cpanel, ftp…)."
-            )
+        st.caption("8️⃣  Hosting/ISP: không phát hiện IP gốc qua subdomain scan (mail, cpanel, ftp…).")
 
     # ── Footer log ────────────────────────────────────────────────────────────
     st.divider()
