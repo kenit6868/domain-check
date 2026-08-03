@@ -2,6 +2,7 @@ config.ini
 case_log.csv
 sent_log.csv
 reports/
+worker_jobs/
 __pycache__/
 *.pyc
 dist/

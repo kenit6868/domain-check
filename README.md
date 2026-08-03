@@ -99,3 +99,15 @@ python -m streamlit run streamlit_app.py
 - `config.ini` chứa API key, không commit lên git (đã có trong `.gitignore`).
 - Google Trust Services không nhận report vì lý do phishing — tool tự bỏ qua bước này khi phát hiện.
 - Google Safe Browsing chỉ hỗ trợ *kiểm tra* trạng thái qua API, việc *report* vẫn phải làm thủ công tại https://safebrowsing.google.com/safebrowsing/report_phish/
+
+## Worker xử lý nhiều domain
+
+Trang **Domain Worker** nhận danh sách domain và tự chạy pipeline kiểm tra, sinh
+draft, rồi gửi những draft có địa chỉ email hợp lệ. Mặc định mỗi batch xử lý 5
+domain, nghỉ 5 phút rồi mới lấy batch tiếp theo.
+
+Worker chạy bằng process riêng nên vẫn tiếp tục nếu đóng hoặc refresh tab trình
+duyệt. Trang này hiển thị tiến độ, kết quả gửi của từng domain và có nút yêu cầu
+dừng. Draft VNCERT mặc định không tự gửi; chỉ bật nếu toàn bộ danh sách thực sự
+nhắm tới nạn nhân tại Việt Nam. Dữ liệu trạng thái được lưu trong
+`worker_jobs/` và thư mục này không được commit.

@@ -796,7 +796,7 @@ def generate_cloudflare_report_text(domain: str, cfg: dict) -> str:
 # A1 — HTTP check: page còn sống không, title, redirect, login form
 # --------------------------------------------------------------------------
 
-def check_http(domain: str) -> dict:
+def check_http(target: str) -> dict:
     """Fetch trang phishing để lấy HTTP status, page title, redirect chain và
     phát hiện login form (input type=password) mà không cần truy cập thủ công.
 
@@ -811,8 +811,16 @@ def check_http(domain: str) -> dict:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
     )
-    for scheme in ("https", "http"):
-        url = f"{scheme}://{domain}"
+    if "://" in target:
+        parsed = urlparse(target)
+        urls = [target]
+        if parsed.scheme.lower() == "https":
+            urls.append(parsed._replace(scheme="http").geturl())
+    else:
+        urls = [f"https://{target}", f"http://{target}"]
+
+    for url in urls:
+        scheme = urlparse(url).scheme
         try:
             r = requests.get(
                 url, timeout=10, allow_redirects=True, verify=False,
@@ -2107,6 +2115,23 @@ def log_sent(row: dict):
         writer.writerow(row)
 
 
+def append_reported_url_to_drafts(drafts: list, target_url: str) -> list:
+    """Ensure every generated report contains the exact offending URL/path."""
+    marker = f"Reported URL: {target_url}"
+    updated = []
+    for path in drafts:
+        try:
+            with open(path, encoding="utf-8") as f:
+                content = f.read()
+            if marker not in content:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content.rstrip() + f"\n\n{marker}\n")
+            updated.append(path)
+        except OSError:
+            updated.append(path)
+    return updated
+
+
 # --------------------------------------------------------------------------
 # Commands
 # --------------------------------------------------------------------------
@@ -2119,6 +2144,7 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
     kết quả giữa hai giao diện.
     """
     domain = normalize_domain(target)
+    target_url = target.strip() if "://" in target else f"http://{domain}"
 
     try:
         cert = get_cert_info(domain)
@@ -2130,7 +2156,7 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
     domain_age_days = compute_domain_age_days(who)
 
     try:
-        http_check = check_http(domain)
+        http_check = check_http(target_url)
     except Exception as e:
         http_check = {"error": str(e)}
 
@@ -2158,7 +2184,7 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
     if vt.get("note") == "Domain chưa từng được VirusTotal quét trước đây" and submit:
         virustotal_submit = submit_virustotal(domain, cfg["vt_api_key"])
 
-    gsb = check_safebrowsing(f"http://{domain}", cfg["gsb_api_key"])
+    gsb = check_safebrowsing(target_url, cfg["gsb_api_key"])
 
     reputation = compute_reputation(vt, gsb)
 
@@ -2167,6 +2193,7 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
     log_row = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "domain": domain,
+        "target_url": target_url,
         "ip": cert.get("ip"),
         "ssl_issuer": cert.get("issuer"),
         "ssl_serial": cert.get("serial"),
@@ -2246,6 +2273,8 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
     except Exception as e:
         registry_info = {"source": "not_found"}
         drafts_error = (drafts_error + "; " if drafts_error else "") + f"Registry/VNCERT draft: {e}"
+
+    drafts = append_reported_url_to_drafts(drafts, target_url)
 
     return {
         "domain": domain,

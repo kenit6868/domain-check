@@ -65,6 +65,8 @@ app_datas = [
     ("streamlit_app.py",    "."),
     ("phishing_toolkit.py", "."),
     ("email_send_ui.py",    "."),
+    ("domain_worker.py",    "."),
+    ("domain_utils.py",     "."),
     ("domain_check.py",     "."),
     ("pages",               "pages"),
     ("config.example.ini",  "."),

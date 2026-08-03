@@ -16,6 +16,16 @@ def _open_browser():
 
 
 if __name__ == "__main__":
+    # Process con dành cho Domain Worker. Phải xử lý trước khi khởi động
+    # Streamlit để bản PyInstaller có thể tự chạy worker bằng chính file .exe.
+    if "--worker-job" in sys.argv:
+        job_index = sys.argv.index("--worker-job")
+        if job_index + 1 >= len(sys.argv):
+            raise SystemExit("Thiếu đường dẫn job sau --worker-job")
+        from domain_worker import run_job
+        run_job(sys.argv[job_index + 1])
+        raise SystemExit(0)
+
     # Khi frozen (chạy từ .exe), sys._MEIPASS là thư mục chứa tất cả file đã extract.
     # Khi chạy bình thường (python launcher.py), dùng thư mục hiện tại.
     if getattr(sys, "frozen", False):
