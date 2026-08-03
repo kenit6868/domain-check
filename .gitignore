@@ -4,3 +4,4 @@ sent_log.csv
 reports/
 __pycache__/
 *.pyc
+dist/
