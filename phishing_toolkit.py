@@ -33,6 +33,7 @@ import csv
 import imaplib
 import json
 import os
+import random
 import re
 import smtplib
 import socket
@@ -80,7 +81,21 @@ except ImportError:
     _SOCKS5 = _SOCKS4 = _SOCKS_HTTP = None
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Khi chạy từ .exe (PyInstaller frozen), __file__ trỏ vào thư mục temp _MEIPASS
+# nên config.ini / reports / logs phải đặt cạnh file .exe, không phải trong _MEIPASS.
+if getattr(sys, "frozen", False):
+    # Thử sys.executable trước (thư mục chứa .exe), fallback cwd
+    _exe_dir = os.path.dirname(sys.executable)
+    _cwd = os.getcwd()
+    # Ưu tiên thư mục nào có config.ini
+    if os.path.exists(os.path.join(_exe_dir, "config.ini")):
+        BASE_DIR = _exe_dir
+    elif os.path.exists(os.path.join(_cwd, "config.ini")):
+        BASE_DIR = _cwd
+    else:
+        BASE_DIR = _exe_dir  # default: cạnh .exe, config.ini sẽ được tạo ở đây
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.ini")
 LOG_PATH = os.path.join(BASE_DIR, "case_log.csv")
 REPORTS_DIR = os.path.join(BASE_DIR, "reports")
@@ -748,11 +763,16 @@ def generate_safebrowsing_report_text(domain: str, cfg: dict) -> str:
     email_send_ui.py. Chỉ trả về string để cmd_check/pages/1_Check_Domain.py tự hiển thị bằng
     st.code()/print() cho người dùng copy.
     """
-    return (
-        f"The domain {domain} is actively impersonating our brand by cloning its official "
-        "login page to harvest user credentials and OTP tokens. Please add this phishing "
-        "URL to your browser security filters to protect users."
-    )
+    rng = _draft_rng(domain)
+    brand = cfg.get("brand_name") or "our brand"
+    variants = [
+        f"The domain {domain} is actively impersonating {brand} by cloning its official login page to harvest user credentials and OTP tokens. Please add this phishing URL to your browser security filters to protect users.",
+        f"This site ({domain}) is a phishing page impersonating {brand}. It clones the official login interface to steal user credentials, OTP codes, and payment details. Please flag and block this URL.",
+        f"{domain} is a phishing domain targeting {brand} users. The site replicates our official authentication portal to harvest login credentials and sensitive personal data.",
+        f"We are reporting {domain} as an active phishing site impersonating {brand}. The page is designed to deceive users into submitting their login credentials, OTP tokens, and financial information.",
+        f"This phishing URL ({domain}) fraudulently impersonates {brand}'s official website to steal user credentials and OTP tokens from victims. Immediate blocking is requested.",
+    ]
+    return _pick(rng, variants)
 
 
 def generate_cloudflare_report_text(domain: str, cfg: dict) -> str:
@@ -760,12 +780,15 @@ def generate_cloudflare_report_text(domain: str, cfg: dict) -> str:
     https://abuse.cloudflare.com/ (mục Phishing & Malware) — tương tự
     generate_safebrowsing_report_text(), không ghi file, chỉ trả về string.
     """
-    return (
-        f"The domain {domain} is impersonating our brand by cloning its official login page "
-        "to harvest user credentials, OTP tokens, and payment details. "
-        "This domain is using Cloudflare services to proxy and conceal the phishing infrastructure. "
-        "Please suspend Cloudflare services for this domain and/or display a phishing interstitial warning."
-    )
+    rng = _draft_rng(domain + "_cf")  # seed khác GSB để variant không trùng
+    brand = cfg.get("brand_name") or "our brand"
+    variants = [
+        f"The domain {domain} is impersonating {brand} by cloning its official login page to harvest user credentials, OTP tokens, and payment details. This domain is using Cloudflare services to proxy and conceal the phishing infrastructure. Please suspend Cloudflare services for this domain and/or display a phishing interstitial warning.",
+        f"{domain} is an active phishing site that impersonates {brand}'s official website to steal user credentials and financial data. The site is proxied through Cloudflare, which is being used to mask the true hosting origin. Please suspend Cloudflare access for this domain.",
+        f"We are reporting {domain} as a phishing domain using Cloudflare to host and proxy a fraudulent site impersonating {brand}. The site harvests login credentials, OTP tokens, and payment information from users. Please terminate Cloudflare services for this account.",
+        f"This domain ({domain}) clones {brand}'s login portal to steal credentials and sensitive data from victims. It leverages Cloudflare infrastructure to remain online and mask its origin. Immediate suspension of Cloudflare services for this domain is requested.",
+    ]
+    return _pick(rng, variants)
 
 
 
@@ -1264,6 +1287,77 @@ def log_case(row: dict):
 # Email drafts
 # --------------------------------------------------------------------------
 
+# Seed random bằng domain + ngày để cùng 1 domain trong 1 ngày cho ra cùng variant
+# nhưng ngày khác nhau thì khác → tránh gửi đúng 1 bản lặp lại nhiều lần.
+def _draft_rng(domain: str) -> random.Random:
+    seed = domain + datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return random.Random(seed)
+
+
+def _pick(rng: random.Random, options: list) -> str:
+    return rng.choice(options)
+
+
+# Pool các variant cho từng phần của email — mỗi pool có ít nhất 4 variant.
+_SUBJECT_REGISTRAR = [
+    "Phishing Abuse Report - {domain}",
+    "Urgent: Phishing Domain Suspension Request - {domain}",
+    "Abuse Report: Active Phishing Site - {domain}",
+    "Brand Impersonation Complaint - {domain}",
+    "Phishing Domain Takedown Request - {domain}",
+]
+
+_OPENING_REGISTRAR = [
+    "We are writing to report the domain {domain} for active phishing activity targeting users of our brand.",
+    "We are reporting the domain {domain}, which is currently being used to conduct a phishing attack against our brand.",
+    "This is a formal abuse report regarding {domain}, a domain actively engaged in phishing activity impersonating our brand.",
+    "We have identified {domain} as a phishing domain actively targeting our users and brand identity.",
+]
+
+_DESCRIPTION_REGISTRAR = [
+    "This domain is impersonating our brand's official website by cloning its login interface to harvest user credentials, OTP tokens, and personal data without authorization. Users who visit this site are deceived into submitting sensitive information (login credentials, passwords, payment details, etc.).",
+    "The domain has been set up to mimic our official website in order to trick visitors into entering their credentials and personal data. It presents a convincing replica of our login page designed to steal user account information.",
+    "This fraudulent site clones our brand's interface to deceive users into submitting sensitive data including login credentials, OTP tokens, and payment information. The phishing page is actively harvesting user data.",
+    "The domain hosts a phishing page that impersonates our brand's login portal. Visitors are tricked into providing credentials, personal information, and financial data to the attacker.",
+]
+
+_REQUEST_REGISTRAR = [
+    "We request the immediate suspension or transfer-lock of this domain in accordance with your Acceptable Use Policy and ICANN Registrar Accreditation Agreement (RAA) §3.18.",
+    "We respectfully request that you suspend or place a transfer-lock on this domain immediately, pursuant to your Acceptable Use Policy and ICANN RAA §3.18.",
+    "Please take immediate action to suspend this domain under your Acceptable Use Policy and ICANN Registrar Accreditation Agreement obligations (RAA §3.18).",
+    "We urge you to suspend this domain without delay in compliance with your Acceptable Use Policy and ICANN RAA §3.18 requirements.",
+]
+
+_CLOSING_REGISTRAR = [
+    "Please confirm receipt and any action taken at your earliest convenience.",
+    "We appreciate your prompt attention to this matter and look forward to your confirmation.",
+    "Your swift action on this matter is greatly appreciated. Please acknowledge receipt of this report.",
+    "Thank you for your attention to this urgent matter. Please confirm once action has been taken.",
+]
+
+_SUBJECT_CA = [
+    "URGENT: SSL Certificate Revocation Request - {domain}",
+    "Certificate Abuse Report: Phishing Domain - {domain}",
+    "Urgent: Fraudulent SSL Certificate in Use - {domain}",
+    "SSL Certificate Revocation Request for Phishing Site - {domain}",
+]
+
+_OPENING_CA = [
+    "We are requesting the immediate revocation of the SSL certificate issued for the domain {domain}, which is being used to impersonate our brand for phishing and credential harvesting.",
+    "We are writing to report that the SSL certificate issued for {domain} is actively being used to facilitate a phishing attack against our brand.",
+    "This is an urgent request for revocation of the SSL certificate for {domain}, a domain currently conducting phishing operations against our users.",
+    "We have identified that the SSL certificate issued for {domain} is being misused to host a phishing site impersonating our brand.",
+]
+
+_DESCRIPTION_CA = [
+    "The fraudulent site clones our brand's official login page to deceive users into submitting sensitive information (credentials, OTP tokens, payment details).",
+    "This domain hosts a phishing page that replicates our brand's login interface to steal user credentials and personal information.",
+    "The site mimics our official brand portal to harvest user login credentials, OTP tokens, and payment information from unsuspecting visitors.",
+    "Attackers are using this certificate to add apparent legitimacy to a phishing page that clones our brand's authentication interface.",
+]
+
+
+
 def generate_email_drafts(domain, cert, who, vt, cfg):
     os.makedirs(REPORTS_DIR, exist_ok=True)
     written = []
@@ -1272,10 +1366,10 @@ def generate_email_drafts(domain, cert, who, vt, cfg):
     contact_email = cfg.get("contact_email") or ""
     signature = f"\nRegards,\n{contact_name}\n{contact_email}\n" if contact_name else "\nRegards,\n"
     detected_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    rng = _draft_rng(domain)
 
     registrar = who.get("registrar") if isinstance(who, dict) else None
     abuse_emails = who.get("emails") if isinstance(who, dict) else None
-    # who.get("emails") từ python-whois có thể trả về list — cần join trước khi ghi vào file.
     if isinstance(abuse_emails, list):
         abuse_emails = ", ".join(e for e in abuse_emails if e)
 
@@ -1294,50 +1388,116 @@ def generate_email_drafts(domain, cert, who, vt, cfg):
             " Please verify this is correct before sending.]\n"
             if abuse_email_source == "static_table" else ""
         )
+        subject = _pick(rng, _SUBJECT_REGISTRAR).format(domain=domain)
+        opening = _pick(rng, _OPENING_REGISTRAR).format(domain=domain)
+        description = _pick(rng, _DESCRIPTION_REGISTRAR)
+        request = _pick(rng, _REQUEST_REGISTRAR)
+        closing = _pick(rng, _CLOSING_REGISTRAR)
+
+        # Evidence bullets — random thứ tự (trừ Domain luôn đứng đầu)
+        vt_count = vt.get("malicious", 0) or 0
+        vt_suspicious = vt.get("suspicious", 0) or 0
+        vt_info = f"VirusTotal: {vt.get('link', 'N/A')}"
+        if vt_count:
+            vt_info += f" ({vt_count} security engines flagged as malicious)"
+        elif vt_suspicious:
+            vt_info += f" ({vt_suspicious} security engines flagged as suspicious)"
+
+        extra_bullets = [
+            f"Registrar: {registrar}",
+            f"SSL Issuer: {cert.get('issuer', 'N/A')}",
+            f"SSL Serial: {cert.get('serial', 'N/A')}",
+            vt_info,
+            f"First detected: {detected_date}",
+        ]
+        rng.shuffle(extra_bullets)
+        evidence = "\n".join(f"- {b}" for b in [f"Domain: {domain}"] + extra_bullets)
+
+        # Đoạn bổ sung chi tiết động — số engine VT + ngày phát hiện cụ thể
+        _vt_sentences = []
+        if vt_count:
+            _vt_sentences = [
+                f"As of {detected_date}, {vt_count} out of 91 security vendors on VirusTotal have flagged this domain as malicious.",
+                f"This domain has been flagged by {vt_count} security engines on VirusTotal (as of {detected_date}), confirming active malicious activity.",
+                f"VirusTotal analysis dated {detected_date} shows {vt_count} security vendors classifying this domain as a phishing threat.",
+                f"Independent verification via VirusTotal ({detected_date}) confirms {vt_count} security vendors have identified this domain as malicious.",
+            ]
+        elif vt_suspicious:
+            _vt_sentences = [
+                f"As of {detected_date}, {vt_suspicious} security vendors on VirusTotal have flagged this domain as suspicious.",
+                f"VirusTotal analysis dated {detected_date} shows {vt_suspicious} security vendors flagging this domain as suspicious.",
+            ]
+        vt_detail = _pick(rng, _vt_sentences) if _vt_sentences else ""
+
+        _detection_sentences = [
+            f"This domain was first identified by our security team on {detected_date} during routine brand monitoring.",
+            f"Our security team detected this phishing site on {detected_date} through proactive brand protection monitoring.",
+            f"We identified this threat on {detected_date} as part of our ongoing brand monitoring operations.",
+            f"This domain came to our attention on {detected_date} during a routine brand impersonation scan.",
+        ]
+        detection_detail = _pick(rng, _detection_sentences)
+
+        extra_context = "\n\n".join(filter(None, [vt_detail, detection_detail]))
+
         with open(path, "w", encoding="utf-8") as f:
             f.write(f"""To: {abuse_emails or '[TRA ABUSE EMAIL TẠI https://lookup.icann.org/]'}
-Subject: Phishing Abuse Report - {domain}
+Subject: {subject}
 {fallback_note}
 Dear {registrar} Abuse Team,
 
-We are writing to report the domain {domain} for active phishing activity
-targeting users of our brand.
+{opening}
 
-This domain is impersonating our brand's official website by cloning its login
-interface to harvest user credentials, OTP tokens, and personal data without
-authorization. Users who visit this site are deceived into submitting sensitive
-information (login credentials, passwords, payment details, etc.).
+{description}
+
+{extra_context}
 
 Evidence:
-- Domain: {domain}
-- Registrar: {registrar}
-- SSL Issuer: {cert.get('issuer', 'N/A')}
-- SSL Serial: {cert.get('serial', 'N/A')}
-- VirusTotal report: {vt.get('link', 'N/A')}
-- First detected: {detected_date}
+{evidence}
 
-We request the immediate suspension or transfer-lock of this domain in
-accordance with your Acceptable Use Policy and ICANN Registrar Accreditation
-Agreement (RAA) §3.18.
+{request}
 
-Please confirm receipt and any action taken at your earliest convenience.
+{closing}
 {signature}""")
         written.append(path)
 
     ca_note = match_ca_notes(cert.get("issuer"))
     if ca_note and ca_note.get("report_url"):
         path = os.path.join(REPORTS_DIR, f"{domain}_ca_report.txt")
+        subject = _pick(rng, _SUBJECT_CA).format(domain=domain)
+        opening = _pick(rng, _OPENING_CA).format(domain=domain)
+        description = _pick(rng, _DESCRIPTION_CA)
+
+        revoke_variants = [
+            "Revoking this certificate will immediately degrade the phishing site's credibility and browser trust indicators. We kindly request expedited handling under your abuse/phishing revocation policy.",
+            "Immediate revocation will remove the trust indicator that makes this phishing site appear legitimate to victims. Please process this under your emergency revocation policy.",
+            "We urge expedited revocation to disrupt the phishing operation. Removing browser trust indicators will significantly reduce the impact on victims.",
+            "Swift revocation will neutralize the SSL trust signal being exploited by this phishing campaign. Please prioritize under your abuse revocation procedures.",
+        ]
+        revoke_text = _pick(rng, revoke_variants)
+        ca_detection = _pick(rng, [
+            f"This phishing activity was first detected on {detected_date} during our brand monitoring operations.",
+            f"Our security team identified this certificate being used for phishing on {detected_date}.",
+            f"We discovered this fraudulent use of the certificate on {detected_date} via routine brand protection scanning.",
+            f"This misuse of your issued certificate was detected on {detected_date} by our security team.",
+        ])
+        vt_ca_note = ""
+        if vt_count:
+            vt_ca_note = _pick(rng, [
+                f"The domain has been confirmed malicious by {vt_count} security vendors on VirusTotal.",
+                f"Independent VirusTotal analysis confirms {vt_count} security engines classify this domain as malicious.",
+                f"{vt_count} out of 91 VirusTotal security vendors have flagged this domain as an active threat.",
+            ])
+
         with open(path, "w", encoding="utf-8") as f:
-            f.write(f"""Subject: URGENT: SSL Certificate Revocation Request - {domain}
+            f.write(f"""Subject: {subject}
 
 Dear {ca_note['ca'].title()} Security / Abuse Team,
 
-We are requesting the immediate revocation of the SSL certificate issued for
-the domain {domain}, which is being used to impersonate our brand for phishing
-and credential harvesting.
+{opening}
 
-The fraudulent site clones our brand's official login page to deceive users
-into submitting sensitive information (credentials, OTP tokens, payment details).
+{description}
+
+{ca_detection}{(" " + vt_ca_note) if vt_ca_note else ""}
 
 Certificate details:
 - Domain: {domain}
@@ -1346,9 +1506,7 @@ Certificate details:
 - VirusTotal report: {vt.get('link', 'N/A')}
 - First detected: {detected_date}
 
-Revoking this certificate will immediately degrade the phishing site's
-credibility and browser trust indicators. We kindly request expedited handling
-under your abuse/phishing revocation policy.
+{revoke_text}
 {signature}""")
         written.append(path)
 
@@ -1365,25 +1523,42 @@ def generate_apwg_draft(domain, vt, cfg):
     contact_name = cfg.get("contact_name") or ""
     contact_email = cfg.get("contact_email") or ""
     signature = f"\nRegards,\n{contact_name}\n{contact_email}\n" if contact_name else "\nRegards,\n"
+    rng = _draft_rng(domain)
+
+    _apwg_subjects = [
+        "Phishing URL Report - {domain}",
+        "Active Phishing Site Report - {domain}",
+        "Brand Impersonation Phishing Report - {domain}",
+        "Phishing Incident Report - {domain}",
+    ]
+    _apwg_openings = [
+        "We are reporting the following URL as an active phishing site impersonating our brand to harvest user credentials and sensitive information.",
+        "We have identified the following domain as an active phishing site targeting our brand and users.",
+        "This is a phishing report for a site actively impersonating our brand and harvesting user credentials.",
+        "We are submitting this report for an active phishing domain that is impersonating our brand's official website.",
+    ]
+    _apwg_descriptions = [
+        "The site clones our brand's official login page to deceive users into submitting their credentials, OTP tokens, and payment details. Please add this URL to the APWG eCrime dataset to protect users across platforms.",
+        "This phishing page replicates our brand's authentication portal to steal user login credentials and personal data. We request you add this to the eCrime dataset for cross-platform protection.",
+        "The domain hosts a replica of our login interface designed to harvest credentials and OTP tokens from victims. Please include in the APWG eCrime dataset.",
+        "Victims are tricked into submitting credentials, payment information, and personal data via this cloned login page. Adding this to the eCrime dataset will help protect users across member platforms.",
+    ]
 
     os.makedirs(REPORTS_DIR, exist_ok=True)
     path = os.path.join(REPORTS_DIR, f"{domain}_apwg_report.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write(f"""To: reportphishing@apwg.org
-Subject: Phishing URL Report - {domain}
+Subject: {_pick(rng, _apwg_subjects).format(domain=domain)}
 
 Hello APWG eCrime Team,
 
-We are reporting the following URL as an active phishing site impersonating
-our brand to harvest user credentials and sensitive information.
+{_pick(rng, _apwg_openings)}
 
 Phishing URL: https://{domain}
 Domain: {domain}
 VirusTotal report: {vt.get('link', 'N/A')}
 
-The site clones our brand's official login page to deceive users into submitting
-their credentials, OTP tokens, and payment details. Please add this URL to the
-APWG eCrime dataset to protect users across platforms.
+{_pick(rng, _apwg_descriptions)}
 {signature}""")
     return path
 
@@ -1393,36 +1568,61 @@ def generate_hosting_draft(domain, ip, ip_whois, cfg):
     contact_name = cfg.get("contact_name") or ""
     contact_email = cfg.get("contact_email") or ""
     signature = f"\nRegards,\n{contact_name}\n{contact_email}\n" if contact_name else "\nRegards,\n"
+    detected_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    rng = _draft_rng(domain + "_hosting")
 
     os.makedirs(REPORTS_DIR, exist_ok=True)
     org = ip_whois.get("org") or "[TÊN TỔ CHỨC HOSTING CHƯA XÁC ĐỊNH]"
     abuse_email = ip_whois.get("abuse_email") or "[TRA ABUSE EMAIL TẠI https://lookup.icann.org/ hoặc rdap.arin.net]"
     asn = ip_whois.get("asn") or "N/A"
+
+    subject = _pick(rng, [
+        f"URGENT: Phishing Site Takedown Request - {domain} (IP: {ip})",
+        f"Abuse Report: Active Phishing Site on Your Network - {domain}",
+        f"Hosting Abuse Report: Brand Impersonation Phishing - {domain}",
+        f"URGENT: Malicious Phishing Site Hosted on IP {ip} - {domain}",
+    ])
+    opening = _pick(rng, [
+        f"We are writing to request the immediate suspension of a phishing website hosted on your infrastructure that is impersonating our brand.",
+        f"We have identified an active phishing site hosted on your network (IP: {ip}) that is impersonating our brand and actively harvesting user credentials.",
+        f"This is a formal takedown request for a phishing site running on your infrastructure (IP: {ip}) that fraudulently impersonates our brand.",
+        f"We are reporting an active phishing operation hosted on your network that is cloning our brand's official website to steal user credentials.",
+    ])
+    description = _pick(rng, [
+        f"The website at https://{domain} (hosted on IP {ip}) is an unauthorized clone of our brand's official platform, actively harvesting user credentials, OTP tokens, and payment details from unsuspecting visitors.",
+        f"This phishing site at https://{domain} (IP: {ip}) replicates our brand's login interface to deceive users into submitting their credentials, OTP tokens, and financial information.",
+        f"The domain {domain} (hosted at IP {ip}) hosts a fraudulent replica of our brand's authentication portal designed to steal login credentials and sensitive personal data from victims.",
+        f"Hosted on IP {ip}, the site {domain} is a phishing page cloning our official brand portal to harvest user credentials, OTP codes, and payment details.",
+    ])
+    request = _pick(rng, [
+        f"We request you suspend this hosting account immediately under your Acceptable Use Policy. This is causing ongoing harm to our users and brand reputation.",
+        f"Please immediately suspend or null-route traffic to this IP/account under your AUP to prevent further credential theft from our users.",
+        f"We urge you to terminate this hosting account without delay in accordance with your Acceptable Use Policy to stop the ongoing phishing operation.",
+        f"Immediate suspension of this account/IP under your AUP is requested to protect users from ongoing credential harvesting.",
+    ])
+
     path = os.path.join(REPORTS_DIR, f"{domain}_hosting_report.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write(f"""To: {abuse_email}
-Subject: URGENT: Phishing Site Takedown Request - {domain} (IP: {ip})
+Subject: {subject}
 
 Dear {org} Abuse Team,
 
-We are writing to request the immediate suspension of a phishing website hosted
-on your infrastructure that is impersonating our brand.
+{opening}
 
-The website at http://{domain} (hosted on IP {ip}) is an unauthorized clone of
-our brand's official platform, actively harvesting user credentials, OTP tokens,
-and payment details from unsuspecting visitors.
+{description}
 
 Hosting details:
 - Phishing domain: {domain}
 - Origin IP: {ip}
 - ASN: {asn}
 - Hosting organization: {org}
+- First detected: {detected_date}
 
 Note: This IP was identified as a candidate origin server via subdomain
 enumeration — please verify independently before taking action.
 
-We request you suspend this hosting account immediately under your Acceptable
-Use Policy. This is causing ongoing harm to our users and brand reputation.
+{request}
 {signature}""")
     return path
 
@@ -1435,6 +1635,8 @@ def generate_registry_draft(domain, registry_info, cfg):
     contact_name = cfg.get("contact_name") or ""
     contact_email = cfg.get("contact_email") or ""
     signature = f"\nRegards,\n{contact_name}\n{contact_email}\n" if contact_name else "\nRegards,\n"
+    detected_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    rng = _draft_rng(domain + "_registry")
 
     os.makedirs(REPORTS_DIR, exist_ok=True)
     if registry_info["source"] == "static_table":
@@ -1451,25 +1653,46 @@ def generate_registry_draft(domain, registry_info, cfg):
             f"{registry_info.get('raw', '')}\n"
         )
 
+    subject = _pick(rng, [
+        f"URGENT: Phishing Domain Suspension Request - {domain}",
+        f"Registry Escalation: Active Phishing Domain - {domain}",
+        f"Formal Complaint: Brand Impersonation Phishing Domain - {domain}",
+        f"URGENT: ClientHold Request for Phishing Domain - {domain}",
+    ])
+    opening = _pick(rng, [
+        f"We are escalating a phishing domain abuse report directly to your registry regarding the domain {domain}, which is being used to impersonate our brand and harvest user credentials.",
+        f"We are filing a formal escalation with your registry regarding {domain}, an active phishing domain impersonating our brand that has not been resolved at the registrar level.",
+        f"This is a registry-level escalation for the phishing domain {domain}, which is actively impersonating our brand and stealing user credentials despite our reports to the registrar.",
+        f"We are escalating directly to your registry to report {domain} as an active phishing domain that is fraudulently impersonating our brand.",
+    ])
+    escalation_reason = _pick(rng, [
+        "We have already submitted abuse reports to the registrar, but are escalating to the registry level due to the ongoing harm and time-sensitive nature of this phishing campaign.",
+        "Prior abuse reports to the domain registrar have not resulted in timely action, requiring this escalation to the registry level to protect our users.",
+        "Given the active and ongoing nature of this phishing campaign and the urgency of protecting affected users, we are escalating directly to your registry.",
+        "The continued operation of this phishing site necessitates registry-level intervention to ensure prompt suspension.",
+    ])
+    request = _pick(rng, [
+        f"We respectfully request that {domain} be placed on ClientHold status immediately to stop active credential harvesting from users of our brand.",
+        f"Please place {domain} on ClientHold (ICANN status) without delay to halt the ongoing phishing operation targeting our users.",
+        f"We urge your registry to apply ClientHold to {domain} immediately under your abuse handling policy to stop the active phishing campaign.",
+        f"Immediate ClientHold of {domain} is requested to neutralize this phishing threat and protect users from ongoing credential theft.",
+    ])
+
     path = os.path.join(REPORTS_DIR, f"{domain}_registry_report.txt")
     with open(path, "w", encoding="utf-8") as f:
         f.write(f"""To: {abuse_email}
-Subject: URGENT: Phishing Domain Suspension Request - {domain}
+Subject: {subject}
 
 Dear {registry_name} Abuse Department,
 
-We are escalating a phishing domain abuse report directly to your registry
-regarding the domain {domain}, which is being used to impersonate our brand
-and harvest user credentials.
+{opening}
 
-We have already submitted abuse reports to the registrar, but are escalating
-to the registry level due to the ongoing harm and time-sensitive nature of this
-phishing campaign.
+{escalation_reason}
 
-We respectfully request that {domain} be placed on ClientHold status
-immediately to stop active credential harvesting from users of our brand.
+{request}
 
 Domain: {domain}
+First detected: {detected_date}
 {note_line}
 This escalation is made in accordance with your registry's abuse handling
 policy and ICANN compliance requirements.
@@ -1482,6 +1705,41 @@ def generate_vncert_draft(domain, cert, vt, cfg):
     contact_name = cfg.get("contact_name") or ""
     contact_email = cfg.get("contact_email") or ""
     signature = f"\nTrân trọng,\n{contact_name}\n{contact_email}\n" if contact_name else "\nTrân trọng,\n"
+    detected_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    rng = _draft_rng(domain + "_vncert")
+    vt_count = vt.get("malicious", 0) or 0
+
+    subject = _pick(rng, [
+        f"[Phản ánh phishing] {domain} giả mạo thương hiệu",
+        f"[Báo cáo lừa đảo] Domain {domain} giả mạo nhãn hiệu",
+        f"[Khẩn] Phản ánh website phishing {domain}",
+        f"[Yêu cầu xử lý] {domain} — website giả mạo đang hoạt động",
+    ])
+    opening = _pick(rng, [
+        f"Chúng tôi xin phản ánh domain {domain} đang thực hiện hành vi giả mạo thương hiệu của chúng tôi nhằm lừa đảo, đánh cắp thông tin nhạy cảm của người dùng (tài khoản đăng nhập, mã OTP, thông tin thẻ ngân hàng...).",
+        f"Chúng tôi phát hiện domain {domain} đang giả mạo thương hiệu của chúng tôi để đánh cắp thông tin đăng nhập, mã OTP và dữ liệu tài chính của người dùng.",
+        f"Chúng tôi báo cáo domain {domain} đang thực hiện tấn công phishing nhắm vào người dùng của chúng tôi bằng cách giả mạo giao diện chính thức của thương hiệu.",
+        f"Chúng tôi kính báo VNCERT/CC về domain {domain} — một trang web phishing đang hoạt động, giả mạo thương hiệu chúng tôi nhằm đánh cắp thông tin người dùng.",
+    ])
+    description = _pick(rng, [
+        "Domain giả mạo hoạt động bằng cách sao chép giao diện đăng nhập chính thức của thương hiệu chúng tôi, dụ người dùng nhập thông tin vào trang giả mạo.",
+        "Trang web này sao chép giao diện đăng nhập của chúng tôi để lừa người dùng cung cấp tên đăng nhập, mật khẩu, mã OTP và thông tin thẻ ngân hàng.",
+        "Website phishing này nhái lại thiết kế trang đăng nhập chính thống của chúng tôi, đánh lừa người dùng nhập thông tin nhạy cảm vào trang giả mạo.",
+        "Kẻ tấn công đã tạo bản sao y hệt trang đăng nhập của chúng tôi tại domain này để thu thập thông tin xác thực và dữ liệu cá nhân của người dùng.",
+    ])
+    vt_note = ""
+    if vt_count:
+        vt_note = _pick(rng, [
+            f"\nDomain này đã bị {vt_count} công cụ bảo mật trên VirusTotal gắn cờ là độc hại.",
+            f"\nTheo VirusTotal, {vt_count} nhà cung cấp bảo mật đã xác nhận domain này là phishing/malicious.",
+            f"\nKiểm tra trên VirusTotal ngày {detected_date} cho thấy {vt_count} engine bảo mật đã phát hiện domain này là mối đe dọa.",
+        ])
+    request = _pick(rng, [
+        "Kính mong VNCERT/CC hỗ trợ xử lý, phối hợp với registrar/hosting để gỡ bỏ domain này nhằm bảo vệ người dùng Việt Nam.",
+        "Chúng tôi kính đề nghị VNCERT/CC hỗ trợ can thiệp, yêu cầu registrar/hosting đình chỉ domain này để bảo vệ người dùng.",
+        "Kính nhờ VNCERT/CC phối hợp xử lý khẩn cấp, liên hệ registrar/hosting để gỡ bỏ trang phishing này sớm nhất có thể.",
+        "Chúng tôi mong nhận được sự hỗ trợ của VNCERT/CC trong việc yêu cầu đình chỉ domain phishing này nhằm ngăn chặn thiệt hại thêm cho người dùng.",
+    ])
 
     os.makedirs(REPORTS_DIR, exist_ok=True)
     path = os.path.join(REPORTS_DIR, f"{domain}_vncert_report.txt")
@@ -1491,25 +1749,22 @@ def generate_vncert_draft(domain, cert, vt, cfg):
 dùng Việt Nam). Tool không tự xác định được điều này — tự đánh giá trước khi gửi.
 
 To: report@vncert.vn
-Subject: [Phản ánh phishing] {domain} giả mạo thương hiệu
+Subject: {subject}
 
 Kính gửi VNCERT/CC,
 
-Chúng tôi xin phản ánh domain {domain} đang thực hiện hành vi giả mạo thương
-hiệu của chúng tôi nhằm lừa đảo, đánh cắp thông tin nhạy cảm của người dùng
-(tài khoản đăng nhập, mã OTP, thông tin thẻ ngân hàng...).
+{opening}
 
-Domain giả mạo hoạt động bằng cách sao chép giao diện đăng nhập chính thức của
-thương hiệu chúng tôi, dụ người dùng nhập thông tin vào trang giả mạo.
+{description}{vt_note}
 
 Thông tin kỹ thuật:
 - Domain: {domain}
 - SSL Issuer: {cert.get('issuer', 'N/A')}
 - SSL Serial: {cert.get('serial', 'N/A')}
 - VirusTotal: {vt.get('link', 'N/A')}
+- Phát hiện lúc: {detected_date}
 
-Kính mong VNCERT/CC hỗ trợ xử lý, phối hợp với registrar/hosting để gỡ bỏ
-domain này nhằm bảo vệ người dùng Việt Nam.
+{request}
 {signature}""")
     return path
 
