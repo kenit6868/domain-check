@@ -37,30 +37,50 @@ def render_send_all_ui(draft_paths: list, cfg: dict, key_prefix: str):
         )
         return
 
-    # Lọc chỉ giữ draft có To: hợp lệ
+    # Lọc chỉ giữ draft có To: hợp lệ, tách riêng VNCERT
     sendable = []
+    vncert_entry = None
     for p in draft_paths:
         if p and os.path.isfile(p):
             parsed = pt.parse_draft_email(p)
             if parsed["to"]:
-                sendable.append((p, parsed))
+                if "_vncert_report.txt" in os.path.basename(p):
+                    vncert_entry = (p, parsed)
+                else:
+                    sendable.append((p, parsed))
 
-    if not sendable:
+    if not sendable and not vncert_entry:
         st.info("Không có draft nào có địa chỉ email hợp lệ để gửi tự động.")
         return
 
-    st.markdown(f"**{len(sendable)} draft có thể gửi:**")
-    for p, parsed in sendable:
+    # Checkbox opt-in cho VNCERT (mặc định không chọn)
+    include_vncert = False
+    if vncert_entry:
+        include_vncert = st.checkbox(
+            f"Gửi kèm VNCERT (`{os.path.basename(vncert_entry[0])}` → `{vncert_entry[1]['to']}`)"
+            " — chỉ tick nếu domain nhắm vào nạn nhân Việt Nam",
+            value=False,
+            key=f"{key_prefix}_include_vncert",
+        )
+
+    final_list = sendable + ([vncert_entry] if include_vncert and vncert_entry else [])
+
+    if not final_list:
+        st.info("Không có draft nào được chọn để gửi.")
+        return
+
+    st.markdown(f"**{len(final_list)} draft sẽ được gửi:**")
+    for p, parsed in final_list:
         st.caption(f"• `{os.path.basename(p)}` → **{parsed['to']}**")
 
     n_accounts = len(accounts)
-    btn_label = f"🚀 Gửi tất cả {len(sendable)} draft × {n_accounts} tài khoản"
+    btn_label = f"🚀 Gửi tất cả {len(final_list)} draft × {n_accounts} tài khoản"
     if st.button(btn_label, key=f"{key_prefix}_send_all_btn", type="primary"):
-        all_results = []  # list of dict: {draft, to, subject, account, success, error, imap_note}
+        all_results = []
         ts = datetime.now(timezone.utc).isoformat()
 
-        with st.spinner(f"Đang gửi {len(sendable)} draft qua {n_accounts} tài khoản..."):
-            for p, parsed in sendable:
+        with st.spinner(f"Đang gửi {len(final_list)} draft qua {n_accounts} tài khoản..."):
+            for p, parsed in final_list:
                 filename = os.path.basename(p)
                 bulk = pt.send_report_email_bulk(parsed["to"], parsed["subject"], parsed["body"], cfg)
                 for r in bulk:
