@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import streamlit as st
 
 import phishing_toolkit as pt
-from email_send_ui import render_send_email_ui
+from email_send_ui import render_send_email_ui, render_send_all_ui
 
 st.set_page_config(page_title="Report Drafts", page_icon="✉️", layout="wide")
 st.title("✉️ Report Drafts")
@@ -29,7 +29,18 @@ if not files:
     st.info("Chưa có draft nào. Vào trang **Check Domain** để tool tự sinh.")
     st.stop()
 
-selected = st.selectbox("Chọn file báo cáo", files)
+cfg = pt.load_config()
+
+# ── Nút gửi tất cả ────────────────────────────────────────────────────────────
+all_paths = [os.path.join(pt.REPORTS_DIR, f) for f in files]
+with st.expander(f"🚀 Gửi tất cả {len(files)} draft cùng lúc", expanded=False):
+    st.caption("Chỉ gửi các draft có địa chỉ email hợp lệ. Draft dạng web form sẽ được bỏ qua.")
+    render_send_all_ui(all_paths, cfg, key_prefix="drafts_all")
+
+st.divider()
+
+# ── Xem / gửi từng draft ──────────────────────────────────────────────────────
+selected = st.selectbox("Chọn file báo cáo để xem", files)
 path = os.path.join(pt.REPORTS_DIR, selected)
 with open(path, encoding="utf-8") as f:
     content = f.read()
@@ -40,5 +51,5 @@ st.code(content, language=None)
 st.download_button("Tải xuống .txt", data=content, file_name=selected, mime="text/plain")
 
 st.divider()
-st.subheader("Gửi báo cáo qua email thật")
-render_send_email_ui(path, pt.load_config(), key_prefix="drafts")
+st.subheader("Gửi riêng draft này qua email")
+render_send_email_ui(path, cfg, key_prefix="drafts")

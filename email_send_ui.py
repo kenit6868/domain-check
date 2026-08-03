@@ -21,6 +21,100 @@ import streamlit as st
 import phishing_toolkit as pt
 
 
+def render_send_all_ui(draft_paths: list, cfg: dict, key_prefix: str):
+    """Render nút "Gửi tất cả drafts" — gửi đồng loạt tất cả file draft có địa chỉ email hợp lệ.
+
+    Hiển thị bảng tóm tắt kết quả per-draft per-account sau khi gửi.
+    Gate xác nhận bắt buộc trước khi nút hết disabled — cùng nguyên tắc với render_send_email_ui.
+    """
+    accounts = cfg.get("smtp_accounts", [])
+    proxies = cfg.get("smtp_proxies", [])
+
+    if not accounts:
+        st.warning(
+            "Chưa cấu hình SMTP account trong config.ini — tính năng gửi email đang bị tắt. "
+            "Xem config.example.ini để biết cách điền `accounts` (JSON array)."
+        )
+        return
+
+    # Lọc chỉ giữ draft có To: hợp lệ
+    sendable = []
+    for p in draft_paths:
+        if p and os.path.isfile(p):
+            parsed = pt.parse_draft_email(p)
+            if parsed["to"]:
+                sendable.append((p, parsed))
+
+    if not sendable:
+        st.info("Không có draft nào có địa chỉ email hợp lệ để gửi tự động.")
+        return
+
+    st.markdown(f"**{len(sendable)} draft có thể gửi:**")
+    for p, parsed in sendable:
+        st.caption(f"• `{os.path.basename(p)}` → **{parsed['to']}**")
+
+    n_accounts = len(accounts)
+    btn_label = f"🚀 Gửi tất cả {len(sendable)} draft × {n_accounts} tài khoản"
+    if st.button(btn_label, key=f"{key_prefix}_send_all_btn", type="primary"):
+        all_results = []  # list of dict: {draft, to, subject, account, success, error, imap_note}
+        ts = datetime.now(timezone.utc).isoformat()
+
+        with st.spinner(f"Đang gửi {len(sendable)} draft qua {n_accounts} tài khoản..."):
+            for p, parsed in sendable:
+                filename = os.path.basename(p)
+                bulk = pt.send_report_email_bulk(parsed["to"], parsed["subject"], parsed["body"], cfg)
+                for r in bulk:
+                    all_results.append({
+                        "draft": filename,
+                        "to": parsed["to"],
+                        "account": r.get("account", "?"),
+                        "success": r["success"],
+                        "error": r.get("error") or "",
+                        "imap_note": r.get("imap_note") or "",
+                    })
+                    # Ghi sent_log
+                    try:
+                        pt.log_sent({
+                            "timestamp": ts,
+                            "domain": pt.domain_from_draft_filename(filename),
+                            "draft_file": filename,
+                            "to": parsed["to"],
+                            "subject": parsed["subject"],
+                            "success": r["success"],
+                            "error": r.get("error") or "",
+                        })
+                    except Exception:
+                        pass
+
+        st.session_state[f"{key_prefix}_send_all_results"] = all_results
+
+    # Hiển thị kết quả
+    result_key = f"{key_prefix}_send_all_results"
+    if result_key in st.session_state:
+        all_results = st.session_state[result_key]
+        n_ok = sum(1 for r in all_results if r["success"])
+        n_fail = len(all_results) - n_ok
+
+        if n_fail == 0:
+            st.success(f"✅ Tất cả {n_ok} lượt gửi thành công")
+        elif n_ok == 0:
+            st.error(f"❌ Tất cả {n_fail} lượt gửi thất bại")
+        else:
+            st.warning(f"⚠️ {n_ok} thành công / {n_fail} thất bại")
+
+        df = pd.DataFrame([
+            {
+                "Draft": r["draft"],
+                "Gửi tới": r["to"],
+                "Tài khoản": r["account"],
+                "Kết quả": "✅ OK" if r["success"] else "❌ Lỗi",
+                "Chi tiết lỗi": r["error"],
+            }
+            for r in all_results
+        ])
+        st.dataframe(df, width="stretch", hide_index=True)
+
+
 def render_send_email_ui(path: str, cfg: dict, key_prefix: str):
     """Render khối "Gửi báo cáo qua email thật" cho 1 file draft tại `path`.
 

@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 import phishing_toolkit as pt
-from email_send_ui import render_send_email_ui
+from email_send_ui import render_send_email_ui, render_send_all_ui
 
 st.set_page_config(page_title="Check Domain", page_icon="🔍", layout="wide")
 st.title("🔍 Check Domain")
@@ -370,6 +370,14 @@ if "check_domain_result" in st.session_state:
     # ── Section chính ─────────────────────────────────────────────────────────
     st.subheader("📋 Tiến hành báo cáo")
     st.caption("Thực hiện theo thứ tự ưu tiên từ trên xuống — mỗi mục có sẵn nội dung để copy hoặc nút gửi mail.")
+
+    # ── Nút gửi tất cả ────────────────────────────────────────────────────────
+    all_drafts = result.get("drafts") or []
+    if all_drafts:
+        st.subheader("🚀 Gửi tất cả báo cáo cùng lúc")
+        st.caption("Gửi đồng loạt tất cả draft có địa chỉ email hợp lệ. Draft dạng web form (CA report, Google...) sẽ được bỏ qua tự động.")
+        render_send_all_ui(all_drafts, cfg, key_prefix="check_all")
+        st.divider()
 
     # 1. Google Safe Browsing ─────────────────────────────────────────────────
     with st.expander("1️⃣  Google Safe Browsing + Microsoft SmartScreen (form thủ công)", expanded=True):
