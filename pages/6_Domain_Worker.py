@@ -143,7 +143,12 @@ if start:
             worker_script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "domain_worker.py")
             command = [sys.executable, worker_script, job_path]
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        subprocess.Popen(command, cwd=pt.BASE_DIR, creationflags=creationflags)
+        subprocess.Popen(
+            command,
+            cwd=pt.BASE_DIR,
+            creationflags=creationflags,
+            start_new_session=os.name != "nt",
+        )
         st.session_state["worker_job_dir"] = job_dir
         st.success(f"Đã khởi chạy job {job_id} với {len(domains)} domain.")
 

@@ -173,31 +173,72 @@ def run_job(job_path: str):
     include_vncert = bool(job.get("include_vncert", False))
     cfg = pt.load_config()
     reported_domain_accounts = _successfully_reported_domain_accounts_today()
-    status = {
-        "job_id": job.get("job_id"),
-        "state": "running",
-        "pid": os.getpid(),
-        "started_at": _now(),
-        "finished_at": None,
-        "total": len(targets),
-        "processed": 0,
-        "current_domain": None,
-        "current_batch": 0,
-        "total_batches": (len(targets) + batch_size - 1) // batch_size,
-        "next_batch_in_seconds": 0,
-        "results": [],
-        "error": None,
-    }
+    previous_status = None
+    if os.path.exists(status_path):
+        try:
+            with open(status_path, encoding="utf-8") as f:
+                candidate = json.load(f)
+            if (
+                candidate.get("job_id") == job.get("job_id")
+                and candidate.get("state") != "completed"
+                and candidate.get("processed", 0) < len(targets)
+            ):
+                previous_status = candidate
+        except (OSError, ValueError):
+            pass
+
+    if previous_status:
+        status = previous_status
+        status.update({
+            "state": "running",
+            "pid": os.getpid(),
+            "finished_at": None,
+            "current_domain": None,
+            "next_batch_in_seconds": 0,
+            "error": None,
+        })
+        completed_targets = {
+            item.get("target_url")
+            for item in status.get("results", [])
+            if item.get("target_url")
+        }
+        _append_event(events_path, {
+            "type": "job_resumed",
+            "processed": status.get("processed", 0),
+            "remaining": len(targets) - len(completed_targets),
+        })
+    else:
+        status = {
+            "job_id": job.get("job_id"),
+            "state": "running",
+            "pid": os.getpid(),
+            "started_at": _now(),
+            "finished_at": None,
+            "total": len(targets),
+            "processed": 0,
+            "current_domain": None,
+            "current_batch": 0,
+            "total_batches": (len(targets) + batch_size - 1) // batch_size,
+            "next_batch_in_seconds": 0,
+            "results": [],
+            "error": None,
+        }
+        completed_targets = set()
+        _append_event(events_path, {"type": "job_started", "total": len(targets), "batch_size": batch_size})
     _atomic_json(status_path, status)
-    _append_event(events_path, {"type": "job_started", "total": len(targets), "batch_size": batch_size})
 
     try:
         for offset in range(0, len(targets), batch_size):
             if _should_stop(stop_path):
                 status["state"] = "stopped"
                 break
-            batch = targets[offset:offset + batch_size]
-            status["current_batch"] += 1
+            batch = [
+                target for target in targets[offset:offset + batch_size]
+                if target not in completed_targets
+            ]
+            if not batch:
+                continue
+            status["current_batch"] = offset // batch_size + 1
             _append_event(events_path, {"type": "batch_started", "batch": status["current_batch"], "domains": batch})
 
             for target in batch:
@@ -267,7 +308,7 @@ def run_job(job_path: str):
 
             if status["state"] == "stopped":
                 break
-            has_more = offset + batch_size < len(targets)
+            has_more = any(target not in completed_targets for target in targets[offset + batch_size:])
             if has_more:
                 status["state"] = "waiting"
                 _atomic_json(status_path, status)

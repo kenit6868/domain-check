@@ -9,7 +9,6 @@ từng domain theo thứ tự với 2 form cạnh nhau:
 import os
 import re
 import sys
-import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -18,7 +17,7 @@ import streamlit as st
 import phishing_toolkit as pt
 
 
-# ── Mapping l1 → l3 cho Google Safe Browsing (confirmed selectors) ────────────
+# ── Mapping l1 → l3 cho Google Safe Browsing ──────────────────────────────────
 _L3_OPTIONS = {
     "Social Engineering": [
         "None", "Bank / Financial Phishing", "Crypto Exchange Phishing",
@@ -53,7 +52,7 @@ def _parse_domains(raw: str) -> tuple[list[str], list[str]]:
     return valid, invalid
 
 
-def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, pw_ok: bool) -> None:
+def _render_domain_block(idx: int, total: int, result: dict, cfg: dict) -> None:
     """Render khối kết quả + 2 form cho 1 domain."""
     domain = result["domain"]
     cf = result["cloudflare"]
@@ -75,41 +74,38 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, pw_ok: b
         with col_gsb:
             st.markdown("**1️⃣ Google Safe Browsing / Microsoft SmartScreen**")
             gsb_text = pt.generate_safebrowsing_report_text(domain, cfg)
-            _domain_url = f"https://{domain}"
-            _gsb_url = "https://safebrowsing.google.com/safebrowsing/report_phish/?url=" + urllib.parse.quote(_domain_url, safe="")
-
-            if pw_ok:
-                c1, c2 = st.columns(2)
-                _threat = c1.selectbox(
-                    "Threat type",
-                    ["Social Engineering", "Malware", "Unwanted Software"],
-                    index=1,
-                    key=f"threat_{idx}",
+            c1, c2 = st.columns(2)
+            threat = c1.selectbox(
+                "Threat type",
+                list(_L3_OPTIONS),
+                key=f"threat_{idx}",
+            )
+            categories = _L3_OPTIONS[threat]
+            default_category = "Other Phishing" if threat == "Social Engineering" else "None"
+            category = c2.selectbox(
+                "Category",
+                categories,
+                index=categories.index(default_category),
+                key=f"cat_{idx}",
+            )
+            b1, b2 = st.columns(2)
+            if b1.button("🤖 Google Safe Browsing", key=f"gsb_{idx}", use_container_width=True, type="primary"):
+                res = pt.open_gsb_form_playwright(
+                    original_url,
+                    gsb_text,
+                    threat_type=threat,
+                    threat_category=category,
                 )
-                _l3_opts = _L3_OPTIONS.get(_threat, ["None"])
-                _def = "Web Malware" if _threat == "Malware" else "None"
-                _cat = c2.selectbox(
-                    "Category",
-                    _l3_opts,
-                    index=_l3_opts.index(_def) if _def in _l3_opts else 0,
-                    key=f"cat_{idx}",
-                )
-                b1, b2 = st.columns(2)
-                if b1.button("🤖 Google Safe Browsing", key=f"gsb_{idx}", use_container_width=True, type="primary"):
-                    res = pt.open_gsb_form_playwright(domain, gsb_text, threat_type=_threat, threat_category=_cat)
-                    if "error" in res:
-                        st.error(res["error"])
-                    else:
-                        st.success("✅ Chrome mở — bấm Submit sau khi điền reCAPTCHA.")
-                if b2.button("🤖 Microsoft SmartScreen", key=f"ms_{idx}", use_container_width=True, type="primary"):
-                    res = pt.open_microsoft_form_playwright(domain)
-                    if "error" in res:
-                        st.error(res["error"])
-                    else:
-                        st.success("✅ Chrome mở — URL + Vietnamese đã điền.")
-            else:
-                st.link_button("🔗 Google Safe Browsing (URL điền sẵn)", _gsb_url, use_container_width=True)
-                st.link_button("🔗 Microsoft SmartScreen", "https://www.microsoft.com/en-us/wdsi/support/report-unsafe-site-guest", use_container_width=True)
+                if "error" in res:
+                    st.error(res["error"])
+                else:
+                    st.success("✅ Đã mở tab và tự điền form — kiểm tra CAPTCHA rồi Submit.")
+            if b2.button("🤖 Microsoft SmartScreen", key=f"ms_{idx}", use_container_width=True, type="primary"):
+                res = pt.open_microsoft_form_playwright(original_url)
+                if "error" in res:
+                    st.error(res["error"])
+                else:
+                    st.success("✅ Đã mở tab và tự điền URL đầy đủ + Vietnamese.")
 
             st.caption("Nội dung dán vào ô Additional details:")
             st.code(gsb_text, language=None)
@@ -122,10 +118,13 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, pw_ok: b
                 if cf:
                     info_cf = pt.CDN_ABUSE_CONTACTS["cloudflare"]
                     cf_text = pt.generate_cloudflare_report_text(domain, cfg)
-                    if st.button("🌐 Mở form Cloudflare Abuse", key=f"cf_{idx}", use_container_width=True, type="primary"):
-                        pt.open_cloudflare_form_browser(domain)
-                        st.info("✅ Đã mở browser — paste nội dung bên dưới vào form.")
-                    st.caption(f"_{info_cf['note']}. Bot-detection của Cloudflare chặn Playwright — chỉ mở browser thật._")
+                    st.link_button(
+                        "↗ Mở form Cloudflare Abuse",
+                        info_cf["report_url"],
+                        use_container_width=True,
+                        type="primary",
+                    )
+                    st.caption(f"_{info_cf['note']}. Dán nội dung bên dưới vào form._")
                     st.code(cf_text, language=None)
                 for name in cdn_detected:
                     info = pt.CDN_ABUSE_CONTACTS.get(name)
@@ -205,11 +204,9 @@ if go:
 if "qr_results" in st.session_state:
     results: list = st.session_state["qr_results"]
     cfg: dict = st.session_state["qr_cfg"]
-    pw_ok = pt.playwright_available()
     total = len(results)
 
     st.divider()
     st.markdown(f"### Kết quả — {total} domain")
     for i, result in enumerate(results):
-        _render_domain_block(i, total, result, cfg, pw_ok)
-
+        _render_domain_block(i, total, result, cfg)

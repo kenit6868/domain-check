@@ -2219,151 +2219,150 @@ def playwright_available() -> bool:
     return importlib.util.find_spec("playwright") is not None
 
 
-def open_gsb_form_playwright(domain: str, description: str,
-                              threat_type: str = "Social Engineering",
-                              threat_category: str = "None") -> dict:
-    """Mở form Google Safe Browsing trong Chrome thật, tự điền tất cả fields.
+_REPORT_BROWSER_MANAGER = None
+_REPORT_BROWSER_MANAGER_LOCK = None
 
-    Form dùng Angular Material (confirmed bằng debug):
-    - [formcontrolname="url"]        → URL (đã điền sẵn qua ?url= param)
-    - [formcontrolname="reportType"] → mặc định "This page is not safe"
-    - [formcontrolname="l1Taxonomy"] → Threat type: Social Engineering / Malware / Unwanted Software
-    - [formcontrolname="l3Taxonomy"] → Threat category (phụ thuộc l1):
-        Social Engineering: Bank/Financial Phishing, Other Phishing, v.v.
-        Malware: Desktop Malware, Mobile Malware, Web Malware
-        Unwanted Software: Unwanted Desktop/Mobile Software
-    - [formcontrolname="details"]    → textarea description
-    Chạy trong background thread. Trả về {"status": "launched"} hoặc {"error": ...}.
-    """
-    try:
-        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-    except ImportError:
-        return {"error": "playwright chưa cài — chạy: pip install playwright && python -m playwright install chromium"}
 
-    import threading
-    import urllib.parse as _up
+def _target_url(value: str) -> str:
+    """Giữ nguyên URL/path; chỉ thêm https:// khi đầu vào là domain thuần."""
+    value = str(value or "").strip()
+    return value if "://" in value else f"https://{normalize_domain(value)}"
 
-    domain_url = f"https://{domain}"
-    gsb_url = ("https://safebrowsing.google.com/safebrowsing/report_phish/?url="
-               + _up.quote(domain_url, safe=""))
 
-    def _run():
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=False, slow_mo=400)
-            page = browser.new_page()
+class _ReportBrowserManager:
+    """Một Playwright browser dùng chung; mỗi report được mở thành tab mới."""
+
+    def __init__(self):
+        import queue
+        import threading
+
+        self._queue = queue.Queue()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="report-browser")
+        self._thread.start()
+
+    def open(self, kind: str, **payload) -> dict:
+        import threading
+
+        done = threading.Event()
+        request = {"kind": kind, "payload": payload, "done": done, "result": None}
+        self._queue.put(request)
+        if not done.wait(timeout=40):
+            return {"error": "Chrome mở quá lâu. Hãy thử lại."}
+        return request["result"]
+
+    def _run(self):
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            while True:
+                request = self._queue.get()
+                request["result"] = {
+                    "error": "playwright chưa cài — chạy: pip install playwright && python -m playwright install chromium"
+                }
+                request["done"].set()
+
+        pw = sync_playwright().start()
+        browser = None
+        while True:
+            request = self._queue.get()
             try:
-                page.goto(gsb_url, timeout=20_000)
-                page.bring_to_front()
-                page.wait_for_load_state("networkidle", timeout=15_000)
-            except PWTimeout:
-                pass
-
-            # ── 1. Điền textarea description ──────────────────────────────────
-            try:
-                details = page.locator('[formcontrolname="details"]')
-                details.wait_for(state="visible", timeout=8_000)
-                details.click()
-                details.fill(description)
-            except Exception:
-                try:
-                    page.locator("textarea").nth(0).fill(description)
-                except Exception:
-                    pass
-
-            # ── 2. Chọn Threat type (l1Taxonomy) ─────────────────────────────
-            try:
-                l1 = page.locator('[formcontrolname="l1Taxonomy"]')
-                l1.wait_for(state="visible", timeout=5_000)
-                l1.click()
-                page.get_by_role("option", name=threat_type).wait_for(state="visible", timeout=5_000)
-                page.get_by_role("option", name=threat_type).click()
-            except Exception:
-                pass
-
-            # ── 3. Chọn Threat category (l3Taxonomy) — chờ enabled sau l1 ────
-            if threat_category and threat_category != "None":
-                try:
-                    l3 = page.locator('[formcontrolname="l3Taxonomy"]')
-                    # Chờ dropdown enabled (Angular bật sau khi l1 được chọn)
-                    l3.wait_for(state="visible", timeout=5_000)
-                    page.wait_for_function(
-                        "() => !document.querySelector('[formcontrolname=\"l3Taxonomy\"]').classList.contains('mat-mdc-select-disabled')",
-                        timeout=5_000,
+                if browser is None or not browser.is_connected():
+                    browser = pw.chromium.launch(
+                        headless=False,
+                        slow_mo=250,
+                        args=[
+                            "--start-maximized",
+                            "--force-dark-mode",
+                            "--enable-features=WebContentsForceDark",
+                        ],
                     )
-                    l3.click()
-                    page.get_by_role("option", name=threat_category).wait_for(state="visible", timeout=5_000)
-                    page.get_by_role("option", name=threat_category).click()
-                except Exception:
-                    pass
-
-            # Giữ browser mở — chờ user review và Submit
-            try:
-                page.wait_for_event("close", timeout=900_000)
-            except Exception:
-                pass
-
-    threading.Thread(target=_run, daemon=True).start()
-    return {"status": "launched"}
-
-
-def open_microsoft_form_playwright(domain: str) -> dict:
-    """Mở form Microsoft SmartScreen, tự điền URL + chọn ngôn ngữ Vietnamese.
-
-    Form tại https://www.microsoft.com/en-us/wdsi/support/report-unsafe-site-guest
-    Confirmed selectors (debug):
-    - #WebsiteUrlOrIP — URL input
-    - #LanguageListButton → click → [role=option][aria-label="Vietnamese"]
-    Trả về {"status":"launched"} hoặc {"error":...}.
-    """
-    try:
-        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-    except ImportError:
-        return {"error": "playwright chưa cài — chạy: pip install playwright && python -m playwright install chromium"}
-
-    import threading
-
-    domain_url = f"https://{domain}"
-
-    def _run():
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=False, slow_mo=400)
-            page = browser.new_page()
-            try:
-                page.goto(
-                    "https://www.microsoft.com/en-us/wdsi/support/report-unsafe-site-guest",
-                    timeout=20_000,
-                )
+                page = browser.new_page(color_scheme="dark", no_viewport=True)
+                if request["kind"] == "google":
+                    self._fill_google(page, **request["payload"])
+                elif request["kind"] == "microsoft":
+                    self._fill_microsoft(page, **request["payload"])
+                else:
+                    raise ValueError(f"Loại form không hỗ trợ: {request['kind']}")
                 page.bring_to_front()
-                page.wait_for_load_state("networkidle", timeout=15_000)
-            except PWTimeout:
-                pass
+                request["result"] = {"status": "launched"}
+            except Exception as exc:
+                request["result"] = {"error": str(exc)}
+            finally:
+                request["done"].set()
 
-            # ── 1. Điền URL ────────────────────────────────────────────────────
-            try:
-                url_field = page.locator("#WebsiteUrlOrIP")
-                url_field.wait_for(state="visible", timeout=8_000)
-                url_field.click()
-                url_field.fill(domain_url)
-            except Exception:
-                pass
+    @staticmethod
+    def _fill_google(page, target_url: str, description: str,
+                     threat_type: str, threat_category: str):
+        import urllib.parse as _up
 
-            # ── 2. Chọn ngôn ngữ Vietnamese ────────────────────────────────────
-            # Click nút mở dropdown → chờ list hiện → click option Vietnamese
-            try:
-                page.locator("#LanguageListButton").click()
-                viet = page.locator('[role="option"][aria-label="Vietnamese"]')
-                viet.wait_for(state="visible", timeout=5_000)
-                viet.click()
-            except Exception:
-                pass
+        gsb_url = (
+            "https://safebrowsing.google.com/safebrowsing/report_phish/?url="
+            + _up.quote(target_url, safe="")
+        )
+        page.goto(gsb_url, wait_until="domcontentloaded", timeout=20_000)
 
-            try:
-                page.wait_for_event("close", timeout=900_000)
-            except Exception:
-                pass
+        url_field = page.locator('[formcontrolname="url"]')
+        url_field.wait_for(state="visible", timeout=10_000)
+        url_field.fill(target_url)
 
-    threading.Thread(target=_run, daemon=True).start()
-    return {"status": "launched"}
+        details = page.locator('[formcontrolname="details"]')
+        details.wait_for(state="visible", timeout=10_000)
+        details.fill(description)
+
+        l1 = page.locator('[formcontrolname="l1Taxonomy"]')
+        l1.click()
+        page.get_by_role("option", name=threat_type, exact=True).click()
+
+        if threat_category and threat_category != "None":
+            l3 = page.locator('[formcontrolname="l3Taxonomy"]')
+            l3.wait_for(state="visible", timeout=5_000)
+            l3.click()
+            page.get_by_role("option", name=threat_category, exact=True).click()
+
+    @staticmethod
+    def _fill_microsoft(page, target_url: str):
+        page.goto(
+            "https://www.microsoft.com/en-us/wdsi/support/report-unsafe-site-guest",
+            wait_until="domcontentloaded",
+            timeout=20_000,
+        )
+        url_field = page.locator("#WebsiteUrlOrIP")
+        url_field.wait_for(state="visible", timeout=10_000)
+        url_field.fill(target_url)
+
+        page.locator("#LanguageListButton").click()
+        vietnamese = page.locator('[role="option"][aria-label="Vietnamese"]')
+        vietnamese.wait_for(state="visible", timeout=5_000)
+        vietnamese.click()
+
+
+def _report_browser_manager() -> _ReportBrowserManager:
+    global _REPORT_BROWSER_MANAGER, _REPORT_BROWSER_MANAGER_LOCK
+    if _REPORT_BROWSER_MANAGER_LOCK is None:
+        import threading
+        _REPORT_BROWSER_MANAGER_LOCK = threading.Lock()
+    with _REPORT_BROWSER_MANAGER_LOCK:
+        if _REPORT_BROWSER_MANAGER is None:
+            _REPORT_BROWSER_MANAGER = _ReportBrowserManager()
+    return _REPORT_BROWSER_MANAGER
+
+
+def open_gsb_form_playwright(target: str, description: str,
+                             threat_type: str = "Social Engineering",
+                             threat_category: str = "None") -> dict:
+    """Mở tab Google trong browser automation dùng chung và tự điền form."""
+    return _report_browser_manager().open(
+        "google",
+        target_url=_target_url(target),
+        description=description,
+        threat_type=threat_type,
+        threat_category=threat_category,
+    )
+
+
+def open_microsoft_form_playwright(target: str) -> dict:
+    """Mở tab Microsoft trong browser automation dùng chung và tự điền form."""
+    return _report_browser_manager().open("microsoft", target_url=_target_url(target))
 
 
 def open_cloudflare_form_browser(domain: str) -> dict:

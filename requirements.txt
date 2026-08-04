@@ -7,3 +7,4 @@ ipwhois
 streamlit
 pandas
 PySocks
+playwright

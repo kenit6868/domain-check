@@ -141,6 +141,56 @@ class DomainWorkerTests(unittest.TestCase):
 
             self.assertEqual(send.call_count, 1)
 
+    def test_job_resumes_without_reprocessing_completed_targets(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            job_path = os.path.join(job_dir, "job.json")
+            status_path = os.path.join(job_dir, "status.json")
+            with open(job_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "job_id": "resume-test",
+                    "domains": ["done.example", "remaining.example"],
+                    "batch_size": 1,
+                    "interval_seconds": 0,
+                    "include_vncert": False,
+                }, f)
+            with open(status_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "job_id": "resume-test",
+                    "state": "waiting",
+                    "processed": 1,
+                    "total": 2,
+                    "current_batch": 1,
+                    "total_batches": 2,
+                    "results": [{
+                        "target_url": "done.example",
+                        "domain": "done.example",
+                        "success": True,
+                    }],
+                }, f)
+
+            with (
+                patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
+                patch.object(domain_worker, "_successfully_reported_domain_accounts_today", return_value=set()),
+                patch.object(
+                    domain_worker.pt,
+                    "run_check",
+                    return_value={
+                        "domain": "remaining.example",
+                        "drafts": [],
+                        "reputation": {"verdict": "unknown"},
+                    },
+                ) as run_check,
+            ):
+                domain_worker.run_job(job_path)
+
+            with open(status_path, encoding="utf-8") as f:
+                status = json.load(f)
+            self.assertEqual(status["state"], "completed")
+            self.assertEqual(status["processed"], 2)
+            self.assertEqual(status["current_batch"], 2)
+            self.assertEqual(run_check.call_count, 1)
+            self.assertEqual(run_check.call_args.args[0], "remaining.example")
+
 
 if __name__ == "__main__":
     unittest.main()
