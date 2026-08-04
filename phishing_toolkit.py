@@ -2230,7 +2230,11 @@ def _target_url(value: str) -> str:
 
 
 class _ReportBrowserManager:
-    """Một Playwright browser dùng chung; mỗi report được mở thành tab mới."""
+    """Một Playwright browser dùng chung; mỗi report được mở thành tab mới.
+
+    Browser được relaunch khi dark_mode thay đổi vì --force-dark-mode là flag
+    browser-level, không thể đổi sau khi đã launch.
+    """
 
     def __init__(self):
         import queue
@@ -2240,11 +2244,11 @@ class _ReportBrowserManager:
         self._thread = threading.Thread(target=self._run, daemon=True, name="report-browser")
         self._thread.start()
 
-    def open(self, kind: str, **payload) -> dict:
+    def open(self, kind: str, dark_mode: bool = True, **payload) -> dict:
         import threading
 
         done = threading.Event()
-        request = {"kind": kind, "payload": payload, "done": done, "result": None}
+        request = {"kind": kind, "dark_mode": dark_mode, "payload": payload, "done": done, "result": None}
         self._queue.put(request)
         if not done.wait(timeout=40):
             return {"error": "Chrome mở quá lâu. Hãy thử lại."}
@@ -2263,20 +2267,29 @@ class _ReportBrowserManager:
 
         pw = sync_playwright().start()
         browser = None
+        current_dark_mode = None  # track theme browser đang dùng
+
         while True:
             request = self._queue.get()
+            dark_mode = request.get("dark_mode", True)
             try:
-                if browser is None or not browser.is_connected():
-                    browser = pw.chromium.launch(
-                        headless=False,
-                        slow_mo=250,
-                        args=[
-                            "--start-maximized",
-                            "--force-dark-mode",
-                            "--enable-features=WebContentsForceDark",
-                        ],
-                    )
-                page = browser.new_page(color_scheme="dark", no_viewport=True)
+                # Relaunch nếu theme thay đổi hoặc browser bị đóng
+                if browser is None or not browser.is_connected() or current_dark_mode != dark_mode:
+                    if browser is not None:
+                        try:
+                            browser.close()
+                        except Exception:
+                            pass
+                    args = ["--start-maximized"]
+                    if dark_mode:
+                        # --force-dark-mode: Chrome UI tối (toolbar, titlebar)
+                        # WebContentsForceDark: force dark cho trang không support media query
+                        args += ["--force-dark-mode", "--enable-features=WebContentsForceDark"]
+                    browser = pw.chromium.launch(headless=False, slow_mo=250, args=args)
+                    current_dark_mode = dark_mode
+
+                color_scheme = "dark" if dark_mode else "light"
+                page = browser.new_page(color_scheme=color_scheme, no_viewport=True)
                 if request["kind"] == "google":
                     self._fill_google(page, **request["payload"])
                 elif request["kind"] == "microsoft":
@@ -2349,10 +2362,12 @@ def _report_browser_manager() -> _ReportBrowserManager:
 
 def open_gsb_form_playwright(target: str, description: str,
                              threat_type: str = "Social Engineering",
-                             threat_category: str = "None") -> dict:
+                             threat_category: str = "None",
+                             dark_mode: bool = True) -> dict:
     """Mở tab Google trong browser automation dùng chung và tự điền form."""
     return _report_browser_manager().open(
         "google",
+        dark_mode=dark_mode,
         target_url=_target_url(target),
         description=description,
         threat_type=threat_type,
@@ -2360,9 +2375,9 @@ def open_gsb_form_playwright(target: str, description: str,
     )
 
 
-def open_microsoft_form_playwright(target: str) -> dict:
+def open_microsoft_form_playwright(target: str, dark_mode: bool = True) -> dict:
     """Mở tab Microsoft trong browser automation dùng chung và tự điền form."""
-    return _report_browser_manager().open("microsoft", target_url=_target_url(target))
+    return _report_browser_manager().open("microsoft", dark_mode=dark_mode, target_url=_target_url(target))
 
 
 def open_cloudflare_form_browser(domain: str) -> dict:
