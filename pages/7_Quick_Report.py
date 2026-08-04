@@ -141,6 +141,21 @@ st.set_page_config(page_title="Quick Report", page_icon="⚡", layout="wide")
 st.title("⚡ Quick Report")
 st.caption("Nhập danh sách domain → check CDN/Cloudflare → hiện form báo cáo từng cái. Không gọi VirusTotal hay GSB API.")
 
+# Banner hướng dẫn cài Playwright (chỉ hiện khi chưa cài)
+if not pt.playwright_available():
+    with st.expander("⚠️ Playwright chưa được cài — các nút tự động điền form chưa hoạt động", expanded=True):
+        st.markdown("""
+Playwright dùng để **tự động mở Chrome và điền sẵn** form Google Safe Browsing / Microsoft SmartScreen.
+Khi chưa cài, các nút này sẽ thay bằng link mở form thủ công.
+
+**Cài đặt** (chạy 2 lệnh sau trong terminal, rồi restart app):
+```
+pip install playwright
+python -m playwright install chromium
+```
+> Nếu lệnh `playwright` không nhận, thử: `python -m playwright install chromium`
+""")
+
 # Lọc từ nội dung thô
 with st.expander("🧹 Lọc domain từ nội dung thô (tùy chọn)", expanded=False):
     st.caption("Dán nguyên văn bản hỗn hợp — tool tách domain/URL rồi đưa xuống ô bên dưới.")
