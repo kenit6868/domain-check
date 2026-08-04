@@ -374,7 +374,7 @@ if "check_domain_result" in st.session_state:
     with st.expander("1️⃣  Google Safe Browsing + Microsoft SmartScreen (form thủ công)", expanded=True):
         col_a, col_b = st.columns(2)
         col_a.link_button("🔗 Mở form Google Safe Browsing", "https://safebrowsing.google.com/safebrowsing/report_phish/")
-        col_b.link_button("🔗 Mở form Microsoft SmartScreen", "https://www.microsoft.com/wdsi/support/report-unsafe-site/")
+        col_b.link_button("🔗 Mở form Microsoft SmartScreen", "https://www.microsoft.com/wdsi/support/report-unsafe-site-guest/")
         st.caption("Nội dung mô tả mẫu — hover vào khung để copy:")
         st.code(pt.generate_safebrowsing_report_text(domain, cfg), language=None)
 

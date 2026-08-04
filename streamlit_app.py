@@ -65,7 +65,7 @@ st.divider()
 
 st.subheader("10 case gần nhất")
 if os.path.exists(pt.LOG_PATH):
-    df = pd.read_csv(pt.LOG_PATH)
+    df = pd.read_csv(pt.LOG_PATH, on_bad_lines="skip")
     st.dataframe(df.tail(10).iloc[::-1], width="stretch")
 else:
     st.info("Chưa có case nào được ghi log. Chạy kiểm tra 1 domain ở trên hoặc vào trang Check Domain.")

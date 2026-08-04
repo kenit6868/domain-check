@@ -23,7 +23,7 @@ if not os.path.exists(pt.LOG_PATH):
     st.info("Chưa có case nào. Vào trang **Check Domain** để chạy kiểm tra đầu tiên.")
     st.stop()
 
-df = pd.read_csv(pt.LOG_PATH)
+df = pd.read_csv(pt.LOG_PATH, on_bad_lines="skip")
 
 if df.empty:
     st.info("case_log.csv hiện đang trống.")
