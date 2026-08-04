@@ -40,6 +40,8 @@ import socket
 import ssl
 import subprocess
 import sys
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from urllib.parse import urlparse
@@ -2101,18 +2103,81 @@ def _normalize_to_addresses(to: str) -> str:
         return {"success": False, "error": str(e)}
 
 
+@contextmanager
+def sent_log_lock(timeout: float = 15.0, stale_after: float = 120.0):
+    """Cross-process lock protecting a shared sent_log.csv and its schema."""
+    lock_path = SENT_LOG_PATH + ".lock"
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                os.write(fd, f"{os.getpid()}\n{time.time()}\n".encode("ascii"))
+            finally:
+                os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(lock_path) > stale_after:
+                    os.remove(lock_path)
+                    continue
+            except FileNotFoundError:
+                continue
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Không thể khóa file log dùng chung: {lock_path}")
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        try:
+            os.remove(lock_path)
+        except FileNotFoundError:
+            pass
+
+
 def log_sent(row: dict):
     """Ghi 1 dòng vào sent_log.csv (file RIÊNG, không phải cột mới trong case_log.csv — giữ
     đúng nguyên tắc không đổi schema CSV đã có dữ liệu thật, đã áp dụng cho reputation/
     cdn_detected/origin_ip_scan/registry_contact trước đó). Gọi cho mọi lần gửi, kể cả thất
     bại, để sent_log.csv là nhật ký đầy đủ của mọi lần ai đó đã bấm gửi.
     """
-    is_new = not os.path.exists(SENT_LOG_PATH)
-    with open(SENT_LOG_PATH, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
-        if is_new:
-            writer.writeheader()
-        writer.writerow(row)
+    with sent_log_lock():
+        is_new = not os.path.exists(SENT_LOG_PATH)
+        if not is_new:
+            with open(SENT_LOG_PATH, newline="", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                existing_fields = reader.fieldnames or []
+                existing_rows = list(reader)
+            missing_fields = [key for key in row if key not in existing_fields]
+            if missing_fields:
+                fields = existing_fields + missing_fields
+                temp_path = f"{SENT_LOG_PATH}.{os.getpid()}.tmp"
+                try:
+                    with open(temp_path, "w", newline="", encoding="utf-8") as f:
+                        writer = csv.DictWriter(f, fieldnames=fields)
+                        writer.writeheader()
+                        writer.writerows(existing_rows)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(temp_path, SENT_LOG_PATH)
+                finally:
+                    try:
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                    except OSError:
+                        pass
+        with open(SENT_LOG_PATH, "a", newline="", encoding="utf-8") as f:
+            if is_new:
+                fields = list(row.keys())
+            else:
+                with open(SENT_LOG_PATH, newline="", encoding="utf-8-sig") as existing:
+                    fields = next(csv.reader(existing), list(row.keys()))
+            writer = csv.DictWriter(f, fieldnames=fields)
+            if is_new:
+                writer.writeheader()
+            writer.writerow(row)
+            f.flush()
+            os.fsync(f.fileno())
 
 
 def append_reported_url_to_drafts(drafts: list, target_url: str) -> list:
@@ -2505,6 +2570,7 @@ def cmd_send(args):
                 "draft_file": os.path.basename(path),
                 "to": parsed["to"],
                 "subject": parsed["subject"],
+                "account": r.get("account") or "",
                 "success": r["success"],
                 "error": r.get("error") or "",
             })

@@ -70,39 +70,48 @@ def _interruptible_wait(seconds: int, stop_path: str, status_path: str, status: 
     return False
 
 
-def _successfully_reported_domains_today(
+def _successfully_reported_domain_accounts_today(
     local_day: date | None = None,
     local_tz=None,
-) -> set[str]:
-    """Return domains successfully emailed during the current local day."""
+) -> set[tuple[str, str]]:
+    """Return successful ``(domain, sender account)`` pairs for the local day.
+
+    Rows written before the account column was introduced are intentionally
+    ignored: they cannot prove which sender already reported the domain.
+    """
     reported = set()
     if not os.path.exists(pt.SENT_LOG_PATH):
         return reported
     local_tz = local_tz or datetime.now().astimezone().tzinfo
     local_day = local_day or datetime.now(local_tz).date()
     try:
-        with open(pt.SENT_LOG_PATH, newline="", encoding="utf-8-sig") as f:
-            for row in csv.DictReader(f):
-                success = str(row.get("success", "")).strip().lower()
-                domain = pt.normalize_domain(str(row.get("domain", "")).strip()).lower().rstrip(".")
-                timestamp = str(row.get("timestamp", "")).strip()
-                try:
-                    sent_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                    if sent_at.tzinfo is None:
-                        sent_at = sent_at.replace(tzinfo=timezone.utc)
-                    sent_day = sent_at.astimezone(local_tz).date()
-                except (TypeError, ValueError):
-                    continue
-                if domain and sent_day == local_day and success in {"true", "1", "yes"}:
-                    reported.add(domain)
+        with pt.sent_log_lock():
+            if not os.path.exists(pt.SENT_LOG_PATH):
+                return reported
+            with open(pt.SENT_LOG_PATH, newline="", encoding="utf-8-sig") as f:
+                for row in csv.DictReader(f):
+                    success = str(row.get("success", "")).strip().lower()
+                    domain = pt.normalize_domain(str(row.get("domain", "")).strip()).lower().rstrip(".")
+                    account = str(row.get("account", "")).strip().lower()
+                    timestamp = str(row.get("timestamp", "")).strip()
+                    try:
+                        sent_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                        if sent_at.tzinfo is None:
+                            sent_at = sent_at.replace(tzinfo=timezone.utc)
+                        sent_day = sent_at.astimezone(local_tz).date()
+                    except (TypeError, ValueError):
+                        continue
+                    if domain and account and sent_day == local_day and success in {"true", "1", "yes"}:
+                        reported.add((domain, account))
     except (OSError, csv.Error):
         # Không chặn job nếu file log đang bị Excel khóa hoặc có một dòng lỗi.
         pass
     return reported
 
 
-def _send_domain_drafts(domain: str, drafts: list, cfg: dict, include_vncert: bool, events_path: str) -> dict:
+def _send_domain_drafts(domain: str, drafts: list, cfg: dict, include_vncert: bool, events_path: str) -> tuple[dict, set[str]]:
     summary = {"drafts_total": len(drafts), "drafts_sendable": 0, "sent_ok": 0, "sent_failed": 0}
+    successful_accounts = set()
     for path in drafts:
         filename = os.path.basename(path)
         if not include_vncert and filename.endswith("_vncert_report.txt"):
@@ -122,6 +131,9 @@ def _send_domain_drafts(domain: str, drafts: list, cfg: dict, include_vncert: bo
         results = pt.send_report_email_bulk(parsed["to"], parsed["subject"], parsed["body"], cfg)
         for result in results:
             ok = bool(result.get("success"))
+            account = str(result.get("account") or "").strip()
+            if ok and account:
+                successful_accounts.add(account.lower())
             summary["sent_ok" if ok else "sent_failed"] += 1
             row = {
                 "timestamp": _now(),
@@ -129,6 +141,7 @@ def _send_domain_drafts(domain: str, drafts: list, cfg: dict, include_vncert: bo
                 "draft_file": filename,
                 "to": parsed["to"],
                 "subject": parsed["subject"],
+                "account": account,
                 "success": ok,
                 "error": result.get("error") or "",
             }
@@ -141,7 +154,7 @@ def _send_domain_drafts(domain: str, drafts: list, cfg: dict, include_vncert: bo
                 "to": parsed["to"], "account": result.get("account"), "success": ok,
                 "error": result.get("error") or "",
             })
-    return summary
+    return summary, successful_accounts
 
 
 def run_job(job_path: str):
@@ -159,7 +172,7 @@ def run_job(job_path: str):
     interval_seconds = max(0, int(job.get("interval_seconds", 300)))
     include_vncert = bool(job.get("include_vncert", False))
     cfg = pt.load_config()
-    reported_domains = _successfully_reported_domains_today()
+    reported_domain_accounts = _successfully_reported_domain_accounts_today()
     status = {
         "job_id": job.get("job_id"),
         "state": "running",
@@ -196,7 +209,13 @@ def run_job(job_path: str):
                 _append_event(events_path, {"type": "domain_started", "target_url": target})
                 started = time.time()
                 target_domain = pt.normalize_domain(target).lower().rstrip(".")
-                if target_domain in reported_domains:
+                configured_accounts = cfg.get("smtp_accounts") or []
+                unsent_accounts = [
+                    account for account in configured_accounts
+                    if (target_domain, str(account.get("username") or "").strip().lower())
+                    not in reported_domain_accounts
+                ]
+                if not unsent_accounts:
                     domain_result = {
                         "target_url": target,
                         "domain": target_domain,
@@ -219,14 +238,20 @@ def run_job(job_path: str):
                     # chủ động submit domain mới lên VirusTotal.
                     result = pt.run_check(target, False, cfg)
                     domain = result["domain"]
-                    mail = _send_domain_drafts(domain, result.get("drafts") or [], cfg, include_vncert, events_path)
+                    send_cfg = dict(cfg)
+                    send_cfg["smtp_accounts"] = unsent_accounts
+                    mail, successful_accounts = _send_domain_drafts(
+                        domain, result.get("drafts") or [], send_cfg, include_vncert, events_path
+                    )
                     domain_result = {
                         "target_url": target, "domain": domain, "success": True,
                         "duration_seconds": round(time.time() - started, 1),
                         "reputation": result.get("reputation", {}).get("verdict"), **mail,
                     }
-                    if mail["sent_ok"] > 0:
-                        reported_domains.add(domain.lower().rstrip("."))
+                    normalized_domain = domain.lower().rstrip(".")
+                    reported_domain_accounts.update(
+                        (normalized_domain, account) for account in successful_accounts
+                    )
                 except Exception as exc:
                     domain_result = {
                         "target_url": target, "domain": pt.normalize_domain(target), "success": False,

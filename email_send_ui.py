@@ -100,6 +100,7 @@ def render_send_all_ui(draft_paths: list, cfg: dict, key_prefix: str):
                             "draft_file": filename,
                             "to": parsed["to"],
                             "subject": parsed["subject"],
+                            "account": r.get("account") or "",
                             "success": r["success"],
                             "error": r.get("error") or "",
                         })
@@ -214,6 +215,7 @@ def render_send_email_ui(path: str, cfg: dict, key_prefix: str):
                     "draft_file": filename,
                     "to": parsed["to"],
                     "subject": parsed["subject"],
+                    "account": r.get("account") or "",
                     "success": r["success"],
                     "error": r.get("error") or "",
                 })
@@ -246,4 +248,3 @@ def render_send_email_ui(path: str, cfg: dict, key_prefix: str):
             for r in results
         ])
         st.table(df)
-
