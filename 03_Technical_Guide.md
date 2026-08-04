@@ -7,7 +7,7 @@
 
 #### 1. Chặn trình duyệt người dùng (Safe Browsing & SmartScreen)
 *   **Google Safe Browsing Form**: [Báo cáo Google](https://safebrowsing.google.com/safebrowsing/report_phish/)
-*   **Microsoft SmartScreen Form**: [Báo cáo Microsoft](https://www.microsoft.com/wdsi/support/report-unsafe-site)
+*   **Microsoft SmartScreen Form**: [Báo cáo Microsoft](https://www.microsoft.com/wdsi/support/report-unsafe-site-guest)
 *   **Nội dung mẫu gửi báo cáo (tiếng Anh)**:
     ```
     The domain [DOMAIN_GIẢ_MẠO] is actively cloning our official website login panel to harvest customer passwords and OTP tokens. Please add this phishing URL to your browser security filters to safeguard users.

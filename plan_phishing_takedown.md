@@ -54,7 +54,7 @@ Tập hợp thành 1 bộ hồ sơ cho mỗi domain:
 | Ưu tiên | Kênh | Ghi chú |
 |---|---|---|
 | 1 | Google Safe Browsing | `https://safebrowsing.google.com/safebrowsing/report_phish/` — hiệu quả nhanh nhất, chặn cảnh báo trên Chrome/Firefox/Safari |
-| 1 | Microsoft SmartScreen | `https://www.microsoft.com/wdsi/support/report-unsafe-site/` — cùng nhóm chặn trình duyệt/OS với Safe Browsing, report thủ công (không có API submit công khai), chặn cảnh báo trên Edge/Windows |
+| 1 | Microsoft SmartScreen | `https://www.microsoft.com/wdsi/support/report-unsafe-site-guest/` — cùng nhóm chặn trình duyệt/OS với Safe Browsing, report thủ công (không có API submit công khai), chặn cảnh báo trên Edge/Windows |
 | 1 | Cộng đồng bảo mật (VirusTotal/PhishTank/OpenPhish) | Cùng nhóm "chặn trình duyệt/cộng đồng" với Safe Browsing, xử lý song song. **VirusTotal**: có API submit, `phishing_toolkit.py check --submit` tự gọi. **PhishTank**: không có API submit công khai đáng tin cậy, report thủ công tại `phishtank.org`. **OpenPhish**: chỉ nhận qua email, tool tự sinh sẵn draft `reports/<domain>_openphish_report.txt` gửi `submit@openphish.com` |
 | 2 | Registrar (theo WHOIS) | Có thể tạm ngưng/thu hồi domain hoàn toàn. Tra abuse email qua `domain_check.py` hoặc `lookup.icann.org` |
 | 2b | Registry (ccTLD) | **Leo thang khi registrar-level không đủ hoặc bị phớt lờ**, đặc biệt với ccTLD lạ mà UDRP của ICANN không áp dụng hoàn toàn. Tool tự tra `lookup_registry_contact()`: bảng tĩnh (`CCTLD_REGISTRY_CONTACTS`) trước, fallback IANA referral (`iana_referral()`) cho ccTLD không có trong bảng — **loại trừ gTLD cổ điển .com/.net/.org...** (đã có đủ UDRP + registrar report ở trên, không cần leo thang thêm). Tự sinh draft `reports/<domain>_registry_report.txt` |

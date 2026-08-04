@@ -114,7 +114,7 @@ cùng 1 domain.
   cho `clean` (web); text thường ở CLI.
 - Mục "1. Google Safe Browsing" trong khuyến nghị kênh báo cáo (`cmd_check`,
   `pages/1_Check_Domain.py`) đã thêm 1 dòng con Microsoft SmartScreen (report thủ công tại
-  `microsoft.com/wdsi/support/report-unsafe-site/`, cùng nhóm chặn trình duyệt/OS, không có API
+  `microsoft.com/wdsi/support/report-unsafe-site-guest/`, cùng nhóm chặn trình duyệt/OS, không có API
   submit — xử lý giống PhishTank: text tĩnh, không hàm/key mới) — khớp với
   `03_Technical_Guide.md` mục 1 và ưu tiên 1 của `plan_phishing_takedown.md` bước 4.
 - **Nội dung mô tả mẫu cho Google Safe Browsing** (`generate_safebrowsing_report_text(domain,

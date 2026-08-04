@@ -2136,6 +2136,185 @@ def append_reported_url_to_drafts(drafts: list, target_url: str) -> list:
 # Commands
 # --------------------------------------------------------------------------
 
+def run_cdn_check(target: str) -> dict:
+    """Pipeline tối giản: chỉ phát hiện Cloudflare/CDN, không gọi API key nào."""
+    domain = normalize_domain(target)
+    who = get_whois_info(domain)
+    cf = is_cloudflare(who.get("name_servers")) if isinstance(who, dict) else False
+    try:
+        cdn_detected = detect_cdn(domain)
+    except Exception:
+        cdn_detected = []
+    return {"domain": domain, "cloudflare": cf, "cdn_detected": cdn_detected}
+
+
+def playwright_available() -> bool:
+    """Kiểm tra Playwright đã cài chưa (không import nặng nếu chưa có)."""
+    import importlib.util
+    return importlib.util.find_spec("playwright") is not None
+
+
+def open_gsb_form_playwright(domain: str, description: str,
+                              threat_type: str = "Social Engineering",
+                              threat_category: str = "None") -> dict:
+    """Mở form Google Safe Browsing trong Chrome thật, tự điền tất cả fields.
+
+    Form dùng Angular Material (confirmed bằng debug):
+    - [formcontrolname="url"]        → URL (đã điền sẵn qua ?url= param)
+    - [formcontrolname="reportType"] → mặc định "This page is not safe"
+    - [formcontrolname="l1Taxonomy"] → Threat type: Social Engineering / Malware / Unwanted Software
+    - [formcontrolname="l3Taxonomy"] → Threat category (phụ thuộc l1):
+        Social Engineering: Bank/Financial Phishing, Other Phishing, v.v.
+        Malware: Desktop Malware, Mobile Malware, Web Malware
+        Unwanted Software: Unwanted Desktop/Mobile Software
+    - [formcontrolname="details"]    → textarea description
+    Chạy trong background thread. Trả về {"status": "launched"} hoặc {"error": ...}.
+    """
+    try:
+        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+    except ImportError:
+        return {"error": "playwright chưa cài — chạy: pip install playwright && python -m playwright install chromium"}
+
+    import threading
+    import urllib.parse as _up
+
+    domain_url = f"https://{domain}"
+    gsb_url = ("https://safebrowsing.google.com/safebrowsing/report_phish/?url="
+               + _up.quote(domain_url, safe=""))
+
+    def _run():
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=False, slow_mo=400)
+            page = browser.new_page()
+            try:
+                page.goto(gsb_url, timeout=20_000)
+                page.bring_to_front()
+                page.wait_for_load_state("networkidle", timeout=15_000)
+            except PWTimeout:
+                pass
+
+            # ── 1. Điền textarea description ──────────────────────────────────
+            try:
+                details = page.locator('[formcontrolname="details"]')
+                details.wait_for(state="visible", timeout=8_000)
+                details.click()
+                details.fill(description)
+            except Exception:
+                try:
+                    page.locator("textarea").nth(0).fill(description)
+                except Exception:
+                    pass
+
+            # ── 2. Chọn Threat type (l1Taxonomy) ─────────────────────────────
+            try:
+                l1 = page.locator('[formcontrolname="l1Taxonomy"]')
+                l1.wait_for(state="visible", timeout=5_000)
+                l1.click()
+                page.get_by_role("option", name=threat_type).wait_for(state="visible", timeout=5_000)
+                page.get_by_role("option", name=threat_type).click()
+            except Exception:
+                pass
+
+            # ── 3. Chọn Threat category (l3Taxonomy) — chờ enabled sau l1 ────
+            if threat_category and threat_category != "None":
+                try:
+                    l3 = page.locator('[formcontrolname="l3Taxonomy"]')
+                    # Chờ dropdown enabled (Angular bật sau khi l1 được chọn)
+                    l3.wait_for(state="visible", timeout=5_000)
+                    page.wait_for_function(
+                        "() => !document.querySelector('[formcontrolname=\"l3Taxonomy\"]').classList.contains('mat-mdc-select-disabled')",
+                        timeout=5_000,
+                    )
+                    l3.click()
+                    page.get_by_role("option", name=threat_category).wait_for(state="visible", timeout=5_000)
+                    page.get_by_role("option", name=threat_category).click()
+                except Exception:
+                    pass
+
+            # Giữ browser mở — chờ user review và Submit
+            try:
+                page.wait_for_event("close", timeout=900_000)
+            except Exception:
+                pass
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "launched"}
+
+
+def open_microsoft_form_playwright(domain: str) -> dict:
+    """Mở form Microsoft SmartScreen, tự điền URL + chọn ngôn ngữ Vietnamese.
+
+    Form tại https://www.microsoft.com/en-us/wdsi/support/report-unsafe-site-guest
+    Confirmed selectors (debug):
+    - #WebsiteUrlOrIP — URL input
+    - #LanguageListButton → click → [role=option][aria-label="Vietnamese"]
+    Trả về {"status":"launched"} hoặc {"error":...}.
+    """
+    try:
+        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+    except ImportError:
+        return {"error": "playwright chưa cài — chạy: pip install playwright && python -m playwright install chromium"}
+
+    import threading
+
+    domain_url = f"https://{domain}"
+
+    def _run():
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=False, slow_mo=400)
+            page = browser.new_page()
+            try:
+                page.goto(
+                    "https://www.microsoft.com/en-us/wdsi/support/report-unsafe-site-guest",
+                    timeout=20_000,
+                )
+                page.bring_to_front()
+                page.wait_for_load_state("networkidle", timeout=15_000)
+            except PWTimeout:
+                pass
+
+            # ── 1. Điền URL ────────────────────────────────────────────────────
+            try:
+                url_field = page.locator("#WebsiteUrlOrIP")
+                url_field.wait_for(state="visible", timeout=8_000)
+                url_field.click()
+                url_field.fill(domain_url)
+            except Exception:
+                pass
+
+            # ── 2. Chọn ngôn ngữ Vietnamese ────────────────────────────────────
+            # Click nút mở dropdown → chờ list hiện → click option Vietnamese
+            try:
+                page.locator("#LanguageListButton").click()
+                viet = page.locator('[role="option"][aria-label="Vietnamese"]')
+                viet.wait_for(state="visible", timeout=5_000)
+                viet.click()
+            except Exception:
+                pass
+
+            try:
+                page.wait_for_event("close", timeout=900_000)
+            except Exception:
+                pass
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "launched"}
+
+
+def open_cloudflare_form_browser(domain: str) -> dict:
+    """Mở form Cloudflare Abuse trong browser thật của user.
+
+    abuse.cloudflare.com dùng chính bot-detection của Cloudflare nên Playwright
+    bị block ngay lập tức. Giải pháp duy nhất đáng tin cậy là mở bằng browser
+    thật — user tự paste description từ nút Copy bên cạnh.
+    """
+    import webbrowser
+    url = "https://abuse.cloudflare.com/phishing"
+    webbrowser.open(url)
+    return {"status": "launched"}
+
+
+
 def run_check(target: str, submit: bool, cfg: dict) -> dict:
     """Chạy toàn bộ pipeline kiểm tra 1 domain và trả về dict kết quả đầy đủ.
 
@@ -2354,7 +2533,7 @@ def cmd_check(args):
     print("     Nội dung mô tả mẫu (copy vào ô mô tả của form):")
     print(f"     \"{generate_safebrowsing_report_text(domain, cfg)}\"")
     print("     Microsoft SmartScreen: report thủ công tại")
-    print("     https://www.microsoft.com/wdsi/support/report-unsafe-site/")
+    print("     https://www.microsoft.com/wdsi/support/report-unsafe-site-guest/")
 
     if cf or cdn_detected:
         print("  2. CDN:")
