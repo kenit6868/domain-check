@@ -67,6 +67,7 @@ app_datas = [
     ("email_send_ui.py",    "."),
     ("domain_worker.py",    "."),
     ("domain_utils.py",     "."),
+    ("link_status.py",      "."),
     ("domain_check.py",     "."),
     ("pages",               "pages"),
     ("config.example.ini",  "."),

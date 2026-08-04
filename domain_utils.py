@@ -5,6 +5,9 @@ import re
 
 def extract_domains_from_text(raw: str) -> list[str]:
     """Extract unique URLs from notes, preserving scheme, path and query."""
+    # Người dùng đôi khi dán hai URL liền nhau, ví dụ
+    # ``example/pathhttps://second.example``. Tạo ranh giới trước scheme sau.
+    raw = re.sub(r"(?i)(?<!^)(https?://)", r"\n\1", raw or "")
     candidates = re.findall(
         r"""(?ix)
         https?://[^\s<>"']+
@@ -12,7 +15,7 @@ def extract_domains_from_text(raw: str) -> list[str]:
         (?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+
         [a-z]{2,63}(?:/[^\s<>"']*)?
         """,
-        raw or "",
+        raw,
     )
     targets = []
     seen = set()
@@ -23,3 +26,30 @@ def extract_domains_from_text(raw: str) -> list[str]:
             seen.add(key)
             targets.append(target)
     return targets
+
+
+def extract_branded_domains(raw: str) -> list[dict[str, str]]:
+    """Extract links and associate them with the nearest preceding brand heading.
+
+    A non-empty line without a domain is treated as a heading. This matches the
+    worker paste format, for example ``QS88`` followed by one or more URLs.
+    """
+    items = []
+    current_brand = ""
+    seen = set()
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        targets = extract_domains_from_text(line)
+        if not targets:
+            # Phần sau " - " là ghi chú như "k có đối thủ", không thuộc tên brand.
+            current_brand = re.split(r"\s+-\s+", line, maxsplit=1)[0].strip()
+            continue
+        for target in targets:
+            key = target.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append({"brand": current_brand, "target": target})
+    return items
