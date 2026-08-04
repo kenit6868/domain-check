@@ -52,7 +52,7 @@ def _parse_domains(raw: str) -> tuple[list[str], list[str]]:
     return valid, invalid
 
 
-def _render_domain_block(idx: int, total: int, result: dict, cfg: dict) -> None:
+def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mode: bool = True) -> None:
     """Render khối kết quả + 2 form cho 1 domain."""
     domain = result["domain"]
     cf = result["cloudflare"]
@@ -95,13 +95,14 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict) -> None:
                     gsb_text,
                     threat_type=threat,
                     threat_category=category,
+                    dark_mode=dark_mode,
                 )
                 if "error" in res:
                     st.error(res["error"])
                 else:
                     st.success("✅ Đã mở tab và tự điền form — kiểm tra CAPTCHA rồi Submit.")
             if b2.button("🤖 Microsoft SmartScreen", key=f"ms_{idx}", use_container_width=True, type="primary"):
-                res = pt.open_microsoft_form_playwright(original_url)
+                res = pt.open_microsoft_form_playwright(original_url, dark_mode=dark_mode)
                 if "error" in res:
                     st.error(res["error"])
                 else:
@@ -171,6 +172,8 @@ with st.expander("🧹 Lọc domain từ nội dung thô (tùy chọn)", expande
         else:
             st.warning("Không tìm thấy domain hợp lệ.")
 
+chrome_dark = st.toggle("🌙 Mở Chrome ở chế độ tối", value=True, key="chrome_dark_mode")
+
 with st.form("quick_report_form"):
     raw_domains = st.text_area(
         "Danh sách domain (mỗi dòng 1 domain hoặc URL)",
@@ -209,4 +212,4 @@ if "qr_results" in st.session_state:
     st.divider()
     st.markdown(f"### Kết quả — {total} domain")
     for i, result in enumerate(results):
-        _render_domain_block(i, total, result, cfg)
+        _render_domain_block(i, total, result, cfg, dark_mode=st.session_state.get("chrome_dark_mode", True))
