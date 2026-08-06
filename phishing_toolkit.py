@@ -202,11 +202,11 @@ CCTLD_REGISTRY_CONTACTS = {
     },
     "ru": {
         "registry": "Coordination Center for TLD RU",
-        "abuse_email": "abuse@cctld.ru / ru-abuse@cctld.ru",
+        "abuse_email": "abuse@cctld.ru, ru-abuse@cctld.ru",
         "note": None,
     },
     "uk": {"registry": "Nominet", "abuse_email": "abuse@nominet.uk", "note": None},
-    "eu": {"registry": "EURid", "abuse_email": "abuse@eurid.eu / legal@eurid.eu", "note": None},
+    "eu": {"registry": "EURid", "abuse_email": "abuse@eurid.eu, legal@eurid.eu", "note": None},
     "tw": {"registry": "TWNIC", "abuse_email": "abuse@twnic.tw", "note": None},
     "hk": {"registry": "HKIRC", "abuse_email": "abuse@hkirc.hk", "note": None},
     "us": {"registry": "GoDaddy Registry", "abuse_email": "abuse@about.us", "note": None},
@@ -2051,9 +2051,10 @@ def parse_draft_email(path: str) -> dict:
 def _normalize_to_addresses(to: str) -> str:
     """Chuẩn hóa trường To: về dạng 'addr1, addr2' thuần túy.
 
-    Xử lý 2 trường hợp lỗi legacy:
+    Xử lý các trường hợp:
     - Python list repr: "['addr1', 'addr2']" — do python-whois trả về list, bị ghi nguyên vào file
-    - String list đơn: giữ nguyên
+    - Slash-separated: "addr1 / addr2" — legacy format trong CCTLD_REGISTRY_CONTACTS (vd. EURid, RU)
+    - String đơn: giữ nguyên
 
     Trả về chuỗi comma-separated sạch để dùng trong header email và sendmail().
     """
@@ -2065,6 +2066,9 @@ def _normalize_to_addresses(to: str) -> str:
                 return ", ".join(str(e).strip() for e in parsed if e)
         except Exception:
             pass
+    if to and " / " in to:
+        parts = [p.strip() for p in to.split(" / ") if p.strip()]
+        return ", ".join(parts)
     return to
     """Gửi 1 email report thật qua SMTP (smtplib, thư viện chuẩn, không cần cài thêm gì).
 
