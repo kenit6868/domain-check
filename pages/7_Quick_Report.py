@@ -9,6 +9,7 @@ từng domain theo thứ tự với 2 form cạnh nhau:
 import os
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -53,138 +54,131 @@ def _parse_domains(raw: str) -> tuple[list[str], list[str]]:
 
 
 def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mode: bool = True) -> None:
-    """Render khối kết quả + form cho 1 domain."""
     domain = result["domain"]
     cf = result["cloudflare"]
     cdn_detected = result.get("cdn_detected", [])
     has_cdn = cf or bool(cdn_detected)
     registrar = result.get("registrar") or ""
+    original_url = result.get("_original_url", f"https://{domain}")
+    gsb_text = pt.generate_safebrowsing_report_text(domain, cfg)
 
-    # Phát hiện registrar web-form
+    # Chỉ hiện khi có web form
     r_lower = registrar.lower()
     webform_url_r = next(
-        (url for key, url in pt.WEB_FORM_REGISTRARS.items() if key in r_lower),
-        None
+        (url for key, url in pt.WEB_FORM_REGISTRARS.items() if key in r_lower), None
     ) if registrar else None
-    # Registrar email-only (có trong REGISTRAR_ABUSE_EMAILS hoặc có thể tra RDAP sau)
-    registrar_email = pt.lookup_registrar_abuse_email(registrar) if registrar else None
+
+    registry_info = result.get("registry_contact")
+    show_registry = bool(registry_info and registry_info.get("report_webform"))
 
     with st.container(border=True):
-        original_url = result.get("_original_url", f"https://{domain}")
-        h_num, h_url, h2, h3, h4 = st.columns([1, 4, 1, 1, 2])
-        h_num.markdown(f"### #{idx + 1}/{total}")
-        h_url.code(original_url, language=None)
-        h2.metric("Cloudflare", "✓ Có" if cf else "Không")
-        h3.metric("CDN khác", ", ".join(n.title() for n in cdn_detected) if cdn_detected else "—")
-        if webform_url_r:
-            h4.metric("Registrar", f"⚠️ {registrar[:20]}…" if len(registrar) > 20 else f"⚠️ {registrar}")
-        elif registrar:
-            h4.metric("Registrar", registrar[:24] if len(registrar) > 24 else registrar)
-        else:
-            h4.metric("Registrar", "—")
+        # ── Header: URL + nhãn nhỏ ───────────────────────────────────────────
+        h_num, h_url = st.columns([1, 11])
+        h_num.markdown(f"#### #{idx + 1}")
+        h_url.markdown(f"`{original_url}`")
 
-        col_gsb, col_right = st.columns(2)
+        tags = []
+        if cf: tags.append("☁️ Cloudflare")
+        for n in cdn_detected: tags.append(n.title())
+        if webform_url_r: tags.append(f"📋 {registrar[:20]}")
+        if show_registry: tags.append(f"🌐 {registry_info.get('registry','Registry')[:20]}")
+        if tags:
+            st.caption("  ·  ".join(tags))
 
-        # ── Cột trái: Google Safe Browsing + Microsoft SmartScreen ────────────
-        with col_gsb:
-            st.markdown("**1️⃣ Browser Blocking: GSB / SmartScreen / Netcraft / PhishTank**")
-            gsb_text = pt.generate_safebrowsing_report_text(domain, cfg)
-            c1, c2 = st.columns(2)
-            threat = c1.selectbox(
-                "Threat type",
-                list(_L3_OPTIONS),
-                key=f"threat_{idx}",
-            )
-            categories = _L3_OPTIONS[threat]
-            default_category = "Other Phishing" if threat == "Social Engineering" else "None"
-            category = c2.selectbox(
-                "Category",
-                categories,
-                index=categories.index(default_category),
-                key=f"cat_{idx}",
-            )
-            b1, b2, b3 = st.columns(3)
-            if b1.button("🤖 Google Safe Browsing", key=f"gsb_{idx}", use_container_width=True, type="primary"):
-                res = pt.open_gsb_form_playwright(
-                    original_url,
-                    gsb_text,
-                    threat_type=threat,
-                    threat_category=category,
-                    dark_mode=dark_mode,
-                )
-                if "error" in res:
-                    st.error(res["error"])
-                else:
-                    st.success("✅ Đã mở tab và tự điền form — kiểm tra CAPTCHA rồi Submit.")
-            if b2.button("🤖 Microsoft SmartScreen", key=f"ms_{idx}", use_container_width=True, type="primary"):
-                res = pt.open_microsoft_form_playwright(original_url, dark_mode=dark_mode)
-                if "error" in res:
-                    st.error(res["error"])
-                else:
-                    st.success("✅ Đã mở tab và tự điền URL đầy đủ + Vietnamese.")
-            if b3.link_button(
-                "↗ Netcraft",
-                f"https://report.netcraft.com/report?url={original_url}",
-                use_container_width=True,
-            ):
-                pass
-            st.link_button(
-                "↗ PhishTank",
-                "https://www.phishtank.com/add_web_phish.php",
-                use_container_width=True,
-            )
+        st.divider()
 
-            st.caption("Nội dung dán vào ô Additional details:")
-            st.code(gsb_text, language=None)
+        # ── Browser Blocking ──────────────────────────────────────────────────
+        st.markdown("##### 🛡️ Browser Blocking")
 
-        # ── Cột phải: CDN + Registrar ─────────────────────────────────────────
-        with col_right:
-            # CDN
-            if has_cdn:
-                cdn_names = (["Cloudflare"] if cf else []) + [n.title() for n in cdn_detected]
-                st.markdown(f"**2️⃣ CDN: {', '.join(cdn_names)}**")
-                if cf:
-                    info_cf = pt.CDN_ABUSE_CONTACTS["cloudflare"]
-                    cf_text = pt.generate_cloudflare_report_text(domain, cfg)
-                    st.link_button(
-                        "↗ Mở form Cloudflare Abuse",
-                        info_cf["report_url"],
-                        use_container_width=True,
-                        type="primary",
-                    )
-                    st.caption(f"_{info_cf['note']}. Dán nội dung bên dưới vào form._")
-                    st.code(cf_text, language=None)
-                for name in cdn_detected:
-                    info = pt.CDN_ABUSE_CONTACTS.get(name)
-                    if info:
-                        st.link_button(f"🔗 {name.title()} Abuse", info["report_url"], use_container_width=True)
+        # Dropdowns nhỏ gọn cùng hàng
+        dc1, dc2, _sp = st.columns([3, 4, 5])
+        threat = dc1.selectbox("", list(_L3_OPTIONS), key=f"threat_{idx}",
+                               label_visibility="collapsed")
+        categories = _L3_OPTIONS[threat]
+        default_cat = "Other Phishing" if threat == "Social Engineering" else "None"
+        category = dc2.selectbox("", categories, index=categories.index(default_cat),
+                                 key=f"cat_{idx}", label_visibility="collapsed")
+
+        # Nút action — không dùng use_container_width để trông nhỏ hơn
+        bc1, bc2, bc3, bc4, _bsp = st.columns([2, 2, 2, 2, 4])
+        if bc1.button("🤖 GSB", key=f"gsb_{idx}", type="primary",
+                      help="Google Safe Browsing — tự điền form bằng Playwright"):
+            res = pt.open_gsb_form_playwright(original_url, gsb_text,
+                                              threat_type=threat, threat_category=category,
+                                              dark_mode=dark_mode)
+            st.success("✅ Đã mở Chrome và tự điền GSB.") if "error" not in res else st.error(res["error"])
+
+        if bc2.button("🤖 SmartScreen", key=f"ms_{idx}", type="primary",
+                      help="Microsoft SmartScreen — tự điền form"):
+            res = pt.open_microsoft_form_playwright(original_url, dark_mode=dark_mode)
+            st.success("✅ Đã mở SmartScreen.") if "error" not in res else st.error(res["error"])
+
+        if bc3.button("📡 Netcraft", key=f"nc_{idx}", type="primary",
+                      help="Gửi thẳng qua Netcraft API"):
+            nc_email = cfg.get("contact_email", "")
+            if not nc_email:
+                st.error("Chưa có contact_email trong config.ini")
             else:
-                st.caption("_(Không phát hiện CDN/proxy)_")
-
-            # Registrar
-            if registrar:
-                st.markdown(f"**3️⃣ Registrar: {registrar}**")
-                if webform_url_r:
-                    st.link_button(
-                        f"↗ Mở form {registrar}",
-                        webform_url_r,
-                        use_container_width=True,
-                        type="primary",
-                    )
-                    # Hiện draft inline để copy vào form — không cần chạy run_check()
-                    draft_text = pt.get_webform_draft_text(
-                        domain=domain,
-                        registrar=registrar,
-                        webform_url=webform_url_r,
-                        cfg=cfg,
-                        target_url=original_url,
-                    )
-                    st.caption("Nội dung điền vào form — mở form ở tab khác rồi copy từng field:")
-                    st.code(draft_text, language=None)
-                elif registrar_email:
-                    st.markdown(f"Abuse email: `{registrar_email}`")
+                with st.spinner("Đang gửi..."):
+                    res = pt.report_netcraft_api(original_url, gsb_text, nc_email)
+                if res.get("success"):
+                    st.success(f"✅ Netcraft HTTP {res.get('status_code')}")
                 else:
-                    st.caption("Tra abuse contact tại [lookup.icann.org](https://lookup.icann.org/)")
+                    st.error(f"❌ {res.get('error')}")
+
+        bc4.link_button("↗ PhishTank", "https://www.phishtank.com/add_web_phish.php",
+                        help="Mở PhishTank thủ công")
+
+        st.caption("Nội dung dán vào ô Additional details:")
+        st.code(gsb_text, language=None)
+
+        # ── CDN / Registrar / Registry (chỉ khi có webform) ──────────────────
+        sections = []
+        if has_cdn: sections.append("cdn")
+        if webform_url_r: sections.append("reg")
+        if show_registry: sections.append("tld")
+
+        if sections:
+            st.divider()
+            cols = st.columns(len(sections))
+            col_map = {k: cols[i] for i, k in enumerate(sections)}
+
+            if "cdn" in col_map:
+                with col_map["cdn"]:
+                    cdn_names = (["Cloudflare"] if cf else []) + [n.title() for n in cdn_detected]
+                    st.markdown(f"##### ☁️ CDN")
+                    st.caption(", ".join(cdn_names))
+                    if cf:
+                        info_cf = pt.CDN_ABUSE_CONTACTS["cloudflare"]
+                        cf_text = pt.generate_cloudflare_report_text(domain, cfg)
+                        st.link_button("↗ Cloudflare Abuse", info_cf["report_url"],
+                                       type="primary")
+                        st.code(cf_text, language=None)
+                    for name in cdn_detected:
+                        info = pt.CDN_ABUSE_CONTACTS.get(name)
+                        if info:
+                            st.link_button(f"↗ {name.title()} Abuse", info["report_url"])
+
+            if "reg" in col_map:
+                with col_map["reg"]:
+                    st.markdown(f"##### 📋 Registrar")
+                    st.caption(registrar)
+                    st.link_button(f"↗ Form {registrar[:18]}", webform_url_r, type="primary")
+                    draft_text = pt.get_webform_draft_text(
+                        domain=domain, registrar=registrar, webform_url=webform_url_r,
+                        cfg=cfg, target_url=original_url, urlscan=result.get("urlscan"),
+                    )
+                    st.code(draft_text, language=None)
+
+            if "tld" in col_map:
+                with col_map["tld"]:
+                    reg_name = registry_info.get("registry", "Registry")
+                    st.markdown(f"##### 🌐 TLD Registry")
+                    st.caption(reg_name)
+                    if registry_info.get("note"):
+                        st.caption(f"ℹ️ {registry_info['note']}")
+                    st.link_button(f"↗ Form {reg_name[:18]}", registry_info["report_webform"],
+                                   type="primary")
 
 
 # ── Page layout ────────────────────────────────────────────────────────────────
@@ -244,14 +238,40 @@ if go:
         cfg = pt.load_config()
         results = []
         prog = st.progress(0, text=f"Đang kiểm tra 0/{len(domains)}...")
+
+        # Submit URLScan song song cho tất cả domain ngay từ đầu
+        urlscan_futures = {}
+        urlscan_api_key = cfg.get("urlscan_api_key") or ""
+        if urlscan_api_key:
+            executor = ThreadPoolExecutor(max_workers=min(len(domains), 5))
+            for t in domains:
+                raw = t.strip()
+                domain_only = pt.normalize_domain(raw).lower().rstrip(".")
+                fut = executor.submit(pt.urlscan_submit_and_wait, domain_only, urlscan_api_key)
+                urlscan_futures[t] = fut
+
         for i, t in enumerate(domains):
             prog.progress((i) / len(domains), text=f"Đang kiểm tra {i + 1}/{len(domains)}: {t}")
             r = pt.run_cdn_check(t)
-            # Lưu URL gốc (có path) để hiển thị/copy
             raw = t.strip()
             r["_original_url"] = raw if "://" in raw else f"https://{pt.normalize_domain(raw)}"
             results.append(r)
+        prog.progress(1.0, text=f"✅ Hoàn tất {len(domains)} domain. Đang chờ URLScan...")
+
+        # Thu kết quả URLScan (đã chạy song song trong khi check CDN)
+        if urlscan_futures:
+            for i, (t, fut) in enumerate(urlscan_futures.items()):
+                prog.progress(1.0, text=f"⏳ Chờ URLScan {i + 1}/{len(urlscan_futures)}: {t}")
+                try:
+                    us = fut.result(timeout=90)
+                except Exception as e:
+                    us = {"error": str(e)}
+                # Gắn vào result tương ứng theo index (domains và results cùng thứ tự)
+                idx = domains.index(t)
+                results[idx]["urlscan"] = us
+            executor.shutdown(wait=False)
         prog.progress(1.0, text=f"✅ Hoàn tất {len(domains)} domain.")
+
         st.session_state["qr_results"] = results
         st.session_state["qr_cfg"] = cfg
 
@@ -270,7 +290,7 @@ if "qr_results" in st.session_state:
             st.caption(
                 "nic.top nhận báo cáo hàng loạt qua file Excel (tối đa 200 domain/lần). "
                 "Tải file rồi gửi kèm ảnh chụp màn hình đến **abuse@nic.top** hoặc qua form "
-                "[en.nic.top/about/anti_phishing.html](https://en.nic.top/about/anti_phishing.html)."
+                "[nic.top/cn/Complaintsnew.asp](https://www.nic.top/cn/Complaintsnew.asp)."
             )
             brand_name = cfg.get("brand_name", "")
             if st.button("📊 Tạo file Excel nic.top", key="btn_nictop_excel", type="primary"):

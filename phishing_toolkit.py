@@ -364,45 +364,71 @@ CCTLD_REGISTRY_CONTACTS = {
     "us": {
         "registry": "GoDaddy Registry",
         "abuse_email": None,
-        "report_webform": "https://domainabuse.registry.godaddy.com",
+        "report_webform": "https://domainabuse.registry.godaddy/s/",
         "note": "Áp dụng cho cả .co .biz .vip .club (GoDaddy Registry).",
     },
     "co": {
         "registry": "GoDaddy Registry",
         "abuse_email": None,
-        "report_webform": "https://domainabuse.registry.godaddy.com",
+        "report_webform": "https://domainabuse.registry.godaddy/s/",
         "note": None,
     },
     "biz": {
         "registry": "GoDaddy Registry",
         "abuse_email": None,
-        "report_webform": "https://domainabuse.registry.godaddy.com",
+        "report_webform": "https://domainabuse.registry.godaddy/s/",
         "note": None,
     },
     "vip": {
         "registry": "GoDaddy Registry",
         "abuse_email": None,
-        "report_webform": "https://domainabuse.registry.godaddy.com",
+        "report_webform": "https://domainabuse.registry.godaddy/s/",
         "note": None,
     },
     "club": {
         "registry": "GoDaddy Registry",
         "abuse_email": None,
-        "report_webform": "https://domainabuse.registry.godaddy.com",
+        "report_webform": "https://domainabuse.registry.godaddy/s/",
         "note": None,
     },
     "top": {
         "registry": "Jiangsu Bangning Science & Technology (nic.top)",
         "abuse_email": "abuse@nic.top",
-        "report_webform": "https://nic.top/cn/Complaintsnew.asp",
+        "report_webform": "https://www.nic.top/cn/Complaintsnew.asp",
         "note": "Có xử lý thật — nhận email + web form. Gửi kèm file Excel (tối đa 200 domain/lần) và ảnh chụp màn hình có thanh địa chỉ.",
     },
     "xyz": {
         "registry": "XYZ.COM LLC",
-        "abuse_email": None,
+        "abuse_email": "xyz_abuse@gen.xyz",
         "report_webform": "https://gen.xyz/account/abuse.php",
-        "note": None,
+        "note": "Áp dụng cho 35+ TLD của XYZ (monster, quest, baby, cars, beauty, hair, homes, game, lol, mom, pics, hosting, audio, diet, ceo...). Nhiều domain cùng lúc gửi email xyz_abuse@gen.xyz. Hiệu quả — thường hôm sau bị khoá.",
     },
+    # XYZ TLD family — cùng registry/abuse contact với .xyz
+    "monster":  {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "quest":    {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "baby":     {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "cars":     {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "beauty":   {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "hair":     {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "homes":    {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "game":     {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "lol":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "mom":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "pics":     {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "hosting":  {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "audio":    {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "diet":     {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    "ceo":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/abuse.php", "note": None},
+    # CentralNic 2-level domains — không phải ccTLD thật, dùng report_webform chung
+    "uk.com":   {"registry": "CentralNic", "abuse_email": None, "report_webform": "https://www.centralnicregistry.com/contact", "note": "Chọn mục Report Abuse. Không phải ccTLD UK — đừng gửi Nominet."},
+    "jpn.com":  {"registry": "CentralNic", "abuse_email": None, "report_webform": "https://www.centralnicregistry.com/contact", "note": "Không phải ccTLD JP — đừng gửi JPRS."},
+    "jp.net":   {"registry": "CentralNic", "abuse_email": None, "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
+    "in.net":   {"registry": "CentralNic", "abuse_email": None, "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
+    "com.co":   {"registry": "CentralNic", "abuse_email": None, "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
+    # Alias 2 cấp — trỏ về registry của TLD cha
+    "co.in":    {"registry": "NIXI", "abuse_email": "abuse@registry.in", "note": "Hay không hồi âm — nên đi đường nhà đăng ký."},
+    "co.jp":    {"registry": "JPRS", "abuse_email": "abuse@jprs.jp", "note": "Đòi hỏi xác thực nhãn hiệu đăng ký tại Nhật Bản."},
+    "com.mx":   {"registry": "NIC Mexico", "abuse_email": "legal@nic.mx", "note": None},
     "shop": {
         "registry": "GMO Registry / Shopify",
         "abuse_email": None,
@@ -530,10 +556,12 @@ def get_webform_draft_text(
     cfg: dict,
     target_url: str = "",
     vt_link: str = "",
+    urlscan: dict | None = None,
 ) -> str:
     """Sinh nội dung tố cáo để paste thẳng vào ô Description/Comments của web form.
 
     Không có field labels hay hướng dẫn — chỉ là đoạn text evidence sạch.
+    urlscan: dict trả về từ urlscan_submit_and_wait() — nếu có thì thêm screenshot/result URL.
     """
     from datetime import datetime, timezone as _tz
     brand = cfg.get("brand_name") or "[BRAND]"
@@ -543,15 +571,23 @@ def get_webform_draft_text(
     t_url = target_url or f"https://{domain}"
     vt = vt_link or f"https://www.virustotal.com/gui/domain/{domain}"
 
-    return (
+    evidence_lines = (
         f"The domain {domain} is being actively used for phishing — impersonating {brand} "
         f"to deceive users into submitting credentials and personal data.\n\n"
         f"Phishing URL: {t_url}\n"
         f"VirusTotal:   {vt}\n"
+    )
+    if urlscan and not urlscan.get("error"):
+        if urlscan.get("result_url"):
+            evidence_lines += f"URLScan:      {urlscan['result_url']}\n"
+        if urlscan.get("screenshot_url"):
+            evidence_lines += f"Screenshot:   {urlscan['screenshot_url']}\n"
+    evidence_lines += (
         f"Detected:     {detected_date}\n\n"
         f"We request immediate suspension (serverHold / clientHold) of this domain.\n\n"
         f"Reported by: {contact_name} <{contact_email}>"
     )
+    return evidence_lines
 
 
 def lookup_registrar_abuse_email(registrar: str) -> str | None:
@@ -904,21 +940,21 @@ _SKIP_REGISTRY_ESCALATION_TLDS = {"org", "info", "biz", "name", "pro", "mobi"}
 
 
 def lookup_registry_contact(domain: str) -> dict:
-    """Tra abuse contact của Registry quản lý TLD của domain (03_Technical_Guide.md mục 5) —
-    dùng để leo thang khi report registrar-level không đủ hoặc bị phớt lờ, đặc biệt với ccTLD lạ
-    mà UDRP của ICANN không áp dụng hoàn toàn.
+    """Tra abuse contact của Registry quản lý TLD của domain.
 
-    Tra CCTLD_REGISTRY_CONTACTS (bảng tĩnh, không cần mạng) TRƯỚC — chỉ fallback sang
-    iana_referral() (cần mạng, WHOIS output không có cấu trúc cố định) khi TLD không có trong
-    bảng VÀ không nằm trong _SKIP_REGISTRY_ESCALATION_TLDS (gTLD cổ điển, xem comment trên).
-    Khác get_whois_info(): output từ iana_referral trả về nguyên văn (`raw`) không parse thành
-    field có cấu trúc, vì format WHOIS mỗi registry quốc gia rất khác nhau — không đáng để viết
-    parser riêng cho từng cái, con người tự đọc abuse email trong đó.
-
-    Giới hạn: chỉ xử lý TLD 1 nhãn (vd .jp) — KHÔNG xử lý ccTLD 2 nhãn kiểu .co.uk/.com.cn,
-    domain dạng đó rơi vào nhánh "not_found" thay vì cố xử lý sai.
+    Tra CCTLD_REGISTRY_CONTACTS (bảng tĩnh, không cần mạng) TRƯỚC — thử 2-level suffix
+    (.co.jp, .uk.com, .com.mx...) trước, rồi mới thử 1-level (.jp, .com...).
+    Fallback sang iana_referral() (cần mạng) khi không tìm thấy trong bảng.
     """
-    tld = domain.lower().rsplit(".", 1)[-1]
+    d = domain.lower()
+    # Thử 2-level suffix trước (vd "co.jp", "uk.com")
+    parts = d.rsplit(".", 2)
+    if len(parts) >= 3:
+        two_level = f"{parts[-2]}.{parts[-1]}"
+        if two_level in CCTLD_REGISTRY_CONTACTS:
+            return {"source": "static_table", **CCTLD_REGISTRY_CONTACTS[two_level]}
+    # Thử 1-level TLD
+    tld = d.rsplit(".", 1)[-1]
     if tld in CCTLD_REGISTRY_CONTACTS:
         return {"source": "static_table", **CCTLD_REGISTRY_CONTACTS[tld]}
     if tld in _SKIP_REGISTRY_ESCALATION_TLDS:
@@ -2895,7 +2931,28 @@ def run_cdn_check(target: str) -> dict:
         cdn_detected = detect_cdn(domain)
     except Exception:
         cdn_detected = []
-    return {"domain": domain, "cloudflare": cf, "cdn_detected": cdn_detected, "registrar": registrar}
+    # Tra TLD registry từ bảng tĩnh (không cần mạng, không fallback IANA)
+    registry_contact = _static_registry_lookup(domain)
+    return {
+        "domain": domain,
+        "cloudflare": cf,
+        "cdn_detected": cdn_detected,
+        "registrar": registrar,
+        "registry_contact": registry_contact,
+    }
+
+
+def _static_registry_lookup(domain: str) -> dict | None:
+    """Tra CCTLD_REGISTRY_CONTACTS từ bảng tĩnh, thử 2-level trước rồi 1-level.
+    Trả về dict entry hoặc None nếu không tìm thấy."""
+    d = domain.lower()
+    parts = d.rsplit(".", 2)
+    if len(parts) >= 3:
+        two_level = f"{parts[-2]}.{parts[-1]}"
+        if two_level in CCTLD_REGISTRY_CONTACTS:
+            return CCTLD_REGISTRY_CONTACTS[two_level]
+    tld = d.rsplit(".", 1)[-1]
+    return CCTLD_REGISTRY_CONTACTS.get(tld)
 
 
 def playwright_available() -> bool:
@@ -3018,6 +3075,7 @@ class _ReportBrowserManager:
             page.get_by_role("option", name=threat_category, exact=True).click()
 
     @staticmethod
+    @staticmethod
     def _fill_microsoft(page, target_url: str):
         page.goto(
             "https://www.microsoft.com/en-us/wdsi/support/report-unsafe-site-guest",
@@ -3058,6 +3116,46 @@ def open_gsb_form_playwright(target: str, description: str,
         threat_type=threat_type,
         threat_category=threat_category,
     )
+
+
+def report_netcraft_api(target_url: str, reason: str, email: str) -> dict:
+    """Gửi report URL lên Netcraft qua API v3 (không cần API key, không cần Playwright).
+
+    https://report.netcraft.com/api/v3#tag/Report/operation/report_urls
+    Trả về dict gồm payload gửi đi, status_code, response body để kiểm tra.
+    """
+    if requests is None:
+        return {"error": "requests not installed"}
+    payload = {
+        "email": email,
+        "urls": [{
+            "url": target_url,
+            "country": "VN",
+            "reason": reason,
+        }],
+    }
+    try:
+        r = requests.post(
+            "https://report.netcraft.com/api/nightly/report/urls",
+            json=payload,
+            timeout=15,
+        )
+        try:
+            resp_body = r.json()
+        except Exception:
+            resp_body = r.text
+        result = {
+            "payload": payload,
+            "status_code": r.status_code,
+            "response": resp_body,
+        }
+        if r.status_code in (200, 201, 204):
+            result["success"] = True
+        else:
+            result["error"] = f"HTTP {r.status_code}"
+        return result
+    except Exception as exc:
+        return {"payload": payload, "error": str(exc)}
 
 
 def open_microsoft_form_playwright(target: str, dark_mode: bool = True) -> dict:
