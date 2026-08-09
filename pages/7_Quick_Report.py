@@ -100,7 +100,7 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                                  key=f"cat_{idx}", label_visibility="collapsed")
 
         # Nút action — không dùng use_container_width để trông nhỏ hơn
-        bc1, bc2, bc3, bc4, _bsp = st.columns([2, 2, 2, 2, 4])
+        bc1, bc2, bc3, _bsp = st.columns([2, 2, 2, 6])
         if bc1.button("🤖 GSB", key=f"gsb_{idx}", type="primary",
                       help="Google Safe Browsing — tự điền form bằng Playwright"):
             res = pt.open_gsb_form_playwright(original_url, gsb_text,
@@ -125,9 +125,6 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                     st.success(f"✅ Netcraft HTTP {res.get('status_code')}")
                 else:
                     st.error(f"❌ {res.get('error')}")
-
-        bc4.link_button("↗ PhishTank", "https://www.phishtank.com/add_web_phish.php",
-                        help="Mở PhishTank thủ công")
 
         st.caption("Nội dung dán vào ô Additional details:")
         st.code(gsb_text, language=None)

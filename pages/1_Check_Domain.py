@@ -359,15 +359,14 @@ if "check_domain_result" in st.session_state:
         st.divider()
 
     # 1. Browser blocking ─────────────────────────────────────────────────────
-    with st.expander("1️⃣  Browser Blocking — GSB / SmartScreen / Netcraft / PhishTank / OpenPhish", expanded=True):
+    with st.expander("1️⃣  Browser Blocking — GSB / SmartScreen / Netcraft / OpenPhish", expanded=True):
         st.caption("Gửi song song, không thay thế báo registrar. Có hiệu quả nhanh: trình duyệt hiện màn cảnh báo đỏ trước khi người dùng vào site.")
         gsb_text = pt.generate_safebrowsing_report_text(domain, cfg)
         domain_url = result.get("target_url") or f"https://{domain}"
-        bl1, bl2, bl3, bl4 = st.columns(4)
+        bl1, bl2, bl3 = st.columns(3)
         bl1.link_button("🔗 Google Safe Browsing", f"https://safebrowsing.google.com/safebrowsing/report_phish/?url={domain_url}", use_container_width=True)
         bl2.link_button("🔗 Microsoft SmartScreen", "https://www.microsoft.com/wdsi/support/report-unsafe-site-guest/", use_container_width=True)
         bl3.link_button("🔗 Netcraft", f"https://report.netcraft.com/report?url={domain_url}", use_container_width=True)
-        bl4.link_button("🔗 PhishTank", "https://www.phishtank.com/add_web_phish.php", use_container_width=True)
         st.caption("Nội dung mô tả mẫu (paste vào ô Additional details của GSB):")
         st.code(gsb_text, language=None)
         # OpenPhish — nhận report qua email submit@openphish.com
