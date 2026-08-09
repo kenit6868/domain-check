@@ -1,8 +1,8 @@
 """streamlit_app.py — Trang chủ / dashboard của Phishing Takedown Toolkit.
 
 Chạy: streamlit run streamlit_app.py
-Mở thêm các trang trong sidebar (thư mục pages/): Check Domain, Related
-Domains, Brand Scan, Case Log, Report Drafts.
+Dùng st.navigation() để kiểm soát sidebar — comment/bỏ comment từng st.Page
+bên dưới để ẩn/hiện page tương ứng.
 
 Toàn bộ logic nghiệp vụ (SSL/WHOIS/VirusTotal/Safe Browsing/log/email draft)
 nằm trong phishing_toolkit.py — trang này chỉ gọi thẳng phishing_toolkit.run_check()
@@ -19,53 +19,17 @@ import streamlit as st
 
 import phishing_toolkit as pt
 
-st.set_page_config(page_title="Phishing Takedown Toolkit", page_icon="🎣", layout="wide")
-
-st.title("🎣 Phishing Takedown Toolkit")
-st.caption("Công cụ nội bộ phát hiện, xác minh và báo cáo domain phishing giả mạo thương hiệu")
-
-st.info(
-    "Kết quả tool chỉ là tín hiệu kỹ thuật, chưa phải xác nhận phishing. "
-    "Luôn xác minh thủ công (screenshot, nội dung trang) trước khi báo cáo — "
-    "xem `plan_phishing_takedown.md` bước 2."
-)
-
-st.subheader("Kiểm tra nhanh 1 domain")
-with st.form("quick_check_form"):
-    target = st.text_input("Domain hoặc URL", placeholder="vd: chass.ru.com")
-    submit_vt = st.checkbox(
-        "Submit lên VirusTotal nếu chưa có dữ liệu",
-        help="Tương ứng cờ --submit của CLI.",
-    )
-    go = st.form_submit_button("Kiểm tra", type="primary")
-
-if go:
-    if not target.strip():
-        st.warning("Nhập domain trước khi kiểm tra.")
-        st.stop()
-    cfg = pt.load_config()
-    with st.spinner(f"Đang kiểm tra {target}..."):
-        result = pt.run_check(target, submit_vt, cfg)
-
-    st.success(f"Đã kiểm tra xong: {result['domain']} — xem đầy đủ ở trang **Check Domain**.")
-
-    rep = result["reputation"]
-    rep_fn = {"flagged": st.error, "suspicious": st.warning, "unknown": st.info}.get(rep["verdict"], st.success)
-    rep_fn(f"**Uy tín:** {rep['label']}" + ("".join(f"\n- {r}" for r in rep["reasons"])))
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("VT Malicious", result["virustotal"].get("malicious", "N/A"))
-    col2.metric("VT Suspicious", result["virustotal"].get("suspicious", "N/A"))
-    col3.metric("Cloudflare", "Có" if result["cloudflare"] else "Không")
-    col4.metric("Registrar", result["whois"].get("registrar") or "N/A")
-    if result["log_error"]:
-        st.error(f"Lỗi khi ghi log: {result['log_error']}")
-
-st.divider()
-
-st.subheader("10 case gần nhất")
-if os.path.exists(pt.LOG_PATH):
-    df = pd.read_csv(pt.LOG_PATH, on_bad_lines="skip")
-    st.dataframe(df.tail(10).iloc[::-1], width="stretch")
-else:
-    st.info("Chưa có case nào được ghi log. Chạy kiểm tra 1 domain ở trên hoặc vào trang Check Domain.")
+# ── Khai báo sidebar navigation ───────────────────────────────────────────────
+# Comment bất kỳ st.Page nào để ẩn page đó khỏi sidebar.
+_pages = st.navigation([
+    st.Page("streamlit_home.py",              title="Trang chủ",        icon="🏠"),
+    st.Page("pages/1_Check_Domain.py",        title="Check Domain",     icon="🔍"),
+    st.Page("pages/7_Quick_Report.py",        title="Quick Report",     icon="⚡"),
+#     st.Page("pages/2_Related_Domains.py",     title="Related Domains",  icon="🕸️"),
+#     st.Page("pages/3_Brand_Scan.py",          title="Brand Scan",       icon="🛡️"),
+    st.Page("pages/6_Domain_Worker.py",       title="Domain Worker",    icon="⚙️"),
+    st.Page("pages/8_Check_Link_Status.py",   title="Check Link Status",icon="🔗"),
+    st.Page("pages/4_Case_Log.py",            title="Case Log",         icon="📋"),
+    st.Page("pages/5_Report_Drafts.py",       title="Report Drafts",    icon="✉️"),
+])
+_pages.run()
