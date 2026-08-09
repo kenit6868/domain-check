@@ -63,6 +63,7 @@ hidden_imports = [
 
 app_datas = [
     ("streamlit_app.py",    "."),
+    ("streamlit_home.py",   "."),
     ("phishing_toolkit.py", "."),
     ("email_send_ui.py",    "."),
     ("domain_worker.py",    "."),
