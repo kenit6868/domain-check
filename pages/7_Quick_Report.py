@@ -9,13 +9,46 @@ từng domain theo thứ tự với 2 form cạnh nhau:
 import os
 import re
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
 
 import phishing_toolkit as pt
+
+_MAX_CHECK_WORKERS = 1
+
+
+@st.cache_resource
+def _check_executor() -> ThreadPoolExecutor:
+    """Executor sống qua các lần rerun để UI không bị khóa lúc check domain."""
+    return ThreadPoolExecutor(max_workers=_MAX_CHECK_WORKERS, thread_name_prefix="quick-report")
+
+
+@st.cache_resource
+def _quick_report_cache() -> dict:
+    """Cache sống qua F5, cho tới khi bấm Xóa cache hoặc restart server."""
+    return {}
+
+
+def _netcraft_status_text(result: dict) -> str:
+    """Tạo trạng thái ngắn gọn từ response API, không lộ payload/email."""
+    status_code = result.get("status_code")
+    response = result.get("response")
+    detail = ""
+    if isinstance(response, dict):
+        detail = str(
+            response.get("detail")
+            or response.get("message")
+            or response.get("error")
+            or ""
+        )
+    elif response:
+        detail = str(response).strip()
+    detail = " ".join(detail.split())[:300]
+    prefix = f"HTTP {status_code}" if status_code is not None else str(result.get("error", "Lỗi không xác định"))
+    return f"{prefix}: {detail}" if detail else prefix
 
 
 # ── Mapping l1 → l3 cho Google Safe Browsing ──────────────────────────────────
@@ -117,14 +150,19 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                       help="Gửi thẳng qua Netcraft API"):
             nc_email = cfg.get("contact_email", "")
             if not nc_email:
-                st.error("Chưa có contact_email trong config.ini")
+                res = {"error": "Chưa có contact_email trong config.ini"}
             else:
                 with st.spinner("Đang gửi..."):
                     res = pt.report_netcraft_api(original_url, gsb_text, nc_email)
-                if res.get("success"):
-                    st.success(f"✅ Netcraft HTTP {res.get('status_code')}")
-                else:
-                    st.error(f"❌ {res.get('error')}")
+            _quick_report_cache().setdefault("netcraft_status", {})[original_url] = res
+
+        netcraft_status = _quick_report_cache().get("netcraft_status", {}).get(original_url)
+        if netcraft_status:
+            status_text = _netcraft_status_text(netcraft_status)
+            if netcraft_status.get("success"):
+                st.success(f"✅ Netcraft {status_text}")
+            else:
+                st.error(f"❌ Netcraft {status_text}")
 
         st.caption("Nội dung dán vào ô Additional details:")
         st.code(gsb_text, language=None)
@@ -178,6 +216,28 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                                    type="primary")
 
 
+def _run_one_cdn_check(target: str, urlscan_api_key: str = "") -> dict:
+    """Check one target and always return a renderable result."""
+    raw = target.strip()
+    domain = pt.normalize_domain(raw)
+    try:
+        result = pt.run_cdn_check(raw)
+    except Exception as exc:
+        result = {
+            "domain": domain,
+            "cloudflare": False,
+            "cdn_detected": [],
+            "_error": str(exc),
+        }
+    result["_original_url"] = raw if "://" in raw else f"https://{domain}"
+    if urlscan_api_key:
+        try:
+            result["urlscan"] = pt.urlscan_submit_and_wait(domain, urlscan_api_key)
+        except Exception as exc:
+            result["urlscan"] = {"error": str(exc)}
+    return result
+
+
 # ── Page layout ────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Quick Report", page_icon="⚡", layout="wide")
 st.title("⚡ Quick Report")
@@ -225,6 +285,23 @@ with st.form("quick_report_form"):
     )
     go = st.form_submit_button("⚡ Kiểm tra tất cả", type="primary")
 
+cache = _quick_report_cache()
+cache_col, cache_info_col = st.columns([1, 4])
+if cache_col.button(
+    "🗑️ Xóa cache",
+    use_container_width=True,
+    disabled=not cache,
+):
+    for future in cache.get("pending", {}).values():
+        future.cancel()
+    cache.clear()
+    st.success("Đã xóa cache Quick Report. Bạn có thể dán danh sách mới.")
+if cache:
+    cache_info_col.caption(
+        f"💾 Đang giữ {sum(r is not None for r in cache.get('results', []))}/"
+        f"{len(cache.get('results', []))} kết quả. Cache vẫn còn sau khi F5."
+    )
+
 if go:
     domains, invalid = _parse_domains(raw_domains)
     if invalid:
@@ -233,55 +310,75 @@ if go:
         st.warning("Chưa có domain hợp lệ để kiểm tra.")
     else:
         cfg = pt.load_config()
-        results = []
-        prog = st.progress(0, text=f"Đang kiểm tra 0/{len(domains)}...")
-
-        # Submit URLScan song song cho tất cả domain ngay từ đầu
-        urlscan_futures = {}
+        signature = tuple(t.strip() for t in domains)
+        total = len(domains)
+        executor = _check_executor()
+        for future in cache.get("pending", {}).values():
+            future.cancel()
+        cache.clear()
+        cache.update({
+            "signature": signature,
+            "targets": domains,
+            "results": [None] * total,
+            "cfg": cfg,
+        })
         urlscan_api_key = cfg.get("urlscan_api_key") or ""
-        if urlscan_api_key:
-            executor = ThreadPoolExecutor(max_workers=min(len(domains), 5))
-            for t in domains:
-                raw = t.strip()
-                domain_only = pt.normalize_domain(raw).lower().rstrip(".")
-                fut = executor.submit(pt.urlscan_submit_and_wait, domain_only, urlscan_api_key)
-                urlscan_futures[t] = fut
+        cache["pending"] = {
+            i: executor.submit(_run_one_cdn_check, target, urlscan_api_key)
+            for i, target in enumerate(domains)
+        }
+        st.info(
+            f"Đã bắt đầu kiểm tra mới {total} domain ở nền. "
+            "Các nút report dùng được ngay khi từng kết quả xuất hiện."
+        )
 
-        for i, t in enumerate(domains):
-            prog.progress((i) / len(domains), text=f"Đang kiểm tra {i + 1}/{len(domains)}: {t}")
-            r = pt.run_cdn_check(t)
-            raw = t.strip()
-            r["_original_url"] = raw if "://" in raw else f"https://{pt.normalize_domain(raw)}"
-            results.append(r)
-        prog.progress(1.0, text=f"✅ Hoàn tất {len(domains)} domain. Đang chờ URLScan...")
 
-        # Thu kết quả URLScan (đã chạy song song trong khi check CDN)
-        if urlscan_futures:
-            for i, (t, fut) in enumerate(urlscan_futures.items()):
-                prog.progress(1.0, text=f"⏳ Chờ URLScan {i + 1}/{len(urlscan_futures)}: {t}")
-                try:
-                    us = fut.result(timeout=90)
-                except Exception as e:
-                    us = {"error": str(e)}
-                # Gắn vào result tương ứng theo index (domains và results cùng thứ tự)
-                idx = domains.index(t)
-                results[idx]["urlscan"] = us
-            executor.shutdown(wait=False)
-        prog.progress(1.0, text=f"✅ Hoàn tất {len(domains)} domain.")
+@st.fragment(run_every=1)
+def _render_results() -> None:
+    cache = _quick_report_cache()
+    if "results" not in cache:
+        return
 
-        st.session_state["qr_results"] = results
-        st.session_state["qr_cfg"] = cfg
-
-if "qr_results" in st.session_state:
-    results: list = st.session_state["qr_results"]
-    cfg: dict = st.session_state["qr_cfg"]
+    results: list = cache["results"]
+    cfg: dict = cache["cfg"]
     total = len(results)
+    pending: dict = cache.get("pending", {})
+
+    for index, future in list(pending.items()):
+        if future.done():
+            try:
+                results[index] = future.result()
+            except Exception as exc:
+                target = cache.get("targets", [""] * total)[index]
+                results[index] = {
+                    "domain": pt.normalize_domain(target),
+                    "cloudflare": False,
+                    "cdn_detected": [],
+                    "_original_url": target,
+                    "_error": str(exc),
+                }
+            del pending[index]
+
+    completed = sum(result is not None for result in results)
+    if total:
+        label = (
+            f"✅ Hoàn tất {total}/{total} domain."
+            if not pending
+            else f"Đã xong {completed}/{total} domain — đang kiểm tra nền..."
+        )
+        st.progress(completed / total, text=label)
+
+    if not pending:
+        cache.pop("pending", None)
 
     st.divider()
-    st.markdown(f"### Kết quả — {total} domain")
+    st.markdown(f"### Kết quả trực tiếp — {completed}/{total} domain")
 
     # T8: nic.top Excel export cho domain .top
-    top_domains = [r["domain"] for r in results if r["domain"].lower().endswith(".top")]
+    top_domains = [
+        r["domain"] for r in results
+        if r is not None and r["domain"].lower().endswith(".top")
+    ]
     if top_domains:
         with st.expander(f"📊 Export Excel cho nic.top ({len(top_domains)} domain .top)", expanded=True):
             st.caption(
@@ -307,4 +404,13 @@ if "qr_results" in st.session_state:
                     st.error(f"Lỗi tạo Excel: {e}")
 
     for i, result in enumerate(results):
+        if result is None:
+            target = cache.get("targets", [""] * total)[i]
+            st.info(f"⏳ #{i + 1}/{total} Đang chờ: {target}")
+            continue
+        if result.get("_error"):
+            st.warning(f"Không thể check đầy đủ {result['domain']}: {result['_error']}")
         _render_domain_block(i, total, result, cfg, dark_mode=st.session_state.get("chrome_dark_mode", True))
+
+
+_render_results()
