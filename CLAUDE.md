@@ -406,6 +406,8 @@ CLI (không phải thay thế hoàn toàn — cả 2 luôn đồng bộ vì dùn
   cột đó; nút "Lưu thay đổi" ghi đè lại toàn bộ dataframe (không lọc) bằng
   `df.to_csv(pt.LOG_PATH, index=False)`. Việc lọc/sửa chỉ nằm ở tầng UI — không thêm hàm mới nào vào
   `phishing_toolkit.py` cho việc này, vì `case_log.csv` là dữ liệu làm việc, không phải logic.
+  **T7**: Thêm tab "⏰ Cần follow-up (>7 ngày)" — đọc `sent_log.csv`, lọc email gửi thành công >7 ngày
+  mà chưa có `ticket_ref`, dedup theo domain+to, hiện bảng để nhắc gửi follow-up.
 - **`pages/5_Report_Drafts.py`**: liệt kê file `*.txt` trong `pt.REPORTS_DIR`, hiển thị nội dung file
   được chọn bằng `st.code` (có sẵn nút copy-to-clipboard khi hover — không cần thêm dependency
   clipboard nào) cộng với 1 `st.download_button`. Bên dưới: gọi
@@ -413,6 +415,12 @@ CLI (không phải thay thế hoàn toàn — cả 2 luôn đồng bộ vì dùn
   (phần "UI dùng chung") để biết chi tiết gate xác nhận checkbox bắt buộc trước khi nút gửi hết
   disabled. Trang này KHÔNG còn tự viết logic gửi email inline nữa (đã refactor sang
   `email_send_ui.py` để dùng chung với `1_Check_Domain.py`).
+- **`pages/7_Quick_Report.py`**: check nhanh nhiều domain (chỉ CDN/WHOIS, không gọi VT/GSB API).
+  Mỗi domain render trong `st.container(border=True)` với 2 cột — cột trái: **3 nút browser blocking**
+  (Google Safe Browsing Playwright, Microsoft SmartScreen Playwright, **Netcraft link**); cột phải: CDN.
+  **T8**: Khi có domain `.top` trong list, tự động hiện panel "📊 Export Excel cho nic.top" — gọi
+  `pt.export_nictop_excel()` sinh `.xlsx` theo format chuẩn nic.top (max 200 domain), cung cấp
+  `st.download_button`. Yêu cầu `openpyxl` (thêm vào requirements.txt nếu chưa có).
 - **`pages/1_Check_Domain.py`**: mỗi draft trong khối "Email báo cáo đã tạo sẵn" (`st.expander`)
   giờ có thêm `email_send_ui.render_send_email_ui(path, cfg, key_prefix="check")` ngay bên dưới
   nội dung draft — gửi được ngay tại chỗ sau khi check xong, không cần qua trang Report Drafts
@@ -465,3 +473,81 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
 (thêm/chỉnh phần liên quan ở trên) để phiên Claude tiếp theo hiểu được trạng thái hiện tại của dự án
 chỉ bằng cách đọc file này, không cần đọc lại toàn bộ source. Giữ phần cập nhật ngắn gọn — mô tả cái
 gì đã đổi và vì sao nó quan trọng về mặt kiến trúc, không phải diff từng dòng.
+
+## Cập nhật chất lượng email draft (T1-T8, từ phân tích 2.357 reports thực tế → 0.2% thành công)
+
+Toàn bộ thay đổi dưới đây được thực hiện sau khi phân tích 35 ngày gửi report thực tế và phát hiện
+nhiều vấn đề nghiêm trọng với logic sinh email. **Nguồn gốc**: nic.top là registrar DUY NHẤT xử lý
+thật; APWG/withheldforprivacy/domain-contact.org gây lãng phí 100%; GoDaddy/Dynadot/Tucows... chỉ
+nhận web form.
+
+### T1 — Blacklist địa chỉ sai (`phishing_toolkit.py`)
+- **`WHOIS_PRIVACY_DOMAINS`** (mới, đặt sau `REGISTRAR_ABUSE_EMAILS`): set các domain của WHOIS privacy
+  service (withheldforprivacy.com, domainsbyproxy.com, domain-contact.org...). Trong
+  `generate_email_drafts()`, email từ WHOIS có domain thuộc set này bị lọc bỏ, fallback về bảng
+  tĩnh. Lý do: đây là các dịch vụ ẩn WHOIS, KHÔNG phải abuse handler — gửi tới họ = không bao giờ
+  nhận phản hồi.
+- **`withheldforprivacy`/`domainsbyproxy`** đã bị xóa khỏi `REGISTRAR_ABUSE_EMAILS`.
+- **APWG** (`generate_apwg_draft`) bị comment khỏi `run_check()` pipeline (gửi 743 emails → 0 kết
+  quả). Hàm vẫn còn để gọi thủ công nếu muốn.
+
+### T2 — Cập nhật `CCTLD_REGISTRY_CONTACTS` (`phishing_toolkit.py`)
+- Thêm 20+ TLD mới: `.buzz`, `.site`, `.online`, `.store`, `.pw`, `.shop`, `.live`, `.ltd`, `.ninja`,
+  `.pro`, `.vc`, `.cc`, `.de`, `.fr`, `.nl`, `.au`, `.ca`, `.br`, `.info`, `.vn`...
+- `.top` được cập nhật với `report_webform` (en.nic.top) và note hướng dẫn đính kèm Excel.
+- Thêm field `report_webform` vào entry — `generate_registry_draft()` kiểm tra: nếu có
+  `report_webform` VÀ không có `abuse_email` → sinh file hướng dẫn web form thay vì email.
+
+### T3 — `WEB_FORM_REGISTRARS` (`phishing_toolkit.py`)
+- Dict mới: GoDaddy, Dynadot, Tucows/OpenSRS, NameSilo, Porkbun, Key-Systems, Instra, Alibaba/Aliyun,
+  DNSPod, West263, Verisign, Network Solutions, Web.com.
+- `generate_email_drafts()`: nếu registrar khớp key trong dict này → sinh file hướng dẫn web form
+  thay vì email (có URL form cụ thể). File vẫn có `parse_draft_email()`-compatible header nhưng `to`
+  = None nên UI sẽ không cho gửi email — đúng ý muốn.
+
+### T4 — Mở rộng `CDN_ABUSE_CONTACTS` (`phishing_toolkit.py`)
+- Thêm: Vercel, Netlify, GitHub Pages, DigitalOcean, Hetzner, OVH, Azure (MSRC), AWS (Trust & Safety),
+  GCP (Google), Firebase.
+
+### T5 — Sửa format email draft (`phishing_toolkit.py`)
+- Xóa tất cả "URGENT:" khỏi `_SUBJECT_REGISTRAR`, `_SUBJECT_CA`, hosting/registry subjects.
+- `generate_email_drafts()` nhận thêm `target_url=None` — URL đầy đủ (có path) thay vì chỉ domain.
+- Evidence section: thêm `Phishing URL: <url>` nổi bật đầu tiên, thêm dòng bắt buộc
+  `Screenshots: [ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]`.
+- Thêm `serverHold / clientHold` vào request cuối email registrar.
+- `run_check()` truyền `target_url=target_url` vào `generate_email_drafts()`.
+
+### T6 — Netcraft (`pages/7_Quick_Report.py`)
+- Thêm nút "↗ Netcraft" (link `https://report.netcraft.com/report?url=<url>`) cạnh GSB và SmartScreen.
+- Header đổi thành "1️⃣ Browser Blocking: GSB / SmartScreen / Netcraft".
+
+### T7 — Ticket tracking (`email_send_ui.py`, `pages/4_Case_Log.py`)
+- `email_send_ui.render_send_email_ui()`: sau khi gửi thành công (n_ok > 0), hiện ô nhập
+  "Ticket/Case#" và nút "Lưu ticket" — gọi `pt.log_sent()` với key `ticket_ref`. `log_sent()` đã
+  handle dynamic schema nên không cần sửa schema.
+- `pages/4_Case_Log.py`: thêm tab "⏰ Cần follow-up (>7 ngày)" — đọc `sent_log.csv`, lọc dòng
+  thành công, loại bỏ domain đã có `ticket_ref`, loại dòng `[ticket-update]`, lọc >7 ngày, dedup
+  domain+to, hiện bảng cảnh báo.
+
+### T8 — nic.top Excel export (`phishing_toolkit.py`, `pages/7_Quick_Report.py`)
+- **`export_nictop_excel(domains, brand_name, output_path) -> str`** (mới): sinh `.xlsx` với header
+  màu xanh, 5 cột (Domain/Phishing URL/Description/Brand/Date), max 200 domain. Dùng `openpyxl`
+  (thêm vào requirements.txt nếu chưa có). Ghi vào `reports/nictop_report_YYYYMMDD_HHMMSS.xlsx`.
+- `pages/7_Quick_Report.py`: tự phát hiện domain `.top` trong kết quả, hiện panel export với
+  `st.download_button`.
+
+### RDAP abuse email lookup (sau T8)
+- **`_load_rdap_bootstrap() -> dict`**: load file bootstrap IANA (`data.iana.org/rdap/dns.json`) để
+  map TLD → RDAP server URL. Cache in-process, chỉ fetch 1 lần. Bắt exception toàn bộ.
+- **`get_rdap_abuse_email(domain) -> dict`** (mới): tra abuse email của registrar qua RDAP (JSON,
+  ICANN standard) — đây chính xác là cơ chế mà lookup.icann.org dùng. Không cần hardcode server,
+  tự tìm qua bootstrap. Parse entity role "registrar" → sub-entity role "abuse" → `vcardArray` email.
+  Trả `{"registrar": ..., "abuse_email": ...}` hoặc `{"error": ...}`, không raise.
+  Verified: `havacilikveuzay.blog` → `{registrar: Namecheap, abuse_email: abuse@namecheap.com}`,
+  `google.com` → `{registrar: MarkMonitor Inc., abuse_email: abusecomplaints@markmonitor.com}`.
+- **Thứ tự ưu tiên abuse email trong `generate_email_drafts()`**: WHOIS (filtered) → **RDAP** → static
+  table. RDAP nằm giữa vì: đáng tin hơn static table, nhưng WHOIS email đã filter vẫn ưu tiên (vì
+  WHOIS đôi khi có abuse email tốt hơn RDAP khi registrar cấu hình RDAP không đầy đủ).
+- `fallback_note` trong draft được cập nhật hiển thị nguồn: `[rdap]` hoặc `[static_table]`.
+- `run_check()` cũng dùng `get_rdap_abuse_email()` để tính `registrar_abuse_email_source` cho UI.
+

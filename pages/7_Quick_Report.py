@@ -53,26 +53,41 @@ def _parse_domains(raw: str) -> tuple[list[str], list[str]]:
 
 
 def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mode: bool = True) -> None:
-    """Render khối kết quả + 2 form cho 1 domain."""
+    """Render khối kết quả + form cho 1 domain."""
     domain = result["domain"]
     cf = result["cloudflare"]
     cdn_detected = result.get("cdn_detected", [])
     has_cdn = cf or bool(cdn_detected)
+    registrar = result.get("registrar") or ""
+
+    # Phát hiện registrar web-form
+    r_lower = registrar.lower()
+    webform_url_r = next(
+        (url for key, url in pt.WEB_FORM_REGISTRARS.items() if key in r_lower),
+        None
+    ) if registrar else None
+    # Registrar email-only (có trong REGISTRAR_ABUSE_EMAILS hoặc có thể tra RDAP sau)
+    registrar_email = pt.lookup_registrar_abuse_email(registrar) if registrar else None
 
     with st.container(border=True):
         original_url = result.get("_original_url", f"https://{domain}")
-        h_num, h_url, h2, h3 = st.columns([1, 4, 1, 1])
+        h_num, h_url, h2, h3, h4 = st.columns([1, 4, 1, 1, 2])
         h_num.markdown(f"### #{idx + 1}/{total}")
         h_url.code(original_url, language=None)
         h2.metric("Cloudflare", "✓ Có" if cf else "Không")
         h3.metric("CDN khác", ", ".join(n.title() for n in cdn_detected) if cdn_detected else "—")
+        if webform_url_r:
+            h4.metric("Registrar", f"⚠️ {registrar[:20]}…" if len(registrar) > 20 else f"⚠️ {registrar}")
+        elif registrar:
+            h4.metric("Registrar", registrar[:24] if len(registrar) > 24 else registrar)
+        else:
+            h4.metric("Registrar", "—")
 
-
-        col_gsb, col_cf = st.columns(2)
+        col_gsb, col_right = st.columns(2)
 
         # ── Cột trái: Google Safe Browsing + Microsoft SmartScreen ────────────
         with col_gsb:
-            st.markdown("**1️⃣ Google Safe Browsing / Microsoft SmartScreen**")
+            st.markdown("**1️⃣ Browser Blocking: GSB / SmartScreen / Netcraft / PhishTank**")
             gsb_text = pt.generate_safebrowsing_report_text(domain, cfg)
             c1, c2 = st.columns(2)
             threat = c1.selectbox(
@@ -88,7 +103,7 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                 index=categories.index(default_category),
                 key=f"cat_{idx}",
             )
-            b1, b2 = st.columns(2)
+            b1, b2, b3 = st.columns(3)
             if b1.button("🤖 Google Safe Browsing", key=f"gsb_{idx}", use_container_width=True, type="primary"):
                 res = pt.open_gsb_form_playwright(
                     original_url,
@@ -107,12 +122,24 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                     st.error(res["error"])
                 else:
                     st.success("✅ Đã mở tab và tự điền URL đầy đủ + Vietnamese.")
+            if b3.link_button(
+                "↗ Netcraft",
+                f"https://report.netcraft.com/report?url={original_url}",
+                use_container_width=True,
+            ):
+                pass
+            st.link_button(
+                "↗ PhishTank",
+                "https://www.phishtank.com/add_web_phish.php",
+                use_container_width=True,
+            )
 
             st.caption("Nội dung dán vào ô Additional details:")
             st.code(gsb_text, language=None)
 
-        # ── Cột phải: Cloudflare / CDN ────────────────────────────────────────
-        with col_cf:
+        # ── Cột phải: CDN + Registrar ─────────────────────────────────────────
+        with col_right:
+            # CDN
             if has_cdn:
                 cdn_names = (["Cloudflare"] if cf else []) + [n.title() for n in cdn_detected]
                 st.markdown(f"**2️⃣ CDN: {', '.join(cdn_names)}**")
@@ -132,8 +159,32 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                     if info:
                         st.link_button(f"🔗 {name.title()} Abuse", info["report_url"], use_container_width=True)
             else:
-                st.markdown("**2️⃣ Cloudflare / CDN**")
-                st.caption("Không phát hiện Cloudflare hay CDN.")
+                st.caption("_(Không phát hiện CDN/proxy)_")
+
+            # Registrar
+            if registrar:
+                st.markdown(f"**3️⃣ Registrar: {registrar}**")
+                if webform_url_r:
+                    st.link_button(
+                        f"↗ Mở form {registrar}",
+                        webform_url_r,
+                        use_container_width=True,
+                        type="primary",
+                    )
+                    # Hiện draft inline để copy vào form — không cần chạy run_check()
+                    draft_text = pt.get_webform_draft_text(
+                        domain=domain,
+                        registrar=registrar,
+                        webform_url=webform_url_r,
+                        cfg=cfg,
+                        target_url=original_url,
+                    )
+                    st.caption("Nội dung điền vào form — mở form ở tab khác rồi copy từng field:")
+                    st.code(draft_text, language=None)
+                elif registrar_email:
+                    st.markdown(f"Abuse email: `{registrar_email}`")
+                else:
+                    st.caption("Tra abuse contact tại [lookup.icann.org](https://lookup.icann.org/)")
 
 
 # ── Page layout ────────────────────────────────────────────────────────────────
@@ -211,5 +262,32 @@ if "qr_results" in st.session_state:
 
     st.divider()
     st.markdown(f"### Kết quả — {total} domain")
+
+    # T8: nic.top Excel export cho domain .top
+    top_domains = [r["domain"] for r in results if r["domain"].lower().endswith(".top")]
+    if top_domains:
+        with st.expander(f"📊 Export Excel cho nic.top ({len(top_domains)} domain .top)", expanded=True):
+            st.caption(
+                "nic.top nhận báo cáo hàng loạt qua file Excel (tối đa 200 domain/lần). "
+                "Tải file rồi gửi kèm ảnh chụp màn hình đến **abuse@nic.top** hoặc qua form "
+                "[en.nic.top/about/anti_phishing.html](https://en.nic.top/about/anti_phishing.html)."
+            )
+            brand_name = cfg.get("brand_name", "")
+            if st.button("📊 Tạo file Excel nic.top", key="btn_nictop_excel", type="primary"):
+                try:
+                    path = pt.export_nictop_excel(top_domains, brand_name=brand_name)
+                    with open(path, "rb") as f:
+                        st.download_button(
+                            label=f"⬇️ Tải xuống ({len(top_domains)} domain)",
+                            data=f,
+                            file_name=os.path.basename(path),
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        )
+                    st.success(f"✅ Đã tạo {os.path.basename(path)}")
+                except RuntimeError as e:
+                    st.error(str(e))
+                except Exception as e:
+                    st.error(f"Lỗi tạo Excel: {e}")
+
     for i, result in enumerate(results):
         _render_domain_block(i, total, result, cfg, dark_mode=st.session_state.get("chrome_dark_mode", True))

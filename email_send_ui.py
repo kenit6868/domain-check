@@ -224,7 +224,7 @@ def render_send_email_ui(path: str, cfg: dict, key_prefix: str):
 
         st.session_state[result_key] = results
 
-    # Hiển thị kết quả
+    # Hiển thị kết quả + nhập ticket number
     if result_key in st.session_state:
         results = st.session_state[result_key]
         n_ok = sum(1 for r in results if r["success"])
@@ -248,3 +248,29 @@ def render_send_email_ui(path: str, cfg: dict, key_prefix: str):
             for r in results
         ])
         st.table(df)
+
+        # T7: Nhập ticket/case number sau khi gửi thành công
+        if n_ok > 0:
+            ticket_key = f"{key_prefix}_ticket_{filename}"
+            ticket_val = st.text_input(
+                "📝 Ticket / Case # (nếu registrar phản hồi, nhập số ticket tại đây để theo dõi)",
+                key=ticket_key,
+                placeholder="vd. TKT-2024-001 hoặc REG-CASE-12345",
+            )
+            if ticket_val and st.button("Lưu ticket", key=f"{ticket_key}_save"):
+                try:
+                    ts = datetime.now(timezone.utc).isoformat()
+                    pt.log_sent({
+                        "timestamp": ts,
+                        "domain": pt.domain_from_draft_filename(filename),
+                        "draft_file": filename,
+                        "to": parsed["to"],
+                        "subject": parsed["subject"],
+                        "account": "[ticket-update]",
+                        "success": True,
+                        "error": "",
+                        "ticket_ref": ticket_val,
+                    })
+                    st.success(f"✅ Đã lưu ticket #{ticket_val}")
+                except Exception as e:
+                    st.warning(f"Lưu ticket lỗi: {e}")

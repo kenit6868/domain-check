@@ -8,3 +8,4 @@ streamlit
 pandas
 PySocks
 playwright
+openpyxl
