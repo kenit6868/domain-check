@@ -106,30 +106,66 @@ SENT_LOG_PATH = os.path.join(BASE_DIR, "sent_log.csv")
 CA_ABUSE_NOTES = {
     "google trust services": {
         "report_url": None,
+        "abuse_email": None,
         "note": (
-            "Google Trust Services KHÔNG xử lý report abuse vì lý do phishing/"
-            "malware/nội dung, chỉ xử lý mis-issuance. Bỏ qua bước report CA này."
+            "Google Trust Services KHÔNG xử lý report phishing/malware — chỉ xử lý mis-issuance. "
+            "Bỏ qua bước này."
         ),
+        "can_revoke": False,
     },
     "let's encrypt": {
-        "report_url": "https://letsencrypt.org/repository/ hoặc abuse@letsencrypt.org",
-        "note": "Chủ yếu xử lý mis-issuance, không đảm bảo revoke vì nội dung phishing.",
+        "report_url": "https://letsencrypt.org/abuse/",
+        "abuse_email": "abuse@letsencrypt.org",
+        "note": "Let's Encrypt xử lý report qua form hoặc email. Xác suất revoke cert thấp hơn các CA thương mại.",
+        "can_revoke": True,
     },
     "sectigo": {
         "report_url": "https://sectigo.com/support-resources/report-abuse-ssl-certificate",
-        "note": "Có xử lý report phishing/malware.",
+        "abuse_email": None,
+        "note": "Sectigo có xử lý report phishing/malware — dùng web form.",
+        "can_revoke": True,
+    },
+    "comodo": {
+        "report_url": "https://sectigo.com/support-resources/report-abuse-ssl-certificate",
+        "abuse_email": None,
+        "note": "Comodo CA (nay là Sectigo) — dùng form Sectigo.",
+        "can_revoke": True,
     },
     "digicert": {
-        "report_url": "https://www.digicert.com/reporting-abuse/ hoặc abuse@digicert.com",
-        "note": "Có xử lý report phishing/malware.",
+        "report_url": "https://www.digicert.com/reporting-abuse/",
+        "abuse_email": "abuse@digicert.com",
+        "note": "DigiCert có xử lý report phishing/malware — form hoặc email.",
+        "can_revoke": True,
     },
     "zerossl": {
-        "report_url": "abuse@zerossl.com",
-        "note": "Có nhận report abuse qua email.",
+        "report_url": None,
+        "abuse_email": "abuse@zerossl.com",
+        "note": "ZeroSSL nhận report qua email.",
+        "can_revoke": True,
     },
     "godaddy": {
-        "report_url": "abuse@godaddy.com hoặc https://sg.godaddy.com/help/report-abuse-24108",
-        "note": "Có xử lý report phishing/malware.",
+        "report_url": "https://sg.godaddy.com/help/report-abuse-24108",
+        "abuse_email": "abuse@godaddy.com",
+        "note": "GoDaddy (vai trò CA) có xử lý report phishing — form hoặc email.",
+        "can_revoke": True,
+    },
+    "globalsign": {
+        "report_url": "https://www.globalsign.com/en/company/legal/abuse/",
+        "abuse_email": "abuse@globalsign.com",
+        "note": "GlobalSign có xử lý report phishing/malware.",
+        "can_revoke": True,
+    },
+    "entrust": {
+        "report_url": None,
+        "abuse_email": "certissues@entrust.com",
+        "note": "Entrust nhận report qua email.",
+        "can_revoke": True,
+    },
+    "actalis": {
+        "report_url": None,
+        "abuse_email": "tls-abuse@actalis.it",
+        "note": "Actalis nhận report qua email.",
+        "can_revoke": True,
     },
 }
 
@@ -138,28 +174,89 @@ CA_ABUSE_NOTES = {
 # không vẫn do is_cloudflare() (tra nameserver) đảm nhiệm, không phải detect_cdn().
 CDN_ABUSE_CONTACTS = {
     "cloudflare": {
-        "report_url": "https://abuse.cloudflare.com/phishing",
+        "report_url": "https://abuse.cloudflare.com",
         "note": "Chọn mục \"Phishing & Malware\" khi report — có thể chặn proxy hoặc gắn interstitial cảnh báo.",
     },
     "fastly": {
-        "report_url": "https://www.fastly.com/abuse hoặc abuse@fastly.com",
-        "note": "Report qua form hoặc gửi email abuse trực tiếp.",
+        "report_url": "https://www.fastly.com/abuse",
+        "note": "Report qua form web.",
     },
     "akamai": {
-        "report_url": "abuse@akamai.com hoặc https://www.akamai.com/legal/compliance/report-abuse",
-        "note": "Report qua email hoặc form compliance.",
+        "report_url": "https://www.akamai.com/legal/compliance/report-abuse",
+        "note": "Report qua form compliance.",
     },
     "cloudfront": {
-        "report_url": "https://aws.amazon.com/premiumsupport/knowledge-center/report-cloudfront-abuse/ hoặc abuse@amazonaws.com",
-        "note": "CDN của AWS — report qua knowledge center hoặc email abuse chung của AWS.",
+        "report_url": "https://support.aws.amazon.com/#/contacts/report-abuse",
+        "note": "CDN của AWS — dùng form Trust & Safety của AWS.",
     },
     "stormwall": {
         "report_url": "abuse@stormwall.pro",
         "note": "Cũng có thể report qua live chat trên trang chủ Stormwall.",
     },
     "ddos-guard": {
-        "report_url": "abuse@ddos-guard.net hoặc https://ddos-guard.net/en/abuse",
+        "report_url": "https://ddos-guard.net/en/abuse",
         "note": "Anti-DDoS proxy — thường ẩn IP gốc, kết hợp quét subdomain (origin_ip_scan) để tìm IP thật.",
+    },
+    # Hosting platform / cloud — phishing thường host trực tiếp trên đây
+    "vercel": {
+        "report_url": "https://vercel.com/abuse",
+        "note": "Vercel hosting — điền web form.",
+    },
+    "netlify": {
+        "report_url": "fraud@netlify.com",
+        "note": "Netlify hosting — chỉ nhận qua email fraud@netlify.com.",
+    },
+    "github-pages": {
+        "report_url": "https://support.github.com/contact/report-abuse",
+        "note": "GitHub Pages — report qua form support.",
+    },
+    "digitalocean": {
+        "report_url": "https://www.digitalocean.com/company/contact/abuse",
+        "note": "DigitalOcean VPS/Droplet.",
+    },
+    "hetzner": {
+        "report_url": "https://abuse.hetzner.com",
+        "note": "Hetzner Cloud/dedicated.",
+    },
+    "ovh": {
+        "report_url": "https://www.ovhcloud.com/en/abuse",
+        "note": "OVH/OVHcloud — có form riêng.",
+    },
+    "azure": {
+        "report_url": "https://msrc.microsoft.com/report/abuse",
+        "note": "Microsoft Azure — report qua MSRC.",
+    },
+    "amazonaws": {
+        "report_url": "https://support.aws.amazon.com/#/contacts/report-abuse",
+        "note": "AWS — EC2/S3/CloudFront/ELB. Form Trust & Safety.",
+    },
+    "gcp": {
+        "report_url": "https://support.google.com/code/contact/cloud_platform_report",
+        "note": "Google Cloud Platform (GCP) — report qua form.",
+    },
+    "firebase": {
+        "report_url": "https://support.google.com/legal/troubleshooter/1114905",
+        "note": "Firebase Hosting (Google) — dùng form Legal Troubleshooter.",
+    },
+    "google-cloud": {
+        "report_url": "https://support.google.com/code/contact/cloud_platform_report",
+        "note": "Google Cloud Platform (App Engine, GCS...) — report qua form.",
+    },
+    "cloudflare-pages": {
+        "report_url": "https://abuse.cloudflare.com",
+        "note": "Cloudflare Pages (pages.dev) — dùng form abuse Cloudflare.",
+    },
+    "aws": {
+        "report_url": "https://support.aws.amazon.com/#/contacts/report-abuse",
+        "note": "AWS (S3, EC2, Elastic Beanstalk...) — form Trust & Safety.",
+    },
+    "render": {
+        "report_url": "https://render.com/abuse",
+        "note": "Render.com hosting — report qua form.",
+    },
+    "heroku": {
+        "report_url": "https://www.heroku.com/policy/heroku-trust-and-safety-program",
+        "note": "Heroku (Salesforce) — report qua trang Trust & Safety.",
     },
 }
 
@@ -183,16 +280,17 @@ MAIL_PROVIDER_ABUSE = {
 # Registry quản lý ccTLD — bảng tĩnh tra TRƯỚC (không cần mạng), chỉ TLD 1 nhãn (03_Technical_Guide.md
 # mục 5 bước 3). TLD không có trong bảng này fallback sang iana_referral() (cần mạng).
 CCTLD_REGISTRY_CONTACTS = {
+    # --- ccTLD thật ---
     "cn": {
         "registry": "CNNIC",
         "abuse_email": "supervision@cnnic.cn",
         "note": "Yêu cầu bản dịch nhãn hiệu tiếng Trung/Anh có công chứng.",
     },
-    "in": {"registry": "NIXI", "abuse_email": "abuse@registry.in", "note": None},
+    "in": {"registry": "NIXI", "abuse_email": "abuse@registry.in", "note": "Hay không hồi âm — nên đi đường nhà đăng ký."},
     "io": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": None},
     "jp": {
         "registry": "JPRS",
-        "abuse_email": "info@jprs.jp",
+        "abuse_email": "abuse@jprs.jp",
         "note": "Đòi hỏi xác thực nhãn hiệu đăng ký tại Nhật Bản.",
     },
     "kr": {
@@ -202,19 +300,128 @@ CCTLD_REGISTRY_CONTACTS = {
     },
     "ru": {
         "registry": "Coordination Center for TLD RU",
-        "abuse_email": "abuse@cctld.ru, ru-abuse@cctld.ru",
+        "abuse_email": "abuse@cctld.ru",
         "note": None,
     },
-    "uk": {"registry": "Nominet", "abuse_email": "abuse@nominet.uk", "note": None},
-    "eu": {"registry": "EURid", "abuse_email": "abuse@eurid.eu, legal@eurid.eu", "note": None},
-    "tw": {"registry": "TWNIC", "abuse_email": "abuse@twnic.tw", "note": None},
+    "uk": {
+        "registry": "Nominet",
+        "abuse_email": None,
+        "report_webform": "https://registrars.nominet.uk/abuse-complaints/",
+        "note": "Áp dụng cho cả .co.uk và .org.uk.",
+    },
+    "eu": {"registry": "EURid", "abuse_email": "info@eurid.eu", "note": None},
+    "tw": {
+        "registry": "TWNIC",
+        "abuse_email": None,
+        "report_webform": "https://phishingcheck.tw",
+        "note": "Áp dụng cho cả .com.tw.",
+    },
     "hk": {"registry": "HKIRC", "abuse_email": "abuse@hkirc.hk", "note": None},
-    "us": {"registry": "GoDaddy Registry", "abuse_email": "abuse@about.us", "note": None},
-    "me": {"registry": "doMEn", "abuse_email": "abuse@domain.me", "note": None},
-    "xyz": {"registry": "XYZ.COM LLC", "abuse_email": "abuse@xyz.xyz", "note": None},
-    "top": {"registry": ".top registry", "abuse_email": "abuse@nic.top", "note": None},
-    "club": {"registry": "GoDaddy Registry", "abuse_email": "clubabuse@godaddy.com", "note": None},
-    "co": {"registry": "GoDaddy Registry", "abuse_email": "abuse@godaddy.com", "note": None},
+    "de": {
+        "registry": "DENIC",
+        "abuse_email": None,
+        "report_webform": "https://www.denic.de/en/report-a-concern/",
+        "note": None,
+    },
+    "fr": {"registry": "AFNIC", "abuse_email": "fraude@afnic.fr", "note": None},
+    "nl": {"registry": "SIDN", "abuse_email": "support@sidn.nl", "note": None},
+    "pl": {"registry": "NASK", "abuse_email": "info@dns.pl", "note": None},
+    "it": {"registry": "IIT-CNR", "abuse_email": "info@nic.it", "note": None},
+    "mx": {"registry": "NIC Mexico", "abuse_email": "legal@nic.mx", "note": "Áp dụng cho cả .com.mx"},
+    "au": {"registry": "auDA", "abuse_email": "compliance@auda.org.au", "note": None},
+    "ca": {"registry": "CIRA", "abuse_email": "cira@cira.ca", "note": None},
+    "br": {"registry": "NIC.br", "abuse_email": "abuse@registro.br", "note": None},
+    "vn": {
+        "registry": "VNNIC",
+        "abuse_email": "abuse@vnnic.vn",
+        "note": "Đối với domain .vn phishing, report thêm tới VNCERT (cert@vncert.gov.vn).",
+    },
+    # --- gTLD / nTLD phổ biến trong phishing ---
+    "com": {
+        "registry": "Verisign",
+        "abuse_email": None,
+        "report_webform": "https://verisign.my.site.com/DNSAbuse",
+        "note": "Áp dụng cho cả .net .name .cc",
+    },
+    "net": {
+        "registry": "Verisign",
+        "abuse_email": None,
+        "report_webform": "https://verisign.my.site.com/DNSAbuse",
+        "note": None,
+    },
+    "name": {
+        "registry": "Verisign",
+        "abuse_email": None,
+        "report_webform": "https://verisign.my.site.com/DNSAbuse",
+        "note": None,
+    },
+    "cc": {
+        "registry": "Verisign",
+        "abuse_email": None,
+        "report_webform": "https://verisign.my.site.com/DNSAbuse",
+        "note": None,
+    },
+    "us": {
+        "registry": "GoDaddy Registry",
+        "abuse_email": None,
+        "report_webform": "https://domainabuse.registry.godaddy.com",
+        "note": "Áp dụng cho cả .co .biz .vip .club (GoDaddy Registry).",
+    },
+    "co": {
+        "registry": "GoDaddy Registry",
+        "abuse_email": None,
+        "report_webform": "https://domainabuse.registry.godaddy.com",
+        "note": None,
+    },
+    "biz": {
+        "registry": "GoDaddy Registry",
+        "abuse_email": None,
+        "report_webform": "https://domainabuse.registry.godaddy.com",
+        "note": None,
+    },
+    "vip": {
+        "registry": "GoDaddy Registry",
+        "abuse_email": None,
+        "report_webform": "https://domainabuse.registry.godaddy.com",
+        "note": None,
+    },
+    "club": {
+        "registry": "GoDaddy Registry",
+        "abuse_email": None,
+        "report_webform": "https://domainabuse.registry.godaddy.com",
+        "note": None,
+    },
+    "top": {
+        "registry": "Jiangsu Bangning Science & Technology (nic.top)",
+        "abuse_email": "abuse@nic.top",
+        "report_webform": "https://nic.top/cn/Complaintsnew.asp",
+        "note": "Có xử lý thật — nhận email + web form. Gửi kèm file Excel (tối đa 200 domain/lần) và ảnh chụp màn hình có thanh địa chỉ.",
+    },
+    "xyz": {
+        "registry": "XYZ.COM LLC",
+        "abuse_email": None,
+        "report_webform": "https://gen.xyz/account/abuse.php",
+        "note": None,
+    },
+    "shop": {
+        "registry": "GMO Registry / Shopify",
+        "abuse_email": None,
+        "report_webform": "https://get.shop/abuse",
+        "note": None,
+    },
+    "buzz": {"registry": "DOTSTRATEGY CO.", "abuse_email": "buzzabuse@dotstrategy.biz", "note": None},
+    "site": {"registry": "Radix Registry", "abuse_email": "abuse@radix.support", "note": None},
+    "online": {"registry": "Radix Registry", "abuse_email": "abuse@radix.support", "note": None},
+    "store": {"registry": "Radix Registry", "abuse_email": "abuse@radix.support", "note": None},
+    "pw": {"registry": "Radix Registry", "abuse_email": "abuse@radix.support", "note": "Formerly Palau ccTLD, now managed by Radix."},
+    "live": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": "Web form có trên site họ nhưng không hoạt động — chỉ dùng email."},
+    "ltd": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": None},
+    "ninja": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": None},
+    "pro": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": None},
+    "vc": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": None},
+    "info": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": None},
+    "me": {"registry": "doMEn", "abuse_email": None, "report_webform": None, "note": "Không có kênh registry riêng — báo nhà đăng ký."},
+    "tv": {"registry": "Verisign", "abuse_email": None, "report_webform": None, "note": "Không có kênh registry riêng — báo nhà đăng ký."},
 }
 
 # Bảng tĩnh abuse email của các registrar phổ biến — dùng làm fallback khi WHOIS không trả về email.
@@ -257,19 +464,94 @@ REGISTRAR_ABUSE_EMAILS = {
     "inwx":                "abuse@inwx.com",
     "regtons":             "abuse@regtons.com",
     "publicdomainregistry": "abuse@publicdomainregistry.com",
-    "withheldforprivacy":  "abuse@withheldforprivacy.com",
-    "domainsbyproxy":      "abuse@domainsbyproxy.com",
+    # Các entry dưới đây là WHOIS privacy services, KHÔNG phải abuse handlers thật.
+    # Chỉ giữ để nhận diện, filter sẽ loại bỏ chúng trong generate_email_drafts().
+    # "withheldforprivacy":  "abuse@withheldforprivacy.com",  # WHOIS privacy của Namecheap, không xử lý report
+    # "domainsbyproxy":      "abuse@domainsbyproxy.com",      # WHOIS privacy của GoDaddy, không xử lý report
     "whoisguard":          "compliance@namecheap.com",
     "resellerclub":        "abuse-staff@resellerclub.com",
     "netearth":            "abuse@netearth.net",
     "nicenic":             "abuse@nicenic.net",
-    "west263":             "abuse@west263.com",
+    "west263":             "abuse@hkdns.hk",
+    "hkdns":               "abuse@hkdns.hk",
     "net-chinese":         "abuse@net-chinese.com.tw",
     "hichina":             "DomainAbuse@service.aliyun.com",
     "wix":                 "abuse@wix.com",
     "wordpress":           "abuse@automattic.com",
     "shopify":             "trust@shopify.com",
 }
+
+# Domain của các WHOIS privacy service — email từ các domain này KHÔNG phải abuse contact thật.
+# Khi WHOIS trả về email thuộc 1 domain trong set này, bỏ qua và dùng fallback static table.
+WHOIS_PRIVACY_DOMAINS = {
+    "withheldforprivacy.com",   # Namecheap WHOIS privacy
+    "domainsbyproxy.com",       # GoDaddy WHOIS privacy
+    "domain-contact.org",       # WHOIS relay không xử lý report
+    "privacyprotect.org",       # WHOIS privacy service
+    "whoisguard.com",           # Namecheap WhoisGuard
+    "contactprivacy.com",       # Contact Privacy Inc (Tucows)
+    "anonymize.com",            # anonymize WHOIS
+    "privacydaemon.com",        # Privacy Daemon
+}
+
+# Registrars CHỈ nhận report qua web form, KHÔNG nhận email.
+# Khi registrar khớp 1 key trong dict này, sinh file hướng dẫn web form thay vì email.
+WEB_FORM_REGISTRARS = {
+    "godaddy":              "https://supportcenter.godaddy.com/abusereport/phishing",
+    "dynadot":              "https://www.dynadot.com/report-abuse",
+    "tucows":               "https://www.tucowsdomains.com/report-abuse",
+    "opensrs":              "https://www.tucowsdomains.com/report-abuse",
+    "namesilo":             "https://www.namesilo.com/report_abuse.php",
+    "porkbun":              "https://www.porkbun.com/abuse",
+    "sav.com":              "https://abuse.sav.com",
+    "key-systems":          "https://abuse.cleandns.space",
+    "instra":               "https://abuse.cleandns.space",
+    "cleandns":             "https://abuse.cleandns.space",
+    "gname":                "https://www.gname.com/abuse",
+    "cosmotown":            "https://portal.cosmotown.com/report",
+    "realtime register":    "https://www.mydomainprovider.com/contact_abuse",
+    "publicdomainregistry": "https://www.publicdomainregistry.com/process-for-handling-abuse",
+    "alibaba":              "https://report.alibabacloud.com",
+    "aliyun":               "https://report.alibabacloud.com",
+    "hichina":              "https://report.alibabacloud.com",
+    "dnspod":               "https://intl.cloud.tencent.com/report-platform/dnsabuse",
+    "tencent":              "https://intl.cloud.tencent.com/report-platform/dnsabuse",
+    "west263":              "https://abuse.west.cn/",
+    "verisign":             "https://verisign.my.site.com/DNSAbuse",
+    "network solutions":    "https://www.networksolutions.com/support/aup/",
+    "web.com":              "https://www.web.com/legal/abuse",
+}
+
+
+def get_webform_draft_text(
+    domain: str,
+    registrar: str,
+    webform_url: str,
+    cfg: dict,
+    target_url: str = "",
+    vt_link: str = "",
+) -> str:
+    """Sinh nội dung tố cáo để paste thẳng vào ô Description/Comments của web form.
+
+    Không có field labels hay hướng dẫn — chỉ là đoạn text evidence sạch.
+    """
+    from datetime import datetime, timezone as _tz
+    brand = cfg.get("brand_name") or "[BRAND]"
+    contact_name = cfg.get("contact_name") or "[TÊN BẠN]"
+    contact_email = cfg.get("contact_email") or "[EMAIL BẠN]"
+    detected_date = datetime.now(_tz.utc).strftime("%Y-%m-%d")
+    t_url = target_url or f"https://{domain}"
+    vt = vt_link or f"https://www.virustotal.com/gui/domain/{domain}"
+
+    return (
+        f"The domain {domain} is being actively used for phishing — impersonating {brand} "
+        f"to deceive users into submitting credentials and personal data.\n\n"
+        f"Phishing URL: {t_url}\n"
+        f"VirusTotal:   {vt}\n"
+        f"Detected:     {detected_date}\n\n"
+        f"We request immediate suspension (serverHold / clientHold) of this domain.\n\n"
+        f"Reported by: {contact_name} <{contact_email}>"
+    )
 
 
 def lookup_registrar_abuse_email(registrar: str) -> str | None:
@@ -284,9 +566,113 @@ def lookup_registrar_abuse_email(registrar: str) -> str | None:
     return None
 
 
-# --------------------------------------------------------------------------
-# Config
-# --------------------------------------------------------------------------
+# RDAP bootstrap cache (TLD → RDAP server URL). Load 1 lần per process.
+# RDAP là chuẩn mới của ICANN thay thế WHOIS text — trả về JSON có cấu trúc,
+# có entity role "abuse" rõ ràng, đáng tin cậy hơn python-whois parse text nhiều.
+_rdap_bootstrap_cache: dict = {}
+_rdap_bootstrap_loaded: bool = False
+
+
+def _load_rdap_bootstrap() -> dict:
+    """Load IANA RDAP bootstrap cho DNS TLD (https://data.iana.org/rdap/dns.json).
+    Cache sau lần load đầu — không fetch lại trong cùng 1 process."""
+    global _rdap_bootstrap_cache, _rdap_bootstrap_loaded
+    if _rdap_bootstrap_loaded:
+        return _rdap_bootstrap_cache
+    try:
+        r = requests.get("https://data.iana.org/rdap/dns.json", timeout=8)
+        if r.status_code == 200:
+            data = r.json()
+            mapping = {}
+            for service in data.get("services", []):
+                tlds, servers = service[0], service[1]
+                if servers:
+                    for tld in tlds:
+                        mapping[tld.lower()] = servers[0].rstrip("/")
+            _rdap_bootstrap_cache = mapping
+    except Exception:
+        pass
+    _rdap_bootstrap_loaded = True
+    return _rdap_bootstrap_cache
+
+
+def get_rdap_abuse_email(domain: str) -> dict:
+    """Tra abuse email của registrar qua RDAP (ICANN standard JSON, đáng tin hơn WHOIS text).
+
+    Dùng IANA bootstrap để tìm RDAP server đúng cho TLD của domain — không hardcode,
+    hoạt động cho mọi gTLD/ccTLD có hỗ trợ RDAP. Đây chính xác là cách ICANN Lookup
+    (lookup.icann.org) tra thông tin abuse contact.
+
+    Trả về dict với các key:
+      "registrar"   : tên registrar (str) — nếu parse được
+      "abuse_email" : email abuse (str) — nếu có
+      "error"       : lý do thất bại (str) — nếu không lấy được
+
+    KHÔNG raise exception — lỗi trả về trong key "error".
+    """
+    if requests is None:
+        return {"error": "requests library not available"}
+
+    tld = domain.lower().rsplit(".", 1)[-1]
+    bootstrap = _load_rdap_bootstrap()
+    rdap_base = bootstrap.get(tld)
+    if not rdap_base:
+        return {"error": f"No RDAP server for .{tld} in IANA bootstrap"}
+
+    try:
+        resp = requests.get(
+            f"{rdap_base}/domain/{domain}",
+            timeout=10,
+            headers={"Accept": "application/rdap+json"},
+        )
+        if resp.status_code == 404:
+            return {"error": "Domain not found in RDAP"}
+        if resp.status_code != 200:
+            return {"error": f"RDAP HTTP {resp.status_code}"}
+        data = resp.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+    registrar_name = None
+    abuse_email = None
+
+    def _vcard_field(vcard_array, field_name):
+        """Lấy giá trị 1 field từ vcardArray dạng [['fn',{},'text','Value'],...]."""
+        if len(vcard_array) < 2:
+            return None
+        for prop in vcard_array[1]:
+            try:
+                if prop[0] == field_name:
+                    return prop[3]
+            except (IndexError, TypeError):
+                continue
+        return None
+
+    for entity in data.get("entities", []):
+        if "registrar" not in entity.get("roles", []):
+            continue
+        registrar_name = _vcard_field(entity.get("vcardArray", []), "fn") or registrar_name
+        # Tìm entity con có role "abuse"
+        for sub in entity.get("entities", []):
+            if "abuse" in sub.get("roles", []):
+                email = _vcard_field(sub.get("vcardArray", []), "email")
+                if email:
+                    abuse_email = email
+                    break
+        if registrar_name or abuse_email:
+            break
+
+    result = {}
+    if registrar_name:
+        result["registrar"] = registrar_name
+    if abuse_email:
+        result["abuse_email"] = abuse_email
+    if not result:
+        result["error"] = "No registrar/abuse entity found in RDAP response"
+    return result
+
+
+
 
 def load_config():
     cfg = configparser.ConfigParser()
@@ -510,13 +896,11 @@ def iana_referral(tld: str):
 
 
 
-# whois.iana.org trả về referral cho MỌI TLD nó biết, kể cả gTLD cổ điển như .com/.net (không chỉ
-# ccTLD) — nếu không loại trừ, lookup_registry_contact() sẽ "leo thang Registry" cho cả domain
-# .com/.net bình thường, sinh draft thừa vô nghĩa (gTLD này đã có đầy đủ quy trình UDRP + registrar
-# report ở mục "4. Registrar" rồi). 03_Technical_Guide.md mục 5 chỉ nói về ccTLD ("quy trình UDRP
-# của ICANN không được áp dụng hoàn toàn") — phát hiện lúc test: iana_referral("com") trả về
-# whois.verisign-grs.com bình thường, phải chặn tay các gTLD cổ điển này ở đây.
-_SKIP_REGISTRY_ESCALATION_TLDS = {"com", "net", "org", "info", "biz", "name", "pro", "mobi"}
+# whois.iana.org trả về referral cho MỌI TLD nó biết, kể cả gTLD — nếu không loại trừ,
+# lookup_registry_contact() sẽ "leo thang Registry" cho cả domain .org/.mobi bình thường.
+# .com/.net/.name/.cc đã được thêm vào CCTLD_REGISTRY_CONTACTS với Verisign web form (xem trên)
+# nên không cần trong skip list nữa.
+_SKIP_REGISTRY_ESCALATION_TLDS = {"org", "info", "biz", "name", "pro", "mobi"}
 
 
 def lookup_registry_contact(domain: str) -> dict:
@@ -560,19 +944,74 @@ _CDN_CNAME_SUFFIXES = {
     "akamaiedge.net": "akamai",
     "akamai.net": "akamai",
     "cloudfront.net": "cloudfront",
+    # Vercel CNAME
+    "vercel.app": "vercel",
+    "vercel-dns.com": "vercel",
+    # Netlify CNAME
+    "netlify.app": "netlify",
+    "netlify.com": "netlify",
+    # GitHub Pages
+    "github.io": "github-pages",
+    "github.com": "github-pages",
+    # Firebase / GCP
+    "web.app": "firebase",
+    "firebaseapp.com": "firebase",
+    "appspot.com": "google-cloud",
+    # DigitalOcean
+    "ondigitalocean.app": "digitalocean",
+    "digitaloceanspaces.com": "digitalocean",
+    # Azure
+    "azurewebsites.net": "azure",
+    "azurestaticapps.net": "azure",
+    "cloudapp.azure.com": "azure",
+    # AWS (non-CloudFront)
+    "amazonaws.com": "aws",
+    "elasticbeanstalk.com": "aws",
+    # Render
+    "onrender.com": "render",
+    # Heroku
+    "herokuapp.com": "heroku",
+}
+
+# Hosting platform phishing thường host trực tiếp — detect qua domain suffix (đáng tin nhất)
+_HOSTING_DOMAIN_SUFFIXES = {
+    ".vercel.app": "vercel",
+    ".netlify.app": "netlify",
+    ".github.io": "github-pages",
+    ".pages.dev": "cloudflare-pages",
+    ".web.app": "firebase",
+    ".firebaseapp.com": "firebase",
+    ".onrender.com": "render",
+    ".herokuapp.com": "heroku",
+    ".azurewebsites.net": "azure",
+    ".azurestaticapps.net": "azure",
+    ".ondigitalocean.app": "digitalocean",
+    ".appspot.com": "google-cloud",
+    ".amazonaws.com": "aws",
+    ".s3-website": "aws",
 }
 
 
 def detect_cdn(domain: str) -> list:
-    """Nhận diện CDN đang che domain (KHÔNG gồm Cloudflare — xem is_cloudflare()).
+    """Nhận diện CDN/hosting platform đang che hoặc host domain.
 
-    Kết hợp 2 nguồn tín hiệu: chuỗi CNAME (qua dnspython) và header HTTP response
-    (Server/Via/X-Cache/X-Served-By/X-Amz-Cf-Id). Không raise — lỗi ở từng nguồn tín hiệu
-    (domain không resolve được, không có CNAME, không kết nối HTTP được) chỉ khiến nguồn đó
-    bị bỏ qua, không làm hỏng cả hàm.
+    3 nguồn tín hiệu (theo thứ tự độ tin cậy giảm dần):
+    1. Domain suffix — chắc chắn nhất (vd .vercel.app = luôn là Vercel)
+    2. CNAME chain — qua dnspython
+    3. HTTP response headers — Server/Via/X-Cache/X-Served-By/X-Amz-Cf-Id
+
+    KHÔNG gồm Cloudflare — xem is_cloudflare() (dùng nameserver riêng).
+    Không raise — lỗi ở từng nguồn chỉ khiến nguồn đó bị bỏ qua.
     """
     detected = set()
+    domain_lower = domain.lower()
 
+    # 1. Domain suffix check (ưu tiên cao nhất — không cần mạng)
+    for suffix, name in _HOSTING_DOMAIN_SUFFIXES.items():
+        if domain_lower.endswith(suffix):
+            detected.add(name)
+
+    # 2. CNAME chain
     if dns is not None:
         try:
             answer = dns.resolver.resolve(domain, "CNAME")
@@ -584,6 +1023,7 @@ def detect_cdn(domain: str) -> list:
         except Exception:
             pass
 
+    # 3. HTTP headers
     if requests is not None:
         for scheme in ("http", "https"):
             try:
@@ -594,7 +1034,8 @@ def detect_cdn(domain: str) -> list:
                     str(r.headers.get(h, ""))
                     for h in ("Server", "Via", "X-Cache", "X-Served-By", "X-Amz-Cf-Id")
                 ).lower()
-                if blob.strip():
+                powered_by = str(r.headers.get("X-Powered-By", "")).lower()
+                if blob.strip() or powered_by:
                     if "cloudfront" in blob or r.headers.get("X-Amz-Cf-Id"):
                         detected.add("cloudfront")
                     if "fastly" in blob or "varnish" in blob:
@@ -605,6 +1046,16 @@ def detect_cdn(domain: str) -> list:
                         detected.add("ddos-guard")
                     if "stormwall" in blob:
                         detected.add("stormwall")
+                    if "vercel" in blob or "vercel" in powered_by:
+                        detected.add("vercel")
+                    if "netlify" in blob or "netlify" in powered_by:
+                        detected.add("netlify")
+                    if "github" in blob:
+                        detected.add("github-pages")
+                    if "firebase" in blob or "firebasehosting" in blob:
+                        detected.add("firebase")
+                    if "heroku" in blob:
+                        detected.add("heroku")
             except Exception:
                 continue
 
@@ -1023,37 +1474,74 @@ def urlscan_result(scan_uuid: str, api_key: str = "") -> dict:
         return {"error": str(e)}
 
 
+def urlscan_submit_and_wait(domain: str, api_key: str, timeout: int = 65, poll_interval: int = 5) -> dict:
+    """Submit URLScan và poll tự động đến khi có kết quả (hoặc hết timeout).
+
+    Dùng để chạy song song với pipeline chính trong run_check() — submit ngay từ đầu,
+    poll ở cuối khi các bước VT/GSB/WHOIS đã xong nên phần lớn thời gian 30s đã trôi qua.
+    Trả về dict có status="done" nếu thành công, "pending"/error nếu timeout/lỗi.
+    """
+    import time as _time
+    sub = urlscan_submit(domain, api_key)
+    if "error" in sub or "warning" in sub:
+        return sub
+    scan_id = sub.get("scan_id")
+    if not scan_id:
+        return {"error": "URLScan: no scan_id returned"}
+    deadline = _time.time() + timeout
+    _time.sleep(poll_interval)  # đợi lần đầu trước khi bắt đầu poll
+    while _time.time() < deadline:
+        res = urlscan_result(scan_id, api_key)
+        if res.get("status") == "done":
+            return res
+        if "error" in res:
+            return res
+        _time.sleep(poll_interval)
+    return {"status": "pending", "scan_id": scan_id,
+            "screenshot_url": f"https://urlscan.io/screenshots/{scan_id}.png",
+            "result_url": f"https://urlscan.io/result/{scan_id}/"}
+
+
 def append_urlscan_evidence_to_drafts(drafts: list, urlscan_res: dict) -> list:
     """Append URLScan.io evidence (screenshot link, result URL, verdict) vào cuối tất cả
-    draft files đã sinh — gọi từ UI SAU KHI có kết quả URLScan, không phải trong run_check()
-    (vì URLScan là bước tùy chọn do người dùng chủ động submit, không chạy tự động).
+    draft files đã sinh. Đồng thời thay thế dòng placeholder ảnh chụp màn hình trong
+    draft bằng URL screenshot thật từ URLScan.
 
     Trả về list các draft path đã được cập nhật thành công.
     """
-    if not drafts or urlscan_res.get("status") != "done":
+    if not drafts:
         return []
-
-    verdict = "MALICIOUS" if urlscan_res.get("malicious") else "NOT flagged"
-    score = urlscan_res.get("score", 0)
-    tags = ", ".join(urlscan_res.get("tags") or []) or "—"
-    brands = ", ".join(urlscan_res.get("brands") or []) or "—"
+    # Cho phép chạy kể cả khi status="pending" (timeout) — ta vẫn có screenshot_url từ UUID
     screenshot_url = urlscan_res.get("screenshot_url", "")
     result_url = urlscan_res.get("result_url", "")
-    page_title = urlscan_res.get("page_title") or "—"
-    page_ip = urlscan_res.get("page_ip") or "—"
-    country = urlscan_res.get("page_country") or "—"
 
-    evidence_block = (
-        f"\n\n--- Evidence: URLScan.io Analysis ---\n"
-        f"Verdict   : {verdict} (score: {score})\n"
-        f"Page title: {page_title}\n"
-        f"Page IP   : {page_ip} ({country})\n"
-        f"Tags      : {tags}\n"
-        f"Brands    : {brands}\n"
-        f"Screenshot: {screenshot_url}\n"
-        f"Full report: {result_url}\n"
-        f"--- End of URLScan evidence ---\n"
-    )
+    if urlscan_res.get("status") == "done":
+        verdict = "MALICIOUS" if urlscan_res.get("malicious") else "NOT flagged"
+        score = urlscan_res.get("score", 0)
+        tags = ", ".join(urlscan_res.get("tags") or []) or "—"
+        brands = ", ".join(urlscan_res.get("brands") or []) or "—"
+        page_title = urlscan_res.get("page_title") or "—"
+        page_ip = urlscan_res.get("page_ip") or "—"
+        country = urlscan_res.get("page_country") or "—"
+        evidence_block = (
+            f"\n\n--- Evidence: URLScan.io Analysis ---\n"
+            f"Verdict   : {verdict} (score: {score})\n"
+            f"Page title: {page_title}\n"
+            f"Page IP   : {page_ip} ({country})\n"
+            f"Tags      : {tags}\n"
+            f"Brands    : {brands}\n"
+            f"Screenshot: {screenshot_url}\n"
+            f"Full report: {result_url}\n"
+            f"--- End of URLScan evidence ---\n"
+        )
+    else:
+        # Timeout hoặc pending — chỉ gắn URL, không có verdict
+        evidence_block = (
+            f"\n\n--- Evidence: URLScan.io (kết quả đang xử lý) ---\n"
+            f"Screenshot: {screenshot_url}\n"
+            f"Full report: {result_url}\n"
+            f"--- End of URLScan evidence ---\n"
+        ) if screenshot_url else ""
 
     updated = []
     for path in drafts:
@@ -1062,12 +1550,27 @@ def append_urlscan_evidence_to_drafts(drafts: list, urlscan_res: dict) -> list:
                 continue
             with open(path, encoding="utf-8") as f:
                 content = f.read()
-            # Không append nếu đã có rồi (tránh duplicate khi bấm nhiều lần)
-            if "URLScan.io Analysis" in content:
+            # Không xử lý nếu đã có rồi (tránh duplicate)
+            if "URLScan.io" in content and "urlscan.io/screenshots" in content:
                 updated.append(path)
                 continue
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(evidence_block)
+            # Thay thế placeholder ảnh chụp màn hình bằng link thật nếu có screenshot_url,
+            # đồng thời xóa dòng instruction "(Ảnh chụp phải hiển thị rõ URL ...)" bên dưới
+            if screenshot_url:
+                import re as _re
+                content = content.replace(
+                    "[ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]",
+                    screenshot_url,
+                )
+                # Xóa dòng instruction động bên dưới (dòng này chứa URL trang phishing)
+                content = _re.sub(
+                    r'\(Ảnh chụp phải hiển thị rõ URL ".*?" trên thanh địa chỉ của trình duyệt\)\n?',
+                    "",
+                    content,
+                )
+            new_content = content + evidence_block if evidence_block else content
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(new_content)
             updated.append(path)
         except Exception:
             pass  # file bị khóa hoặc lỗi khác — bỏ qua, không làm crash UI
@@ -1310,11 +1813,11 @@ def _pick(rng: random.Random, options: list) -> str:
 
 # Pool các variant cho từng phần của email — mỗi pool có ít nhất 4 variant.
 _SUBJECT_REGISTRAR = [
-    "Phishing Abuse Report - {domain}",
-    "Urgent: Phishing Domain Suspension Request - {domain}",
+    "Phishing Report - {domain} - Brand Impersonation",
     "Abuse Report: Active Phishing Site - {domain}",
     "Brand Impersonation Complaint - {domain}",
     "Phishing Domain Takedown Request - {domain}",
+    "Formal Phishing Report - {domain}",
 ]
 
 _OPENING_REGISTRAR = [
@@ -1346,9 +1849,9 @@ _CLOSING_REGISTRAR = [
 ]
 
 _SUBJECT_CA = [
-    "URGENT: SSL Certificate Revocation Request - {domain}",
+    "SSL Certificate Revocation Request - {domain} (Phishing)",
     "Certificate Abuse Report: Phishing Domain - {domain}",
-    "Urgent: Fraudulent SSL Certificate in Use - {domain}",
+    "Fraudulent SSL Certificate in Use - {domain}",
     "SSL Certificate Revocation Request for Phishing Site - {domain}",
 ]
 
@@ -1368,33 +1871,102 @@ _DESCRIPTION_CA = [
 
 
 
-def generate_email_drafts(domain, cert, who, vt, cfg):
+def generate_email_drafts(domain, cert, who, vt, cfg, target_url=None):
     os.makedirs(REPORTS_DIR, exist_ok=True)
     written = []
 
     contact_name = cfg.get("contact_name") or ""
     contact_email = cfg.get("contact_email") or ""
+    brand_name = cfg.get("brand_name") or "[TÊN THƯƠNG HIỆU]"
     signature = f"\nRegards,\n{contact_name}\n{contact_email}\n" if contact_name else "\nRegards,\n"
     detected_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     rng = _draft_rng(domain)
 
+    # URL bị phishing — dùng trong evidence section
+    reported_url = target_url or f"https://{domain}"
+
     registrar = who.get("registrar") if isinstance(who, dict) else None
     abuse_emails = who.get("emails") if isinstance(who, dict) else None
+
+    # T1: Lọc WHOIS privacy emails — chúng không xử lý report, gây lãng phí
     if isinstance(abuse_emails, list):
-        abuse_emails = ", ".join(e for e in abuse_emails if e)
+        filtered = [
+            e for e in abuse_emails
+            if e and not any(priv in e.lower() for priv in WHOIS_PRIVACY_DOMAINS)
+        ]
+        abuse_emails = ", ".join(filtered) if filtered else None
+    elif isinstance(abuse_emails, str) and any(priv in abuse_emails.lower() for priv in WHOIS_PRIVACY_DOMAINS):
+        abuse_emails = None
 
-    # Fallback: nếu WHOIS không trả về email, tra bảng tĩnh theo tên registrar
+    # Fallback theo thứ tự ưu tiên: WHOIS emails → RDAP (ICANN standard) → static table
     abuse_email_source = "whois"
-    if not abuse_emails and registrar:
-        fallback = lookup_registrar_abuse_email(registrar)
-        if fallback:
-            abuse_emails = fallback
-            abuse_email_source = "static_table"
+    if not abuse_emails:
+        # Thử RDAP trước static table — RDAP là JSON có cấu trúc, đáng tin hơn
+        rdap_result = get_rdap_abuse_email(domain)
+        if rdap_result.get("abuse_email"):
+            abuse_emails = rdap_result["abuse_email"]
+            abuse_email_source = "rdap"
+            # Nếu WHOIS không trả về registrar nhưng RDAP có → dùng tên từ RDAP
+            if not registrar and rdap_result.get("registrar"):
+                registrar = rdap_result["registrar"]
+        elif registrar:
+            fallback = lookup_registrar_abuse_email(registrar)
+            if fallback:
+                abuse_emails = fallback
+                abuse_email_source = "static_table"
 
+    # T3: Nếu registrar chỉ nhận web form, sinh file hướng dẫn thay vì email
+    webform_url = None
     if registrar:
+        r_lower = registrar.lower()
+        for key, url in WEB_FORM_REGISTRARS.items():
+            if key in r_lower:
+                webform_url = url
+                break
+
+    if registrar and webform_url:
+        path = os.path.join(REPORTS_DIR, f"{domain}_registrar_report.txt")
+        contact_name = cfg.get("contact_name") or "[TÊN BẠN]"
+        contact_email = cfg.get("contact_email") or "[EMAIL BẠN]"
+        urlscan_link = f"https://urlscan.io/search/#page.domain:{domain}"
+        vt_link_str = vt.get("link") or f"https://www.virustotal.com/gui/domain/{domain}"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(f"""=== NỘI DUNG ĐỂ COPY VÀO WEB FORM: {webform_url} ===
+
+--- FIELD: Domain / URL vi phạm ---
+{reported_url}
+
+--- FIELD: Loại vi phạm ---
+Phishing / Brand Impersonation
+
+--- FIELD: Mô tả (Description) ---
+The domain {domain} is actively impersonating {brand_name} to deceive users into submitting sensitive information (login credentials, personal data, payment details).
+
+Evidence:
+- Phishing URL: {reported_url}
+- VirusTotal report: {vt_link_str}
+- URLScan analysis: {urlscan_link}
+- First detected: {detected_date}
+
+We request immediate suspension (serverHold / clientHold) of this domain.
+
+--- FIELD: Thông tin liên hệ ---
+Name: {contact_name}
+Email: {contact_email}
+
+--- FIELD: Bằng chứng đính kèm ---
+[ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]
+(Ảnh chụp phải hiển thị rõ URL "{reported_url}" trên thanh địa chỉ của trình duyệt)
+""")
+        written.append(path)
+
+    elif registrar:
         path = os.path.join(REPORTS_DIR, f"{domain}_registrar_report.txt")
         fallback_note = (
-            "\n[NOTE: Abuse email looked up from static registrar table — WHOIS did not return an email."
+            "\n[NOTE: Abuse email looked up via RDAP (ICANN standard) — WHOIS did not return an email."
+            " RDAP data is generally reliable, but verify before sending.]\n"
+            if abuse_email_source == "rdap" else
+            "\n[NOTE: Abuse email looked up from static registrar table — WHOIS and RDAP did not return an email."
             " Please verify this is correct before sending.]\n"
             if abuse_email_source == "static_table" else ""
         )
@@ -1462,9 +2034,16 @@ Dear {registrar} Abuse Team,
 {extra_context}
 
 Evidence:
-{evidence}
+- Phishing URL  : {reported_url}
+- Domain        : {domain}
+{chr(10).join(f'- {b}' for b in extra_bullets)}
+
+Screenshots: [ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]
+(Ảnh chụp phải hiển thị rõ URL "{reported_url}" trên thanh địa chỉ của trình duyệt)
 
 {request}
+
+We request serverHold / clientHold be placed on this domain to immediately stop the phishing operation.
 
 {closing}
 {signature}""")
@@ -1510,17 +2089,79 @@ Dear {ca_note['ca'].title()} Security / Abuse Team,
 {ca_detection}{(" " + vt_ca_note) if vt_ca_note else ""}
 
 Certificate details:
-- Domain: {domain}
-- Serial Number: {cert.get('serial', 'N/A')}
-- Issued by: {cert.get('issuer', 'N/A')}
-- VirusTotal report: {vt.get('link', 'N/A')}
-- First detected: {detected_date}
+- Phishing URL   : {reported_url}
+- Domain         : {domain}
+- Serial Number  : {cert.get('serial', 'N/A')}
+- Issued by      : {cert.get('issuer', 'N/A')}
+- VirusTotal     : {vt.get('link', 'N/A')}
+- First detected : {detected_date}
+
+Screenshots: [ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]
+(Ảnh chụp phải hiển thị rõ URL "{reported_url}" trên thanh địa chỉ của trình duyệt)
 
 {revoke_text}
 {signature}""")
         written.append(path)
 
     return written
+
+
+def export_nictop_excel(domains: list, brand_name: str = "", output_path: str = None) -> str:
+    """Sinh file Excel theo template nic.top cho báo cáo phishing hàng loạt.
+
+    nic.top nhận file Excel tối đa 200 domain/lần kèm ảnh chụp. Format chuẩn:
+    - Cột A: Domain
+    - Cột B: URL bị phishing
+    - Cột C: Mô tả ngắn
+    - Cột D: Brand bị giả mạo
+    - Cột E: Ngày phát hiện
+
+    Trả về đường dẫn file đã ghi.
+    """
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+    except ImportError:
+        raise RuntimeError(
+            "Cần cài openpyxl: pip install openpyxl"
+        )
+
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    if output_path is None:
+        output_path = os.path.join(REPORTS_DIR, f"nictop_report_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Phishing Domains"
+
+    # Header
+    headers = ["Domain", "Phishing URL", "Description", "Brand Impersonated", "Date Detected"]
+    header_fill = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    # Data
+    detected_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for row, domain in enumerate(domains[:200], 2):  # max 200
+        ws.cell(row=row, column=1, value=domain)
+        ws.cell(row=row, column=2, value=f"https://{domain}")
+        ws.cell(row=row, column=3, value=f"Phishing site impersonating {brand_name or 'brand'} — harvesting user credentials")
+        ws.cell(row=row, column=4, value=brand_name or "[BRAND NAME]")
+        ws.cell(row=row, column=5, value=detected_date)
+
+    # Column widths
+    ws.column_dimensions["A"].width = 35
+    ws.column_dimensions["B"].width = 45
+    ws.column_dimensions["C"].width = 60
+    ws.column_dimensions["D"].width = 20
+    ws.column_dimensions["E"].width = 15
+
+    wb.save(output_path)
+    return output_path
 
 
 def generate_apwg_draft(domain, vt, cfg):
@@ -1587,10 +2228,10 @@ def generate_hosting_draft(domain, ip, ip_whois, cfg):
     asn = ip_whois.get("asn") or "N/A"
 
     subject = _pick(rng, [
-        f"URGENT: Phishing Site Takedown Request - {domain} (IP: {ip})",
+        f"Phishing Site Takedown Request - {domain} (IP: {ip})",
         f"Abuse Report: Active Phishing Site on Your Network - {domain}",
         f"Hosting Abuse Report: Brand Impersonation Phishing - {domain}",
-        f"URGENT: Malicious Phishing Site Hosted on IP {ip} - {domain}",
+        f"Malicious Phishing Site Hosted on IP {ip} - {domain}",
     ])
     opening = _pick(rng, [
         f"We are writing to request the immediate suspension of a phishing website hosted on your infrastructure that is impersonating our brand.",
@@ -1642,6 +2283,12 @@ def generate_registry_draft(domain, registry_info, cfg):
     if registry_info.get("source") == "not_found":
         return None
 
+    # Xử lý trường hợp "không có kênh riêng" (.me, .tv, ...) — có trong bảng nhưng không có email/webform
+    if (registry_info.get("source") == "static_table"
+            and not registry_info.get("abuse_email")
+            and not registry_info.get("report_webform")):
+        return None  # Không sinh draft — guide bảo "báo nhà đăng ký"
+
     contact_name = cfg.get("contact_name") or ""
     contact_email = cfg.get("contact_email") or ""
     signature = f"\nRegards,\n{contact_name}\n{contact_email}\n" if contact_name else "\nRegards,\n"
@@ -1663,11 +2310,44 @@ def generate_registry_draft(domain, registry_info, cfg):
             f"{registry_info.get('raw', '')}\n"
         )
 
+    # T3: Nếu registry chỉ có web form (không có email), sinh file hướng dẫn
+    webform_url_r = registry_info.get("report_webform")
+    if webform_url_r and not registry_info.get("abuse_email"):
+        registry_name_r = registry_info.get("registry") or "Registry"
+        contact_name = cfg.get("contact_name") or "[TÊN BẠN]"
+        contact_email = cfg.get("contact_email") or "[EMAIL BẠN]"
+        vt_link_str = f"https://www.virustotal.com/gui/domain/{domain}"
+        path = os.path.join(REPORTS_DIR, f"{domain}_registry_report.txt")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(f"""=== NỘI DUNG ĐỂ COPY VÀO WEB FORM: {webform_url_r} ===
+
+--- FIELD: Domain / URL vi phạm ---
+{domain}
+
+--- FIELD: Loại vi phạm ---
+Phishing / Brand Impersonation
+
+--- FIELD: Mô tả (Description) ---
+The domain {domain} is actively used for phishing — impersonating a brand to deceive users into submitting credentials or personal data. We request immediate suspension (serverHold / clientHold).
+
+Evidence:
+- VirusTotal: {vt_link_str}
+- First detected: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}
+{note_line}
+--- FIELD: Thông tin liên hệ ---
+Name: {contact_name}
+Email: {contact_email}
+
+--- FIELD: Bằng chứng đính kèm ---
+[ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]
+""")
+        return path
+
     subject = _pick(rng, [
-        f"URGENT: Phishing Domain Suspension Request - {domain}",
+        f"Phishing Domain Suspension Request - {domain}",
         f"Registry Escalation: Active Phishing Domain - {domain}",
         f"Formal Complaint: Brand Impersonation Phishing Domain - {domain}",
-        f"URGENT: ClientHold Request for Phishing Domain - {domain}",
+        f"ClientHold Request for Phishing Domain - {domain}",
     ])
     opening = _pick(rng, [
         f"We are escalating a phishing domain abuse report directly to your registry regarding the domain {domain}, which is being used to impersonate our brand and harvest user credentials.",
@@ -2206,15 +2886,16 @@ def append_reported_url_to_drafts(drafts: list, target_url: str) -> list:
 # --------------------------------------------------------------------------
 
 def run_cdn_check(target: str) -> dict:
-    """Pipeline tối giản: chỉ phát hiện Cloudflare/CDN, không gọi API key nào."""
+    """Pipeline tối giản: phát hiện Cloudflare/CDN và registrar, không gọi API key nào."""
     domain = normalize_domain(target)
     who = get_whois_info(domain)
     cf = is_cloudflare(who.get("name_servers")) if isinstance(who, dict) else False
+    registrar = who.get("registrar") if isinstance(who, dict) else None
     try:
         cdn_detected = detect_cdn(domain)
     except Exception:
         cdn_detected = []
-    return {"domain": domain, "cloudflare": cf, "cdn_detected": cdn_detected}
+    return {"domain": domain, "cloudflare": cf, "cdn_detected": cdn_detected, "registrar": registrar}
 
 
 def playwright_available() -> bool:
@@ -2405,8 +3086,18 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
     gọi thẳng hàm này rồi tự quyết định cách hiển thị, để không bao giờ lệch
     kết quả giữa hai giao diện.
     """
+    import concurrent.futures as _cf
     domain = normalize_domain(target)
     target_url = target.strip() if "://" in target else f"http://{domain}"
+
+    # URLScan: submit sớm (song song với pipeline chính) để thời gian ~30s xử lý
+    # trùng với các bước WHOIS/VT/GSB bên dưới — join ở cuối khi gần xong rồi.
+    _urlscan_key = cfg.get("urlscan_api_key", "")
+    _urlscan_executor = _cf.ThreadPoolExecutor(max_workers=1)
+    if _urlscan_key:
+        _urlscan_future = _urlscan_executor.submit(urlscan_submit_and_wait, domain, _urlscan_key)
+    else:
+        _urlscan_future = None
 
     try:
         cert = get_cert_info(domain)
@@ -2477,33 +3168,45 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
         log_error = str(e)
 
     try:
-        drafts = generate_email_drafts(domain, cert, who, vt, cfg)
+        drafts = generate_email_drafts(domain, cert, who, vt, cfg, target_url=target_url)
         drafts_error = None
-        # Tính toán nguồn email registrar để UI có thể hiển thị (whois vs static_table)
+        # Tính toán nguồn email registrar để UI có thể hiển thị (whois/rdap/static_table)
         _who_emails = who.get("emails") if isinstance(who, dict) else None
         if isinstance(_who_emails, list):
-            _who_emails = ", ".join(e for e in _who_emails if e)
+            _who_emails_filtered = [
+                e for e in _who_emails
+                if e and not any(priv in e.lower() for priv in WHOIS_PRIVACY_DOMAINS)
+            ]
+            _who_emails = ", ".join(_who_emails_filtered) if _who_emails_filtered else None
         _registrar = who.get("registrar") if isinstance(who, dict) else None
         if _who_emails:
             registrar_abuse_email_source = "whois"
             registrar_abuse_email_used = _who_emails
-        elif _registrar and lookup_registrar_abuse_email(_registrar):
-            registrar_abuse_email_source = "static_table"
-            registrar_abuse_email_used = lookup_registrar_abuse_email(_registrar)
         else:
-            registrar_abuse_email_source = None
-            registrar_abuse_email_used = None
+            rdap_r = get_rdap_abuse_email(domain)
+            if rdap_r.get("abuse_email"):
+                registrar_abuse_email_source = "rdap"
+                registrar_abuse_email_used = rdap_r["abuse_email"]
+            elif _registrar and lookup_registrar_abuse_email(_registrar):
+                registrar_abuse_email_source = "static_table"
+                registrar_abuse_email_used = lookup_registrar_abuse_email(_registrar)
+            else:
+                registrar_abuse_email_source = None
+                registrar_abuse_email_used = None
     except Exception as e:
         drafts = []
         drafts_error = str(e)
         registrar_abuse_email_source = None
         registrar_abuse_email_used = None
 
-    try:
-        apwg_draft = generate_apwg_draft(domain, vt, cfg)
-        drafts.append(apwg_draft)
-    except Exception as e:
-        drafts_error = (drafts_error + "; " if drafts_error else "") + f"APWG draft: {e}"
+    # T1: APWG (reportphishing@apwg.org) chỉ là kho dữ liệu — không có quyền gỡ domain.
+    # Đã gửi 743 emails → 0 kết quả (dữ liệu thực tế 35 ngày). Bỏ khỏi pipeline.
+    # Hàm generate_apwg_draft() vẫn giữ cho người dùng gọi thủ công nếu muốn.
+    # try:
+    #     apwg_draft = generate_apwg_draft(domain, vt, cfg)
+    #     drafts.append(apwg_draft)
+    # except Exception as e:
+    #     drafts_error = (drafts_error + "; " if drafts_error else "") + f"APWG draft: {e}"
 
     # Hosting/ISP takedown (03_Technical_Guide.md mục 3) — CHỈ chạy khi origin_ip_scan (ở trên)
     # tìm thấy ít nhất 1 subdomain có IP KHÁC cert["ip"]. Đặt SAU khối openphish (không phải ngay
@@ -2538,6 +3241,21 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
 
     drafts = append_reported_url_to_drafts(drafts, target_url)
 
+    # Thu kết quả URLScan (thread đã chạy song song từ đầu — thường đã xong hoặc sắp xong)
+    urlscan_data = {}
+    if _urlscan_future is not None:
+        try:
+            urlscan_data = _urlscan_future.result(timeout=75)  # đã poll nội bộ rồi, chỉ cần thêm buffer nhỏ
+        except Exception as e:
+            urlscan_data = {"error": str(e)}
+        finally:
+            _urlscan_executor.shutdown(wait=False)
+        # Gắn evidence vào tất cả draft nếu URLScan thành công (hoặc ít nhất có screenshot_url)
+        if urlscan_data.get("screenshot_url"):
+            append_urlscan_evidence_to_drafts(drafts, urlscan_data)
+    else:
+        _urlscan_executor.shutdown(wait=False)
+
     return {
         "domain": domain,
         "cert": cert,
@@ -2561,6 +3279,7 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
         "drafts_error": drafts_error,
         "registrar_abuse_email_source": registrar_abuse_email_source,
         "registrar_abuse_email_used": registrar_abuse_email_used,
+        "urlscan": urlscan_data,
     }
 
 

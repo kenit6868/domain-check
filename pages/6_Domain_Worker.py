@@ -172,9 +172,40 @@ else:
     if status.get("error"):
         st.error(status["error"])
     if status.get("results"):
-        results_df = pd.DataFrame(status["results"])
+        results_list = status["results"]
+        # Bảng tóm tắt
+        summary_rows = []
+        for r in results_list:
+            sent_to_list = r.get("sent_to") or []
+            sent_addresses = "; ".join(
+                f"{'✅' if s['ok'] else '❌'} {s['to']} (via {s['account']})"
+                for s in sent_to_list
+            ) if sent_to_list else ("(skip)" if r.get("skipped") else "—")
+            summary_rows.append({
+                "Domain": r.get("domain", ""),
+                "Verdict": r.get("reputation") or ("skipped" if r.get("skipped") else "—"),
+                "Drafts": r.get("drafts_total", 0),
+                "Sendable": r.get("drafts_sendable", 0),
+                "✅ Sent": r.get("sent_ok", 0),
+                "❌ Failed": r.get("sent_failed", 0),
+                "Địa chỉ đã gửi": sent_addresses,
+                "Lỗi": r.get("error") or "",
+            })
+        results_df = pd.DataFrame(summary_rows)
         results_df.insert(0, "STT", range(1, len(results_df) + 1))
         st.dataframe(results_df, width="stretch", hide_index=True)
+
+        # Chi tiết email từng domain
+        with st.expander("📧 Chi tiết email đã gửi", expanded=False):
+            for r in results_list:
+                sent_to_list = r.get("sent_to") or []
+                if not sent_to_list:
+                    continue
+                st.markdown(f"**{r['domain']}**")
+                for s in sent_to_list:
+                    icon = "✅" if s["ok"] else "❌"
+                    err = f" — {s['error']}" if s.get("error") else ""
+                    st.caption(f"{icon} `{s['to']}` via `{s['account']}` ({s['draft']}){err}")
 
     a, b = st.columns(2)
     if a.button("🔄 Làm mới trạng thái"):

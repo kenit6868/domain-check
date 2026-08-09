@@ -110,7 +110,7 @@ def _successfully_reported_domain_accounts_today(
 
 
 def _send_domain_drafts(domain: str, drafts: list, cfg: dict, include_vncert: bool, events_path: str) -> tuple[dict, set[str]]:
-    summary = {"drafts_total": len(drafts), "drafts_sendable": 0, "sent_ok": 0, "sent_failed": 0}
+    summary = {"drafts_total": len(drafts), "drafts_sendable": 0, "sent_ok": 0, "sent_failed": 0, "sent_to": []}
     successful_accounts = set()
     for path in drafts:
         filename = os.path.basename(path)
@@ -135,6 +135,14 @@ def _send_domain_drafts(domain: str, drafts: list, cfg: dict, include_vncert: bo
             if ok and account:
                 successful_accounts.add(account.lower())
             summary["sent_ok" if ok else "sent_failed"] += 1
+            # Track địa chỉ đã gửi để hiển thị trong UI
+            summary["sent_to"].append({
+                "to": parsed["to"],
+                "draft": filename,
+                "account": account,
+                "ok": ok,
+                "error": result.get("error") or "",
+            })
             row = {
                 "timestamp": _now(),
                 "domain": domain,
