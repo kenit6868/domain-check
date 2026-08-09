@@ -398,7 +398,7 @@ if "check_domain_result" in st.session_state:
         can_revoke = ca_note.get("can_revoke", True)
         ca_icon = "3️⃣" if can_revoke else "3️⃣ ⚠️"
         ca_title = f"{ca_icon}  CA: {ca_note['ca'].title()}"
-        with st.expander(ca_title, expanded=False):
+        with st.expander(ca_title, expanded=True):
             if can_revoke:
                 st.info(
                     "📌 **Báo CA để revoke chứng chỉ SSL** — khi CA thu hồi cert, "
@@ -425,7 +425,7 @@ if "check_domain_result" in st.session_state:
             (url for key, url in pt.WEB_FORM_REGISTRARS.items() if key in _r_lower),
             None
         )
-        with st.expander(f"4️⃣  Registrar: {registrar_name}", expanded=False):
+        with st.expander(f"4️⃣  Registrar: {registrar_name}", expanded=True):
             abuse_email_source = result.get("registrar_abuse_email_source")
             abuse_email_used = result.get("registrar_abuse_email_used")
 
@@ -467,7 +467,7 @@ if "check_domain_result" in st.session_state:
         has_webform = bool(registry_contact.get("report_webform"))
         has_email = bool(registry_contact.get("abuse_email"))
         channel_hint = " (web form)" if has_webform and not has_email else " (email)" if has_email and not has_webform else " (web form + email)" if has_webform and has_email else ""
-        with st.expander(f"5️⃣  Registry: {reg_label}{channel_hint} — leo thang khi registrar không phản hồi >7 ngày", expanded=False):
+        with st.expander(f"5️⃣  Registry: {reg_label}{channel_hint} — leo thang khi registrar không phản hồi >7 ngày", expanded=True):
             st.caption("⏳ Dùng kênh này khi đã báo registrar (mục 5) nhưng sau 7 ngày vẫn không có phản hồi.")
             if registry_contact["source"] == "static_table":
                 if has_webform and not has_email:
@@ -487,7 +487,7 @@ if "check_domain_result" in st.session_state:
                     # Hiện draft để copy nội dung mô tả paste vào form
                     draft_path = find_draft("_registry_report.txt")
                     if draft_path and os.path.isfile(draft_path):
-                        with st.expander("📋 Nội dung mô tả — copy paste vào ô description của form", expanded=False):
+                        with st.expander("📋 Nội dung mô tả — copy paste vào ô description của form", expanded=True):
                             with open(draft_path, encoding="utf-8") as f:
                                 st.code(f.read(), language=None)
                 elif has_email:
@@ -506,7 +506,7 @@ if "check_domain_result" in st.session_state:
                 st.markdown(f"**WHOIS server:** `{registry_contact.get('whois_server')}`")
                 show_draft_block(find_draft("_registry_report.txt"), "registry")
     else:
-        with st.expander(f"5️⃣  Registry — TLD `.{tld}` chưa hỗ trợ tự động", expanded=False):
+        with st.expander(f"5️⃣  Registry — TLD `.{tld}` chưa hỗ trợ tự động", expanded=True):
             st.caption("⏳ Dùng khi registrar không phản hồi sau 7 ngày.")
             st.link_button("🔗 Tra abuse contact tại IANA", f"https://www.iana.org/domains/root/db/{tld}.html")
 
