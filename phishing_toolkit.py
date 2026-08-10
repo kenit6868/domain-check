@@ -323,7 +323,7 @@ CCTLD_REGISTRY_CONTACTS = {
         "report_webform": "https://www.denic.de/en/report-a-concern/",
         "note": None,
     },
-    "fr": {"registry": "AFNIC", "abuse_email": "fraude@afnic.fr", "note": None},
+    "fr": {"registry": "AFNIC", "abuse_email": None, "note": None},
     "nl": {"registry": "SIDN", "abuse_email": "support@sidn.nl", "note": None},
     "pl": {"registry": "NASK", "abuse_email": "info@dns.pl", "note": None},
     "it": {"registry": "IIT-CNR", "abuse_email": "info@nic.it", "note": None},
@@ -368,9 +368,9 @@ CCTLD_REGISTRY_CONTACTS = {
         "note": "Áp dụng cho cả .co .biz .vip .club (GoDaddy Registry).",
     },
     "co": {
-        "registry": "GoDaddy Registry",
-        "abuse_email": None,
-        "report_webform": "https://domainabuse.registry.godaddy/s/",
+        "registry": "Registry Co",
+        "abuse_email": "abuse@registry.co",
+        "report_webform": "https://registry.co/#contact",
         "note": None,
     },
     "biz": {
