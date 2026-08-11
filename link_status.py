@@ -16,6 +16,42 @@ DEFAULT_HEADERS = {
     )
 }
 
+_HOLD_FLAGS = {"clienthold", "serverhold"}
+
+
+def check_domain_hold_status(domain: str) -> dict:
+    """Tra WHOIS để kiểm tra domain có bị clientHold / serverHold không.
+
+    Trả về dict:
+        {
+            "hold": bool,           # True nếu có ít nhất 1 hold flag
+            "flags": list[str],     # Danh sách flag tìm thấy (vd ["serverHold"])
+            "raw_status": list[str] # Toàn bộ status WHOIS trả về
+            "error": str            # Mô tả lỗi nếu WHOIS thất bại
+        }
+    """
+    try:
+        import whois as _whois
+        # Chỉ lấy domain gốc (bỏ subdomain và path)
+        parts = domain.lower().split("/")[0].split("?")[0].split("#")[0]
+        labels = parts.split(".")
+        # Dùng 2 nhãn cuối làm registerable domain để tra WHOIS
+        query_domain = ".".join(labels[-2:]) if len(labels) >= 2 else parts
+        data = _whois.whois(query_domain)
+        raw = data.status or []
+        if isinstance(raw, str):
+            raw = [raw]
+        raw_lower = [s.lower().split(" ")[0] for s in raw]  # bỏ phần URL sau khoảng trắng
+        found = [orig for orig, low in zip(raw, raw_lower) if low in _HOLD_FLAGS]
+        return {
+            "hold": bool(found),
+            "flags": found,
+            "raw_status": list(raw),
+            "error": "",
+        }
+    except Exception as exc:
+        return {"hold": False, "flags": [], "raw_status": [], "error": str(exc)}
+
 
 def _candidate_urls(target: str) -> list[str]:
     target = target.strip()
@@ -31,24 +67,43 @@ def _classify_response(response, body_preview: str = "") -> tuple[str, str, str]
     server = str(headers.get("Server", "")).lower()
     provider = "Cloudflare" if headers.get("CF-Ray") or "cloudflare" in server else ""
     normalized_body = body_preview.lower()
-    cloudflare_phishing_warning = (
-        "suspected phishing" in normalized_body
-        and (
-            "reported for potential phishing" in normalized_body
-            or "cloudflare" in normalized_body
-        )
-    )
 
-    if cloudflare_phishing_warning:
-        return (
-            "BLOCKED",
-            "Cloudflare đang hiển thị trang cảnh báo Suspected Phishing",
-            "Cloudflare",
-        )
+    # Detect trang cảnh báo Cloudflare (phishing hoặc malware) — áp dụng với mọi status code
+    cf_warning = provider == "Cloudflare" and "cloudflare" in normalized_body and any(
+        kw in normalized_body for kw in ("suspected phishing", "suspected malware", "deceptive site", "reported for potential phishing", "reported for potential malware")
+    )
+    if cf_warning:
+        if "malware" in normalized_body:
+            warn_type = "Suspected Malware"
+        elif "deceptive" in normalized_body:
+            warn_type = "Deceptive Site"
+        else:
+            warn_type = "Suspected Phishing"
+        return "BLOCKED", f"Cloudflare đang hiển thị trang cảnh báo: {warn_type}", "Cloudflare"
+
+    # Detect geo-block / IP-block — site vẫn live nhưng chặn vùng/IP này
+    _GEO_BODY_KW = (
+        "not available in your country", "not available in your region",
+        "unavailable in your country", "unavailable in your region",
+        "not available in your area", "geo-restricted", "geo restricted",
+        "access denied based on your location", "blocked in your country",
+        "blocked in your region", "country is not supported",
+        "service is not available in your location",
+        "content is not available in your region",
+    )
+    _GEO_HEADER_KW = ("x-geo-block", "x-country-block", "x-region-block")
+    geo_in_body = any(kw in normalized_body for kw in _GEO_BODY_KW)
+    geo_in_headers = any(h in {k.lower() for k in headers} for h in _GEO_HEADER_KW)
+    # 451 = Unavailable For Legal Reasons (thường dùng cho block vùng)
+    if code == 451 or geo_in_body or geo_in_headers:
+        return "GEO-BLOCK", f"HTTP {code}: site chặn theo vùng/IP — cần kiểm tra qua proxy/VPN để xác nhận còn live không", provider
 
     if 200 <= code < 400:
         return "LIVE", f"HTTP {code}: URL phản hồi thành công", provider
-    if code in {401, 403, 407, 418, 423, 429, 451}:
+    if code in {401, 403, 407, 418, 423, 429}:
+        # 403 từ Cloudflare (không phải warning page) = CF chặn bot checker, site vẫn LIVE với browser thật
+        if code == 403 and provider == "Cloudflare":
+            return "LIVE", "HTTP 403: Cloudflare chặn bot checker — site vẫn hoạt động với browser thật", provider
         protection = f" ({provider}/WAF)" if provider else ""
         return "BLOCKED", f"HTTP {code}: máy chủ còn phản hồi nhưng đang chặn hoặc giới hạn{protection}", provider
     if code in {404, 410}:
@@ -88,7 +143,9 @@ def check_link(target: str, timeout: float = 10.0, timeout_retries: int = 3) -> 
                 status_code = response.status_code
                 body_preview = ""
                 content_type = str(response.headers.get("Content-Type", "")).lower()
-                if "html" in content_type:
+                has_cf = bool(response.headers.get("CF-Ray"))
+                # Đọc body khi: content-type html, HOẶC có CF-Ray header (để detect CF warning page)
+                if "html" in content_type or has_cf:
                     try:
                         preview = bytearray()
                         for chunk in response.iter_content(chunk_size=8192):
@@ -144,6 +201,16 @@ def check_link(target: str, timeout: float = 10.0, timeout_retries: int = 3) -> 
         else "CONNECTION ERROR"
     )
 
+    # Khi DNS ERROR → tra WHOIS kiểm tra clientHold / serverHold
+    hold_info: dict = {"hold": False, "flags": [], "raw_status": [], "error": ""}
+    if dns_error and unreachable:
+        hold_info = check_domain_hold_status(target)
+
+    hold_note = ""
+    if hold_info.get("hold"):
+        flags_str = ", ".join(hold_info["flags"])
+        hold_note = f" | WHOIS HOLD: {flags_str}"
+
     return {
         "input": target,
         "request_url": _candidate_urls(target)[-1],
@@ -164,6 +231,8 @@ def check_link(target: str, timeout: float = 10.0, timeout_retries: int = 3) -> 
         "failure_attempts": failed_attempts,
         "failure_total": total_timeout_slots,
         "error": last_error,
+        "hold_info": hold_info,
+        "hold_note": hold_note,
     }
 
 
@@ -197,7 +266,7 @@ def should_show_result(result: dict) -> bool:
         hop.get("status") for hop in result.get("redirect_chain", [])
     }
     return (
-        result.get("status") in {"DIE", "BLOCKED", "UNREACHABLE"}
+        result.get("status") in {"DIE", "BLOCKED", "UNREACHABLE", "GEO-BLOCK"}
         or bool(redirect_codes.intersection({301, 302}))
     )
 
@@ -216,11 +285,14 @@ def format_result_note(result: dict) -> str:
         label = "DIE"
     elif status == "BLOCKED":
         label = "BLOCKED" + (f" {provider}" if provider else "")
+    elif status == "GEO-BLOCK":
+        label = "GEO-BLOCK" + (f" ({provider})" if provider else "")
     elif status == "UNREACHABLE":
         attempts = result.get("failure_attempts", 0)
         total = result.get("failure_total", attempts)
         failure_type = result.get("failure_type", "CONNECTION ERROR")
-        label = f"UNREACHABLE | {failure_type} {attempts}/{total}"
+        hold_note = result.get("hold_note", "")
+        label = f"UNREACHABLE | {failure_type} {attempts}/{total}{hold_note}"
     else:
         label = "REDIRECT"
 
