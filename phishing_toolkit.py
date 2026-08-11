@@ -306,7 +306,7 @@ CCTLD_REGISTRY_CONTACTS = {
     "uk": {
         "registry": "Nominet",
         "abuse_email": None,
-        "report_webform": "https://registrars.nominet.uk/abuse-complaints/",
+        "report_webform": "https://abuse.cleandns.space/nominet/phishing",
         "note": "Áp dụng cho cả .co.uk và .org.uk.",
     },
     "eu": {"registry": "EURid", "abuse_email": "info@eurid.eu", "note": None},
