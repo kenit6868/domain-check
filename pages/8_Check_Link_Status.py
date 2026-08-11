@@ -94,16 +94,18 @@ if submitted:
     die_count = sum(item["status"] == "DIE" for item, _ in shown_results)
     blocked_count = sum(item["status"] == "BLOCKED" for item, _ in shown_results)
     unreachable_count = sum(item["status"] == "UNREACHABLE" for item, _ in shown_results)
+    geoblock_count = sum(item["status"] == "GEO-BLOCK" for item, _ in shown_results)
     redirected_count = sum(
         any(hop["status"] in {301, 302} for hop in item["redirect_chain"])
         for item, _ in shown_results
     )
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Đã check", len(results))
     m2.metric("DIE", die_count)
     m3.metric("BLOCKED", blocked_count)
     m4.metric("UNREACHABLE", unreachable_count)
-    m5.metric("Có 301/302", redirected_count)
+    m5.metric("GEO-BLOCK", geoblock_count)
+    m6.metric("Có 301/302", redirected_count)
 
     result_groups: dict[str, list[tuple[str, str]]] = {}
     group_order = []
