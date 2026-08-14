@@ -287,7 +287,7 @@ CCTLD_REGISTRY_CONTACTS = {
         "note": "Yêu cầu bản dịch nhãn hiệu tiếng Trung/Anh có công chứng.",
     },
     "in": {"registry": "NIXI", "abuse_email": "abuse@registry.in", "note": "Hay không hồi âm — nên đi đường nhà đăng ký."},
-    "io": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": None},
+    "io": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": None, "report_webform": "https://identity.digital/policies/report-abuse",},
     "jp": {
         "registry": "JPRS",
         "abuse_email": "abuse@jprs.jp",
@@ -446,7 +446,7 @@ CCTLD_REGISTRY_CONTACTS = {
     "pro": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": None},
     "vc": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": None},
     "info": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": None},
-    "me": {"registry": "doMEn", "abuse_email": None, "report_webform": None, "note": "Không có kênh registry riêng — báo nhà đăng ký."},
+    "me": {"registry": "doMEn", "abuse_email": None, "report_webform": "https://identity.digital/policies/report-abuse", "note": "Không có kênh registry riêng — báo nhà đăng ký."},
     "tv": {"registry": "Verisign", "abuse_email": None, "report_webform": None, "note": "Không có kênh registry riêng — báo nhà đăng ký."},
 }
 
