@@ -107,36 +107,78 @@ if submitted:
     m5.metric("GEO-BLOCK", geoblock_count)
     m6.metric("Có 301/302", redirected_count)
 
-    result_groups: dict[str, list[tuple[str, str]]] = {}
-    group_order = []
+    # Tách 2 nhóm: redirect 301/302 và còn lại (DIE/BLOCKED/UNREACHABLE/GEO-BLOCK)
+    redirect_results = []
+    other_results = []
     for result, source in shown_results:
-        brand = source["brand"]
-        if brand not in result_groups:
-            result_groups[brand] = []
-            group_order.append(brand)
-        result_groups[brand].append((source["target"], format_result_note(result)))
+        has_redirect = any(hop["status"] in {301, 302} for hop in result.get("redirect_chain", []))
+        is_only_redirect = (result["status"] not in {"DIE", "BLOCKED", "UNREACHABLE", "GEO-BLOCK"}) and has_redirect
+        if is_only_redirect:
+            redirect_results.append((result, source))
+        else:
+            other_results.append((result, source))
 
-    st.subheader("Kết quả DIE / BLOCKED / UNREACHABLE / 301-302")
-    st.caption(
-        "Trạng thái và toàn bộ chuỗi HTTP nằm ngay trên cùng dòng với link."
-    )
-    if result_groups:
-        output_lines = []
-        for brand in group_order:
+    def _build_groups(items):
+        groups: dict[str, list[tuple[str, str]]] = {}
+        order = []
+        for result, source in items:
+            brand = source["brand"]
+            if brand not in groups:
+                groups[brand] = []
+                order.append(brand)
+            groups[brand].append((source["target"], format_result_note(result)))
+        return groups, order
+
+    def _render_group_links(groups, order):
+        """Render từng brand group với link bấm được (target _blank)."""
+        for brand in order:
             if brand:
-                output_lines.append(brand)
-            output_lines.extend(
-                f"{target} - {note}"
-                for target, note in result_groups[brand]
-            )
-            output_lines.append("")
-        dead_text = "\n".join(output_lines).rstrip()
-        st.code(dead_text, language=None)
+                st.caption(f"**{brand}**")
+            for target, note in groups[brand]:
+                url = target if target.startswith("http") else f"https://{target}"
+                st.markdown(
+                    f'<a href="{url}" target="_blank" style="word-break:break-all">{target}</a>'
+                    f' <span style="color:#888;font-size:0.85em">— {note}</span>',
+                    unsafe_allow_html=True,
+                )
+
+    def _build_text(groups, order):
+        lines = []
+        for brand in order:
+            if brand:
+                lines.append(brand)
+            lines.extend(f"{t} - {n}" for t, n in groups[brand])
+            lines.append("")
+        return "\n".join(lines).rstrip()
+
+    # ── Nhóm DIE / BLOCKED / UNREACHABLE / GEO-BLOCK ──────────────────────────
+    st.subheader("DIE / BLOCKED / UNREACHABLE / GEO-BLOCK")
+    if other_results:
+        other_groups, other_order = _build_groups(other_results)
+        _render_group_links(other_groups, other_order)
+        other_text = _build_text(other_groups, other_order)
         st.download_button(
-            "⬇ Tải danh sách domain die",
-            dead_text.encode("utf-8"),
-            file_name="filtered_link_results.txt",
+            "⬇ Tải danh sách die/blocked",
+            other_text.encode("utf-8"),
+            file_name="die_blocked_results.txt",
             mime="text/plain",
         )
     else:
-        st.success("Không có link phù hợp điều kiện xuất.")
+        st.success("Không có link die/blocked.")
+
+    st.divider()
+
+    # ── Nhóm Redirect 301/302 ──────────────────────────────────────────────────
+    st.subheader("Redirect 301 / 302")
+    if redirect_results:
+        redir_groups, redir_order = _build_groups(redirect_results)
+        _render_group_links(redir_groups, redir_order)
+        redir_text = _build_text(redir_groups, redir_order)
+        st.download_button(
+            "⬇ Tải danh sách redirect",
+            redir_text.encode("utf-8"),
+            file_name="redirect_results.txt",
+            mime="text/plain",
+        )
+    else:
+        st.info("Không có link redirect 301/302.")
