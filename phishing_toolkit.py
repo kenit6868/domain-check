@@ -286,7 +286,7 @@ CCTLD_REGISTRY_CONTACTS = {
         "abuse_email": "supervision@cnnic.cn",
         "note": "Yêu cầu bản dịch nhãn hiệu tiếng Trung/Anh có công chứng.",
     },
-    "in": {"registry": "NIXI", "abuse_email": "abuse@registry.in", "note": "Hay không hồi âm — nên đi đường nhà đăng ký."},
+    "in": {"registry": "NIXI", "note": "Hay không hồi âm — nên đi đường nhà đăng ký."},
     "io": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": None, "report_webform": "https://identity.digital/policies/report-abuse",},
     "jp": {
         "registry": "JPRS",
@@ -426,7 +426,7 @@ CCTLD_REGISTRY_CONTACTS = {
     "in.net":   {"registry": "CentralNic", "abuse_email": None, "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
     "com.co":   {"registry": "CentralNic", "abuse_email": None, "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
     # Alias 2 cấp — trỏ về registry của TLD cha
-    "co.in":    {"registry": "NIXI", "abuse_email": "abuse@registry.in", "note": "Hay không hồi âm — nên đi đường nhà đăng ký."},
+    "co.in":    {"registry": "NIXI", "note": "Hay không hồi âm — nên đi đường nhà đăng ký."},
     "co.jp":    {"registry": "JPRS", "abuse_email": "abuse@jprs.jp", "note": "Đòi hỏi xác thực nhãn hiệu đăng ký tại Nhật Bản."},
     "com.mx":   {"registry": "NIC Mexico", "abuse_email": "legal@nic.mx", "note": None},
     "shop": {
