@@ -1436,10 +1436,16 @@ def urlscan_submit(domain: str, api_key: str = "", use_http: bool = False) -> di
     if not api_key:
         return {"error": "Chưa có urlscan_api_key trong config.ini — đăng ký free tại https://urlscan.io/"}
     scheme = "http" if use_http else "https"
+    raw_target = str(domain or "").strip()
+    if raw_target.lower().startswith(("http://", "https://")):
+        parsed_target = urlparse(raw_target)
+        target_url = parsed_target._replace(scheme=scheme).geturl() if use_http else raw_target
+    else:
+        target_url = f"{scheme}://{raw_target}"
     try:
         r = requests.post(
             "https://urlscan.io/api/v1/scan/",
-            json={"url": f"{scheme}://{domain}", "visibility": "public"},
+            json={"url": target_url, "visibility": "public"},
             headers={"Content-Type": "application/json", "API-Key": api_key},
             timeout=15,
         )

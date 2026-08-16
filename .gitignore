@@ -1,6 +1,9 @@
 config.ini
 case_log.csv
 sent_log.csv
+provider_mail_cache.json
+provider_mail_cache.json.tmp
+evidence/provider_replies/
 reports/
 worker_jobs/
 __pycache__/

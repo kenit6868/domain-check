@@ -31,5 +31,6 @@ _pages = st.navigation([
     st.Page("pages/8_Check_Link_Status.py",   title="Check Link Status",icon="🔗"),
     st.Page("pages/4_Case_Log.py",            title="Case Log",         icon="📋"),
     st.Page("pages/5_Report_Drafts.py",       title="Report Drafts",    icon="✉️"),
+    st.Page("pages/9_Provider_Replies.py",    title="Phản hồi NCC",     icon="📨"),
 ])
 _pages.run()
