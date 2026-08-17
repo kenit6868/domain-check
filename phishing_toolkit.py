@@ -1855,11 +1855,7 @@ def _pick(rng: random.Random, options: list) -> str:
 
 # Pool các variant cho từng phần của email — mỗi pool có ít nhất 4 variant.
 _SUBJECT_REGISTRAR = [
-    "Phishing Report - {domain} - Brand Impersonation",
     "Abuse Report: Active Phishing Site - {domain}",
-    "Brand Impersonation Complaint - {domain}",
-    "Phishing Domain Takedown Request - {domain}",
-    "Formal Phishing Report - {domain}",
 ]
 
 _OPENING_REGISTRAR = [
@@ -2219,10 +2215,7 @@ def generate_apwg_draft(domain, vt, cfg):
     rng = _draft_rng(domain)
 
     _apwg_subjects = [
-        "Phishing URL Report - {domain}",
-        "Active Phishing Site Report - {domain}",
-        "Brand Impersonation Phishing Report - {domain}",
-        "Phishing Incident Report - {domain}",
+        "Abuse Report: Active Phishing Site - {domain}",
     ]
     _apwg_openings = [
         "We are reporting the following URL as an active phishing site impersonating our brand to harvest user credentials and sensitive information.",
@@ -2269,12 +2262,7 @@ def generate_hosting_draft(domain, ip, ip_whois, cfg):
     abuse_email = ip_whois.get("abuse_email") or "[TRA ABUSE EMAIL TẠI https://lookup.icann.org/ hoặc rdap.arin.net]"
     asn = ip_whois.get("asn") or "N/A"
 
-    subject = _pick(rng, [
-        f"Phishing Site Takedown Request - {domain} (IP: {ip})",
-        f"Abuse Report: Active Phishing Site on Your Network - {domain}",
-        f"Hosting Abuse Report: Brand Impersonation Phishing - {domain}",
-        f"Malicious Phishing Site Hosted on IP {ip} - {domain}",
-    ])
+    subject = f"Abuse Report: Active Phishing Site - {domain}"
     opening = _pick(rng, [
         f"We are writing to request the immediate suspension of a phishing website hosted on your infrastructure that is impersonating our brand.",
         f"We have identified an active phishing site hosted on your network (IP: {ip}) that is impersonating our brand and actively harvesting user credentials.",
@@ -2385,12 +2373,7 @@ Email: {contact_email}
 """)
         return path
 
-    subject = _pick(rng, [
-        f"Phishing Domain Suspension Request - {domain}",
-        f"Registry Escalation: Active Phishing Domain - {domain}",
-        f"Formal Complaint: Brand Impersonation Phishing Domain - {domain}",
-        f"ClientHold Request for Phishing Domain - {domain}",
-    ])
+    subject = f"Abuse Report: Active Phishing Site - {domain}"
     opening = _pick(rng, [
         f"We are escalating a phishing domain abuse report directly to your registry regarding the domain {domain}, which is being used to impersonate our brand and harvest user credentials.",
         f"We are filing a formal escalation with your registry regarding {domain}, an active phishing domain impersonating our brand that has not been resolved at the registrar level.",
@@ -2441,12 +2424,7 @@ def generate_vncert_draft(domain, cert, vt, cfg):
     rng = _draft_rng(domain + "_vncert")
     vt_count = vt.get("malicious", 0) or 0
 
-    subject = _pick(rng, [
-        f"[Phản ánh phishing] {domain} giả mạo thương hiệu",
-        f"[Báo cáo lừa đảo] Domain {domain} giả mạo nhãn hiệu",
-        f"[Khẩn] Phản ánh website phishing {domain}",
-        f"[Yêu cầu xử lý] {domain} — website giả mạo đang hoạt động",
-    ])
+    subject = f"Abuse Report: Active Phishing Site - {domain}"
     opening = _pick(rng, [
         f"Chúng tôi xin phản ánh domain {domain} đang thực hiện hành vi giả mạo thương hiệu của chúng tôi nhằm lừa đảo, đánh cắp thông tin nhạy cảm của người dùng (tài khoản đăng nhập, mã OTP, thông tin thẻ ngân hàng...).",
         f"Chúng tôi phát hiện domain {domain} đang giả mạo thương hiệu của chúng tôi để đánh cắp thông tin đăng nhập, mã OTP và dữ liệu tài chính của người dùng.",
@@ -2550,6 +2528,7 @@ class _SMTPWithProxy(smtplib.SMTP):
     để tạo socks.socksocket() thay vì socket.create_connection() thông thường.
     self._proxy_info PHẢI được gán TRƯỚC super().__init__() vì __init__ gọi connect()
     ngay lập tức.
+    Dùng cho STARTTLS (port 587). Với SSL/TLS ngay từ đầu (port 465), dùng _SMTPWithProxySSL.
     """
     def __init__(self, host: str, port: int, proxy_info: tuple, timeout: float = 15):
         self._proxy_info = proxy_info   # ← gán trước, super().__init__ sẽ gọi _get_socket
@@ -2562,6 +2541,27 @@ class _SMTPWithProxy(smtplib.SMTP):
         sock.settimeout(timeout or socket.getdefaulttimeout())
         sock.connect((host, port))
         return sock
+
+
+class _SMTPWithProxySSL(smtplib.SMTP_SSL):
+    """smtplib.SMTP_SSL subclass routing traffic qua SOCKS/HTTP proxy (PySocks).
+
+    Dùng cho SSL/TLS ngay từ đầu (port 465). Tạo SOCKS tunnel trước, sau đó
+    SMTP_SSL._get_socket() bọc SSL lên trên socket đó. Cùng nguyên tắc với _SMTPWithProxy
+    nhưng kế thừa từ SMTP_SSL để SSL handshake xảy ra đúng thứ tự.
+    """
+    def __init__(self, host: str, port: int, proxy_info: tuple, timeout: float = 15, **kwargs):
+        self._proxy_info = proxy_info   # ← gán trước super().__init__
+        super().__init__(host, port, timeout=timeout, **kwargs)
+
+    def _get_socket(self, host, port, timeout):
+        proxy_type, p_host, p_port, p_user, p_pass = self._proxy_info
+        sock = _socks.socksocket()
+        sock.set_proxy(proxy_type, p_host, p_port, username=p_user, password=p_pass)
+        sock.settimeout(timeout or socket.getdefaulttimeout())
+        sock.connect((host, port))
+        # Wrap SSL trên SOCKS tunnel (giống SMTP_SSL._get_socket làm nội bộ)
+        return self.context.wrap_socket(sock, server_hostname=self._host)
 
 
 def _imap_save_sent(account: dict, raw_msg: bytes) -> str | None:
@@ -2640,7 +2640,12 @@ def _send_via_account(account: dict, proxy_str: str | None, to: str, subject: st
             proxy_info = _parse_proxy_url(proxy_str)
             if proxy_info is None:
                 raise RuntimeError(f"Không parse được proxy: {proxy_str}")
-            server_ctx = _SMTPWithProxy(host, port, proxy_info, timeout=15)
+            # SSL (port 465): dùng _SMTPWithProxySSL để SSL handshake đúng thứ tự sau SOCKS tunnel
+            # STARTTLS (port 587): dùng _SMTPWithProxy rồi gọi starttls() sau
+            if use_ssl:
+                server_ctx = _SMTPWithProxySSL(host, port, proxy_info, timeout=15)
+            else:
+                server_ctx = _SMTPWithProxy(host, port, proxy_info, timeout=15)
             with server_ctx as server:
                 if not use_ssl:
                     server.starttls()

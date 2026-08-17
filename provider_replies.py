@@ -17,6 +17,13 @@ from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr, parsedate_to_datetime
 from html import unescape
 
+# Proxy support — tái dùng từ phishing_toolkit để tránh duplicate code
+try:
+    from phishing_toolkit import _SMTPWithProxy, _SMTPWithProxySSL, _parse_proxy_url as _pt_parse_proxy
+    _HAS_SMTP_PROXY = True
+except ImportError:
+    _HAS_SMTP_PROXY = False
+
 
 PROVIDERS = {
     "godaddy": ("GoDaddy", ("godaddy",)), "dynadot": ("Dynadot", ("dynadot",)),
@@ -98,9 +105,18 @@ def extract_body(msg):
 
 
 def detect_provider(sender, subject, body=""):
-    text = f"{sender} {subject} {body[:3000]}".lower()
+    sender_addr = parseaddr(sender)[1].lower()
+    sender_domain = sender_addr.split("@")[-1] if "@" in sender_addr else ""
+    # Ưu tiên match theo sender domain — đáng tin hơn body text
     for key, (label, signals) in PROVIDERS.items():
-        if any(signal in text for signal in signals): return key, label
+        if any(signal in sender_domain for signal in signals):
+            return key, label
+    # Fallback: match trong subject + phần NCC tự viết (đã loại bỏ phần quote/forwarded)
+    request_part = provider_request_text(body)
+    text = f"{sender} {subject} {request_part[:2000]}".lower()
+    for key, (label, signals) in PROVIDERS.items():
+        if any(signal in text for signal in signals):
+            return key, label
     return "unknown", "Khác / Chưa nhận diện"
 
 
@@ -264,7 +280,10 @@ def fetch_provider_mail(account, limit=100, unread_only=False, date_from=None, d
             status, payload = conn.uid("fetch", uid, "(BODY.PEEK[])")
             if status == "OK" and payload and isinstance(payload[0], tuple):
                 item = parse_message(uid.decode(), account["username"], payload[0][1])
-                if item.provider != "unknown" or item.request_type != "manual_review": result.append(item)
+                # Giữ lại: email từ provider đã nhận diện, HOẶC email có request cụ thể (không phải manual_review)
+                # Bỏ qua: provider unknown + manual_review = email rác không liên quan
+                if item.provider != "unknown" or item.request_type != "manual_review":
+                    result.append(item)
             if progress_callback:
                 progress_callback(result, position, total)
         return result
@@ -440,7 +459,7 @@ def _append_sent_copy(account, raw_message):
         except Exception: pass
 
 
-def send_threaded_reply(account, mail, subject, body, attachments=None):
+def send_threaded_reply(account, mail, subject, body, attachments=None, proxy_str=None):
     if mail.channel != "email" or not mail.reply_to: return {"success": False, "error": "Không có Reply-To hợp lệ."}
     msg = EmailMessage(); msg["From"] = account["username"]; msg["To"] = mail.reply_to; msg["Subject"] = subject
     msg["Date"] = formatdate(localtime=False, usegmt=True)
@@ -454,10 +473,28 @@ def send_threaded_reply(account, mail, subject, body, attachments=None):
             msg.add_attachment(handle.read(), maintype=major, subtype=minor, filename=os.path.basename(path))
     try:
         port = int(account.get("port", 465 if account.get("ssl") else 587))
-        smtp = smtplib.SMTP_SSL(account["host"], port, timeout=30) if account.get("ssl") or port == 465 else smtplib.SMTP(account["host"], port, timeout=30)
-        with smtp:
-            if not (account.get("ssl") or port == 465): smtp.starttls()
-            smtp.login(account["username"], account["password"]); smtp.send_message(msg)
+        use_ssl = bool(account.get("ssl")) or port == 465
+
+        if proxy_str and _HAS_SMTP_PROXY:
+            # Route qua proxy để ẩn IP của máy gửi khỏi Received header của mail server
+            proxy_info = _pt_parse_proxy(proxy_str)
+            if proxy_info is None:
+                raise RuntimeError("Proxy được cấu hình nhưng PySocks chưa cài (pip install PySocks)")
+            if use_ssl:
+                smtp_ctx = _SMTPWithProxySSL(account["host"], port, proxy_info, timeout=30)
+            else:
+                smtp_ctx = _SMTPWithProxy(account["host"], port, proxy_info, timeout=30)
+            with smtp_ctx as server:
+                if not use_ssl:
+                    server.starttls()
+                server.login(account["username"], account["password"])
+                server.send_message(msg)
+        else:
+            smtp = smtplib.SMTP_SSL(account["host"], port, timeout=30) if use_ssl else smtplib.SMTP(account["host"], port, timeout=30)
+            with smtp:
+                if not use_ssl: smtp.starttls()
+                smtp.login(account["username"], account["password"]); smtp.send_message(msg)
+
         sent_copy_error = _append_sent_copy(account, msg.as_bytes())
         return {"success": True, "error": "", "sent_at": datetime.now(timezone.utc).isoformat(),
                 "sent_copy_saved": not bool(sent_copy_error), "sent_copy_error": sent_copy_error}
