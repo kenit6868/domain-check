@@ -558,35 +558,43 @@ def get_webform_draft_text(
     vt_link: str = "",
     urlscan: dict | None = None,
 ) -> str:
-    """Sinh nội dung tố cáo để paste thẳng vào ô Description/Comments của web form.
-
-    Không có field labels hay hướng dẫn — chỉ là đoạn text evidence sạch.
-    urlscan: dict trả về từ urlscan_submit_and_wait() — nếu có thì thêm screenshot/result URL.
-    """
+    """Generate concise evidence text for registrar/hosting abuse web forms."""
     from datetime import datetime, timezone as _tz
+
     brand = cfg.get("brand_name") or "[BRAND]"
-    contact_name = cfg.get("contact_name") or "[TÊN BẠN]"
-    contact_email = cfg.get("contact_email") or "[EMAIL BẠN]"
+    contact_name = cfg.get("contact_name") or "[NAME]"
+    contact_email = cfg.get("contact_email") or "[EMAIL]"
+
     detected_date = datetime.now(_tz.utc).strftime("%Y-%m-%d")
+
     t_url = target_url or f"https://{domain}"
     vt = vt_link or f"https://www.virustotal.com/gui/domain/{domain}"
 
     evidence_lines = (
-        f"The domain {domain} is being actively used for phishing — impersonating {brand} "
-        f"to deceive users into submitting credentials and personal data.\n\n"
+        f"The domain {domain} is an active phishing website impersonating "
+        f"{brand} without authorization. It clones the official website and "
+        f"login interface to deceive users and is used to steal user credentials, "
+        f"harvest OTP tokens, and collect payment details.\n\n"
         f"Phishing URL: {t_url}\n"
         f"VirusTotal:   {vt}\n"
     )
+
     if urlscan and not urlscan.get("error"):
         if urlscan.get("result_url"):
             evidence_lines += f"URLScan:      {urlscan['result_url']}\n"
+
         if urlscan.get("screenshot_url"):
             evidence_lines += f"Screenshot:   {urlscan['screenshot_url']}\n"
+
     evidence_lines += (
         f"Detected:     {detected_date}\n\n"
-        f"We request immediate suspension (serverHold / clientHold) of this domain.\n\n"
+        f"This domain is being used for unauthorized brand impersonation and "
+        f"phishing activity. We request immediate suspension of the domain "
+        f"and any applicable serverHold / clientHold action under your abuse "
+        f"and registrar policies.\n\n"
         f"Reported by: {contact_name} <{contact_email}>"
     )
+
     return evidence_lines
 
 
@@ -1255,11 +1263,15 @@ def generate_safebrowsing_report_text(domain: str, cfg: dict) -> str:
     rng = _draft_rng(domain)
     brand = cfg.get("brand_name") or "our brand"
     variants = [
-        f"The domain {domain} is actively impersonating {brand} by cloning its official login page to harvest user credentials and OTP tokens. Please add this phishing URL to your browser security filters to protect users.",
-        f"This site ({domain}) is a phishing page impersonating {brand}. It clones the official login interface to steal user credentials, OTP codes, and payment details. Please flag and block this URL.",
-        f"{domain} is a phishing domain targeting {brand} users. The site replicates our official authentication portal to harvest login credentials and sensitive personal data.",
-        f"We are reporting {domain} as an active phishing site impersonating {brand}. The page is designed to deceive users into submitting their login credentials, OTP tokens, and financial information.",
-        f"This phishing URL ({domain}) fraudulently impersonates {brand}'s official website to steal user credentials and OTP tokens from victims. Immediate blocking is requested.",
+        f"""The domain {domain} is actively impersonating {brand} by cloning its official login page to steal user credentials, harvest OTP tokens, and collect payment details. This is an active phishing site targeting {brand} users. Please immediately flag and block this URL to protect users.""",
+
+        f"""This site ({domain}) is an active phishing page impersonating {brand}. It clones the official login interface to steal user credentials, harvest OTP codes, and collect payment information from victims. Immediate blocking is requested to prevent further user harm.""",
+
+        f"""{domain} is an active phishing domain targeting {brand} users. The site replicates {brand}'s official authentication portal and is used to steal login credentials, harvest OTP tokens, and collect sensitive payment information. Please immediately add this URL to Safe Browsing protections and block access for users.""",
+
+        f"""We are reporting {domain} as an active phishing site impersonating {brand}. The page fraudulently replicates the official website and authentication interface to steal user credentials, harvest OTP tokens, and collect financial information from victims. Immediate blocking is requested to protect users from this phishing threat.""",
+
+        f"""This phishing URL ({domain}) fraudulently impersonates {brand}'s official website and login portal. It is designed to steal user credentials, harvest OTP tokens, and collect payment details from victims. Please immediately flag and block this URL to prevent users from being exposed to the phishing site."""
     ]
     return _pick(rng, variants)
 
@@ -1272,10 +1284,15 @@ def generate_cloudflare_report_text(domain: str, cfg: dict) -> str:
     rng = _draft_rng(domain + "_cf")  # seed khác GSB để variant không trùng
     brand = cfg.get("brand_name") or "our brand"
     variants = [
-        f"The domain {domain} is impersonating {brand} by cloning its official login page to harvest user credentials, OTP tokens, and payment details. This domain is using Cloudflare services to proxy and conceal the phishing infrastructure. Please suspend Cloudflare services for this domain and/or display a phishing interstitial warning.",
-        f"{domain} is an active phishing site that impersonates {brand}'s official website to steal user credentials and financial data. The site is proxied through Cloudflare, which is being used to mask the true hosting origin. Please suspend Cloudflare access for this domain.",
-        f"We are reporting {domain} as a phishing domain using Cloudflare to host and proxy a fraudulent site impersonating {brand}. The site harvests login credentials, OTP tokens, and payment information from users. Please terminate Cloudflare services for this account.",
-        f"This domain ({domain}) clones {brand}'s login portal to steal credentials and sensitive data from victims. It leverages Cloudflare infrastructure to remain online and mask its origin. Immediate suspension of Cloudflare services for this domain is requested.",
+        f"""The domain {domain} is actively impersonating {brand} by cloning its official website and login interface to steal user credentials, harvest OTP tokens, and collect payment details. This is an active phishing site targeting {brand} users. Please investigate this domain and take immediate action under Cloudflare's abuse policies to protect users.""",
+
+        f"""{domain} is an active phishing site impersonating {brand}'s official website. It copies the official login interface and is used to steal user credentials, harvest OTP codes, and collect payment information from victims. Please investigate the reported URL and take immediate action to prevent further user harm.""",
+
+        f"""We are reporting {domain} as an active phishing domain impersonating {brand}. The website fraudulently replicates {brand}'s official website and authentication interface to steal login credentials, harvest OTP tokens, and collect sensitive payment information. Please investigate this phishing activity and take appropriate action under Cloudflare's abuse policies.""",
+
+        f"""This domain ({domain}) is impersonating {brand} without authorization and is being used as an active phishing website. It clones {brand}'s official login portal to steal user credentials, harvest OTP tokens, and collect payment details from victims. Immediate investigation and appropriate action are requested to protect users.""",
+
+        f"""The website at {domain} is a fraudulent copy of {brand}'s official website and login portal. It is being used to steal user credentials, harvest OTP tokens, and collect payment information through an impersonated authentication interface. Please investigate this active phishing site and take appropriate action under your abuse policies."""
     ]
     return _pick(rng, variants)
 
@@ -1859,52 +1876,64 @@ _SUBJECT_REGISTRAR = [
 ]
 
 _OPENING_REGISTRAR = [
-    "We are writing to report the domain {domain} for active phishing activity targeting users of our brand.",
-    "We are reporting the domain {domain}, which is currently being used to conduct a phishing attack against our brand.",
-    "This is a formal abuse report regarding {domain}, a domain actively engaged in phishing activity impersonating our brand.",
-    "We have identified {domain} as a phishing domain actively targeting our users and brand identity.",
+    "We are reporting {domain} as an active phishing domain that fraudulently impersonates our brand and is being used to target our users.",
+
+    "The domain {domain} is actively conducting phishing activity by impersonating our brand and deceiving users into interacting with a fraudulent website.",
+
+    "This is a formal abuse report against {domain}, which is being used as an active phishing website to impersonate our brand and deceive users.",
+
+    "We have confirmed that {domain} is an active phishing domain fraudulently using our brand identity to target and deceive users.",
 ]
 
 _DESCRIPTION_REGISTRAR = [
-    "This domain is impersonating our brand's official website by cloning its login interface to harvest user credentials, OTP tokens, and personal data without authorization. Users who visit this site are deceived into submitting sensitive information (login credentials, passwords, payment details, etc.).",
-    "The domain has been set up to mimic our official website in order to trick visitors into entering their credentials and personal data. It presents a convincing replica of our login page designed to steal user account information.",
-    "This fraudulent site clones our brand's interface to deceive users into submitting sensitive data including login credentials, OTP tokens, and payment information. The phishing page is actively harvesting user data.",
-    "The domain hosts a phishing page that impersonates our brand's login portal. Visitors are tricked into providing credentials, personal information, and financial data to the attacker.",
+    "This domain is actively impersonating our brand's official website by cloning its login interface to steal user credentials, harvest OTP tokens, and collect personal and payment information without authorization. Users are deceived into submitting sensitive information to the fraudulent site.",
+
+    "The domain has been set up as a fraudulent replica of our official website to conduct phishing activity against users. It impersonates our brand and login interface to steal account credentials, harvest OTP tokens, and collect personal and financial information.",
+
+    "This fraudulent site actively clones our brand's interface and login portal to deceive users and steal sensitive information, including login credentials, OTP tokens, passwords, and payment details. The phishing page is actively being used to collect user data.",
+
+    "The domain hosts an active phishing page that fraudulently impersonates our brand's official login portal. It is being used to deceive visitors and steal credentials, OTP tokens, personal information, and financial data from victims.",
 ]
 
 _REQUEST_REGISTRAR = [
-    "We request the immediate suspension or transfer-lock of this domain in accordance with your Acceptable Use Policy and ICANN Registrar Accreditation Agreement (RAA) §3.18.",
-    "We respectfully request that you suspend or place a transfer-lock on this domain immediately, pursuant to your Acceptable Use Policy and ICANN RAA §3.18.",
-    "Please take immediate action to suspend this domain under your Acceptable Use Policy and ICANN Registrar Accreditation Agreement obligations (RAA §3.18).",
-    "We urge you to suspend this domain without delay in compliance with your Acceptable Use Policy and ICANN RAA §3.18 requirements.",
+    "We request the immediate suspension of this domain in accordance with your Acceptable Use Policy and applicable registrar abuse procedures.",
+
+    "We respectfully request that you immediately suspend this domain and take any appropriate registrar-level action under your Acceptable Use Policy and applicable abuse policies.",
+
+    "Please take immediate action to suspend this domain and prevent its continued use for phishing and unauthorized brand impersonation in accordance with your applicable abuse policies.",
+
+    "We urge you to suspend this domain without delay and take appropriate action under your Acceptable Use Policy and registrar abuse procedures to prevent further harm to users.",
 ]
 
 _CLOSING_REGISTRAR = [
-    "Please confirm receipt and any action taken at your earliest convenience.",
-    "We appreciate your prompt attention to this matter and look forward to your confirmation.",
-    "Your swift action on this matter is greatly appreciated. Please acknowledge receipt of this report.",
-    "Thank you for your attention to this urgent matter. Please confirm once action has been taken.",
+    "Please confirm receipt of this report and any action taken at your earliest convenience.",
+
+    "We appreciate your prompt attention to this matter and would appreciate confirmation of any action taken.",
+
+    "Thank you for your attention to this urgent matter. Please acknowledge receipt and advise us of any action taken.",
+
+    "We appreciate your prompt assistance in addressing this matter and look forward to your confirmation.",
 ]
 
 _SUBJECT_CA = [
-    "SSL Certificate Revocation Request - {domain} (Phishing)",
+    "SSL Certificate Abuse Report - {domain} (Phishing)",
+    "Phishing Site Using SSL Certificate - {domain}",
     "Certificate Abuse Report: Phishing Domain - {domain}",
-    "Fraudulent SSL Certificate in Use - {domain}",
-    "SSL Certificate Revocation Request for Phishing Site - {domain}",
+    "Request for SSL Certificate Review - {domain} (Phishing)",
 ]
 
 _OPENING_CA = [
-    "We are requesting the immediate revocation of the SSL certificate issued for the domain {domain}, which is being used to impersonate our brand for phishing and credential harvesting.",
-    "We are writing to report that the SSL certificate issued for {domain} is actively being used to facilitate a phishing attack against our brand.",
-    "This is an urgent request for revocation of the SSL certificate for {domain}, a domain currently conducting phishing operations against our users.",
-    "We have identified that the SSL certificate issued for {domain} is being misused to host a phishing site impersonating our brand.",
+    "We are reporting the SSL certificate associated with {domain}, which is being used by an active phishing website impersonating our brand.",
+    "We are writing to report that the certificate associated with {domain} is currently being used on a phishing website targeting our brand and users.",
+    "This is an abuse report regarding the SSL certificate used by {domain}, an active phishing site impersonating our brand.",
+    "We have identified {domain} as an active phishing website impersonating our brand and using an SSL certificate to serve the fraudulent site over HTTPS.",
 ]
 
 _DESCRIPTION_CA = [
-    "The fraudulent site clones our brand's official login page to deceive users into submitting sensitive information (credentials, OTP tokens, payment details).",
-    "This domain hosts a phishing page that replicates our brand's login interface to steal user credentials and personal information.",
-    "The site mimics our official brand portal to harvest user login credentials, OTP tokens, and payment information from unsuspecting visitors.",
-    "Attackers are using this certificate to add apparent legitimacy to a phishing page that clones our brand's authentication interface.",
+    "The fraudulent site clones our brand's official login page to deceive users into submitting sensitive information, including login credentials, OTP tokens, and payment details.",
+    "This domain hosts a phishing page that replicates our brand's login interface and is used to steal user credentials, harvest OTP tokens, and collect payment information.",
+    "The site impersonates our official brand portal and is being used to steal login credentials, OTP tokens, and sensitive payment information from users.",
+    "The website uses our brand identity and cloned authentication interface to operate an active phishing page and collect sensitive information from victims.",
 ]
 
 
