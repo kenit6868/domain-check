@@ -76,18 +76,26 @@ if sync_clicked:
             save_mail_cache(account_name, st.session_state.provider_mails)
             st.session_state.show_action_required = False
         progress_bar.progress(100, text="Đồng bộ hoàn tất")
-        live_table.empty()
-        st.success(f"Đã nhận diện {len(st.session_state.provider_mails)} email liên quan.")
+        # Không xóa live_table — giữ nguyên để người dùng thấy ngay kết quả
+        # (all_table bên dưới sẽ hiển thị đầy đủ sau khi rerun)
+        st.success(f"Đã nhận diện {len(st.session_state.provider_mails)} email liên quan. Cuộn xuống để xem bảng đầy đủ.")
     except Exception as exc: st.error(f"Không đọc được inbox: {exc}")
 
 all_mails = st.session_state.get("provider_mails", [])
 if not all_mails:
     st.info("Chưa có email trong khoảng ngày đã chọn. Hãy đổi ngày hoặc bấm đồng bộ lại."); st.stop()
 
+# Dùng buffer ±1 ngày để bù timezone discrepancy giữa Date header và IMAP server receipt date.
+# IMAP SINCE/BEFORE đã lọc theo server date; Date header của email có thể lệch múi giờ.
+_buf = timedelta(days=1)
 all_filtered = []
 for item in all_mails:
     received_at = received_datetime(item)
-    if date_from and (received_at is None or not (date_from <= received_at.date() <= date_to)):
+    if received_at is None:
+        all_filtered.append(item)  # không có Date header → không lọc bỏ
+        continue
+    item_date = received_at.date()
+    if date_from and date_to and not (date_from - _buf <= item_date <= date_to + _buf):
         continue
     all_filtered.append(item)
 if not all_filtered:
@@ -239,7 +247,9 @@ with right:
         st.caption("Chưa thể gửi: " + "; ".join(blocked_reasons) + ".")
     if st.button("Gửi phản hồi đúng thread", type="primary", disabled=not can_send, key=f"{key}_send"):
         attachments = [screenshot_path] if screenshot_path and os.path.isfile(screenshot_path) else []
-        result = send_threaded_reply(account, mail, subject, body, attachments=attachments)
+        proxies = cfg.get("smtp_proxies", [])
+        proxy_str = proxies[0] if proxies else None
+        result = send_threaded_reply(account, mail, subject, body, attachments=attachments, proxy_str=proxy_str)
         if result["success"]:
             st.success("SMTP server đã chấp nhận và gửi phản hồi.")
             if result.get("sent_copy_saved"):
