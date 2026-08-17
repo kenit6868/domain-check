@@ -1991,6 +1991,10 @@ def generate_email_drafts(domain, cert, who, vt, cfg, target_url=None):
                 webform_url = url
                 break
 
+    # Khai báo sớm để dùng được ở cả nhánh registrar lẫn CA bên dưới
+    vt_count = vt.get("malicious", 0) or 0
+    vt_suspicious = vt.get("suspicious", 0) or 0
+
     if registrar and webform_url:
         path = os.path.join(REPORTS_DIR, f"{domain}_registrar_report.txt")
         contact_name = cfg.get("contact_name") or "[TÊN BẠN]"
@@ -2044,8 +2048,6 @@ Email: {contact_email}
         closing = _pick(rng, _CLOSING_REGISTRAR)
 
         # Evidence bullets — random thứ tự (trừ Domain luôn đứng đầu)
-        vt_count = vt.get("malicious", 0) or 0
-        vt_suspicious = vt.get("suspicious", 0) or 0
         vt_info = f"VirusTotal: {vt.get('link', 'N/A')}"
         if vt_count:
             vt_info += f" ({vt_count} security engines flagged as malicious)"
