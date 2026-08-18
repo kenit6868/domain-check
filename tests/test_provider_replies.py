@@ -4,7 +4,7 @@ import tempfile
 from email.message import EmailMessage
 from unittest.mock import MagicMock, patch
 import provider_replies as pr
-from provider_replies import ACTION_REQUIRED_TYPES, build_reply, extract_reply_context, parse_message, received_datetime
+from provider_replies import ACTION_REQUIRED_TYPES, build_reply, build_reply_vi, extract_reply_context, load_reply_log, needs_reply, parse_message, provider_message_vi, received_datetime, record_reply_sent, reply_log_key, save_uploaded_evidence
 
 class ProviderReplyTests(unittest.TestCase):
     def make_mail(self, sender, subject, body):
@@ -30,6 +30,17 @@ class ProviderReplyTests(unittest.TestCase):
         msg["Subject"] = "Case update"; msg["Date"] = "Sun, 16 Aug 2026 09:30:00 +0700"; msg.set_content("We received your report.")
         mail = parse_message("13", "reporter@example.com", msg.as_bytes())
         self.assertEqual(received_datetime(mail).date().isoformat(), "2026-08-16")
+
+    def test_imap_server_date_has_priority_over_sender_date(self):
+        mail = self.make_mail("abuse@namecheap.com", "Case update", "We received your report.")
+        mail.date = "Mon, 17 Aug 2026 22:00:00 +0000"
+        mail.server_date = "18-Aug-2026 05:00:03 +0700"
+        value = received_datetime(mail)
+        self.assertEqual(value.strftime("%Y-%m-%d %H:%M:%S %z"), "2026-08-18 05:00:03 +0700")
+
+    def test_imap_internal_date_is_extracted_from_fetch_metadata(self):
+        metadata = b'1064 (UID 1064 INTERNALDATE "18-Aug-2026 12:17:04 +0700" BODY[] {1234}'
+        self.assertEqual(pr._imap_internal_date(metadata), "18-Aug-2026 12:17:04 +0700")
 
     def test_completed_notifications_are_not_action_required(self):
         mail = self.make_mail("report@netcraft.com", "We've finished analysing your submission", "The case is closed.")
@@ -134,6 +145,7 @@ Screenshots: Please attach screenshot evidence."""
         mail = self.make_mail("abuse@dynadot.com", "Abuse Complaint Submitted", body)
         self.assertEqual(mail.request_type, "acknowledgement")
         self.assertNotIn(mail.request_type, ACTION_REQUIRED_TYPES)
+        self.assertFalse(needs_reply(mail))
 
     def test_request_before_quoted_report_remains_actionable(self):
         body = """We could not verify the reported content. Please provide additional evidence.
@@ -142,5 +154,122 @@ Original report details."""
         mail = self.make_mail("noreply@notify.cloudflare.com", "Response to your report", body)
         self.assertEqual(mail.request_type, "technical_evidence")
         self.assertIn(mail.request_type, ACTION_REQUIRED_TYPES)
+
+    def test_cloudflare_forwarded_notice_does_not_need_reply(self):
+        body = """Hello,
+Cloudflare received your Phishing report regarding: hct369[.]com[.]tw.
+Your abuse report has been forwarded to the website owner.
+We have also forwarded this report to the relevant hosting provider.
+To respond to this issue, please reply to abusereply@cloudflare.com.
+Below is the report we received:
+Logs or other evidence of abuse: Please suspend this phishing domain.
+"""
+        mail = self.make_mail(
+            "Cloudflare <noreply@notify.cloudflare.com>",
+            "[d5f83a187b4344a1]: Response to your Phishing report",
+            body,
+        )
+        self.assertEqual(mail.request_type, "acknowledgement")
+        self.assertNotIn(mail.request_type, ACTION_REQUIRED_TYPES)
+
+    def test_cloudflare_could_not_detect_abuse_requires_reply(self):
+        body = """Hello,
+Cloudflare received your Phishing report regarding: yypydw[.]pw.
+We could not detect any abusive or malicious content. If you wish for Cloudflare
+to investigate further, please provide relevant and specific information so that
+we can continue assessing this case.
+If you have questions about this abuse report, please send an email to
+abusereply@cloudflare.com with the following details:
+- The report identification number included in the subject line
+- Any additional details, context or evidence you can provide regarding the content that was reported.
+Below is the report we received:
+Logs or other evidence of abuse: Original reporter text.
+"""
+        mail = self.make_mail(
+            "Cloudflare <noreply@notify.cloudflare.com>",
+            "[5b8c7c2dedb6dbc3]: Response to your Phishing report",
+            body,
+        )
+        self.assertEqual(mail.request_type, "clarification")
+        self.assertIn(mail.request_type, ACTION_REQUIRED_TYPES)
+        self.assertTrue(needs_reply(mail))
+        self.assertEqual(mail.reply_to, "abusereply@cloudflare.com")
+        self.assertEqual(mail.channel, "email")
+        self.assertEqual(mail.ticket, "5b8c7c2dedb6dbc3")
+
+        subject, reply, warnings = build_reply(mail, {
+            "reported_url": "https://yypydw.pw/vi-vn/",
+            "redirect_url": "https://redirect-phishing.example/register",
+            "button_label": "Register/Login",
+            "evidence": "The registration control was tested manually in a browser.",
+            "screenshot_attached": True,
+        })
+        self.assertEqual(subject, "Re: Phishing Report - Report ID 5b8c7c2dedb6dbc3")
+        self.assertIn("redirect-phishing.example/register", reply)
+        self.assertIn('href="https://redirect-phishing.example/register"', reply)
+        self.assertIn("Steps to reproduce", reply)
+        self.assertIn("Register/Login", reply)
+        self.assertIn("corresponding DOM element", reply)
+        self.assertIn("relationship between yypydw.pw and redirect-phishing.example", reply)
+        self.assertEqual(warnings, [])
+        self.assertIn("Cloudflare chưa phát hiện", provider_message_vi(mail))
+        reply_vi = build_reply_vi(mail, {
+            "reported_url": "https://yypydw.pw/vi-vn/",
+            "redirect_url": "https://redirect-phishing.example/register",
+            "button_label": "Register/Login",
+            "screenshot_attached": True,
+        })
+        self.assertIn("Các bước tái hiện", reply_vi)
+        self.assertIn("element DOM", reply_vi)
+        self.assertIn("redirect-phishing.example", reply_vi)
+
+        _, incomplete_reply, incomplete_warnings = build_reply(mail, {
+            "reported_url": "https://yypydw.pw/vi-vn/",
+            "redirect_url": "",
+            "evidence": "Verified phishing page.",
+            "screenshot_attached": True,
+        })
+        self.assertNotIn("[PLEASE", incomplete_reply)
+        self.assertNotIn("href=", incomplete_reply)
+        self.assertNotIn("Steps to reproduce", incomplete_reply)
+        self.assertTrue(incomplete_warnings)
+
+    def test_uploaded_evidence_accepts_real_png_signature(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(pr, "EVIDENCE_DIR", folder):
+                path = save_uploaded_evidence("proof.png", b"\x89PNG\r\n\x1a\nimage", "example.com")
+                self.assertTrue(os.path.isfile(path))
+
+    def test_uploaded_evidence_rejects_fake_image(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(pr, "EVIDENCE_DIR", folder):
+                with self.assertRaises(ValueError):
+                    save_uploaded_evidence("proof.png", b"not-an-image", "example.com")
+
+    def test_successful_reply_status_is_persisted_without_body(self):
+        mail = self.make_mail("abuse@namecheap.com", "Case NC-1234", "Please provide the full URL.")
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(pr, "REPLY_LOG_PATH", os.path.join(folder, "reply-log.json")):
+                record = record_reply_sent(mail, "Re: Case NC-1234", "abuse@namecheap.com")
+                log = load_reply_log()
+        self.assertEqual(log[reply_log_key(mail)]["recipient"], "abuse@namecheap.com")
+        self.assertEqual(record["ticket"], "NC-1234")
+        self.assertNotIn("body", record)
+
+    def test_sent_message_matches_original_thread_or_ticket(self):
+        mail = self.make_mail(
+            "Cloudflare <noreply@notify.cloudflare.com>",
+            "[1977667f35362d26]: Response to your Phishing report",
+            "Please provide additional evidence.",
+        )
+        threaded = EmailMessage()
+        threaded["Subject"] = "Re: Phishing Report - Report ID 1977667f35362d26"
+        threaded["In-Reply-To"] = mail.message_id
+        self.assertTrue(pr._sent_message_matches(mail, threaded))
+        ticket_only = EmailMessage()
+        ticket_only["Subject"] = "Re: Phishing Report - Report ID 1977667f35362d26"
+        self.assertTrue(pr._sent_message_matches(mail, ticket_only))
+        unrelated = EmailMessage(); unrelated["Subject"] = "Unrelated message"
+        self.assertFalse(pr._sent_message_matches(mail, unrelated))
 
 if __name__ == "__main__": unittest.main()

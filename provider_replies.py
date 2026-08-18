@@ -11,7 +11,7 @@ import re
 import smtplib
 import requests
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.header import decode_header
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr, parsedate_to_datetime
@@ -64,6 +64,7 @@ ACTION_REQUIRED_TYPES = {
     "technical_evidence", "clarification",
 }
 CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "provider_mail_cache.json")
+REPLY_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "provider_reply_log.json")
 EVIDENCE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "evidence", "provider_replies")
 
 
@@ -72,6 +73,7 @@ class ProviderMail:
     uid: str; account: str; provider: str; provider_label: str; sender: str; reply_to: str
     subject: str; date: str; message_id: str; body: str; request_type: str; request_label: str
     domain: str; urls: list[str]; ticket: str; channel: str; risk: str
+    server_date: str = ""
     def to_dict(self): return asdict(self)
 
 
@@ -145,7 +147,17 @@ def provider_request_text(body):
 def classify_request(subject, body):
     subject_lower = (subject or "").lower()
     status_text = f"{subject}\n{provider_request_text(body)}".lower()
-    if any(value in subject_lower for value in (
+    # Cloudflare's standard forwarding notice is a terminal acknowledgement:
+    # the report has already been routed to the parties that can act on it.
+    # The generic footer may still mention abusereply@cloudflare.com, but that
+    # invitation alone is not a request for more evidence and must not make the
+    # message actionable.
+    forwarded_notice = (
+        "report has been forwarded to the website owner" in status_text
+        or "report to the relevant hosting provider" in status_text
+        or "report has been forwarded to the relevant hosting provider" in status_text
+    )
+    if forwarded_notice or any(value in subject_lower for value in (
         "abuse complaint submitted", "thanks for your report", "report confirmation",
         "report received", "submission received",
     )) or any(value in status_text for value in ("received your report", "report has been received", "ticket has been created")):
@@ -157,6 +169,33 @@ def classify_request(subject, body):
         if any(word in text for word in words):
             return kind, LABELS[kind], "approval_required" if kind in ("legal_evidence", "identity") else "review"
     return "manual_review", LABELS["manual_review"], "review"
+
+
+def needs_reply(mail):
+    """Return whether a provider message explicitly requires a reviewed response."""
+    if is_delivery_failure(mail.sender, mail.subject):
+        return False
+    if mail.request_type not in ACTION_REQUIRED_TYPES:
+        return False
+    if mail.provider == "cloudflare":
+        request_text = provider_request_text(mail.body).lower()
+        # A forwarding confirmation is complete and does not need a reply even
+        # though its footer offers abusereply@cloudflare.com for questions.
+        if (
+            "report has been forwarded to the website owner" in request_text
+            or "report has been forwarded to the relevant hosting provider" in request_text
+            or "forwarded this report to the relevant hosting provider" in request_text
+        ):
+            return False
+        # Keep Cloudflare requests that explicitly ask for evidence/details.
+        return any(phrase in request_text for phrase in (
+            "could not detect any abusive or malicious content",
+            "please provide relevant and specific information",
+            "additional details, context or evidence",
+            "please provide additional evidence",
+            "please provide additional information",
+        ))
+    return True
 
 
 def is_delivery_failure(sender, subject, content_type=""):
@@ -174,7 +213,10 @@ def is_delivery_failure(sender, subject, content_type=""):
 
 def _ticket(text):
     patterns = (
-        r"report\s*(?:identification number|number|no\.?|id|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{3,})",
+        # Require a separator so prose such as "report identification number
+        # included in the subject" cannot produce the bogus ticket "included".
+        r"report\s*(?:identification number|number|no\.?|id|#)\s*[:#-]\s*([A-Z0-9][A-Z0-9._/-]{3,})",
+        r"^\s*\[([A-F0-9]{12,})\]\s*:",
         r"(?:ticket|case|reference|request)\s*(?:number|no\.?|id|#)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{3,})",
     )
     for pattern in patterns:
@@ -225,11 +267,19 @@ def extract_reply_context(mail):
 
 
 def received_datetime(mail):
-    """Parse an RFC email date; return None for missing or malformed headers."""
+    """Return the IMAP server receipt time, falling back to the message Date header."""
     try:
-        return parsedate_to_datetime(mail.date) if mail.date else None
+        raw_date = getattr(mail, "server_date", "") or mail.date
+        return parsedate_to_datetime(raw_date) if raw_date else None
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _imap_internal_date(fetch_metadata):
+    """Extract IMAP INTERNALDATE and convert it to an RFC-style parseable value."""
+    text = fetch_metadata.decode("ascii", errors="replace") if isinstance(fetch_metadata, bytes) else str(fetch_metadata or "")
+    match = re.search(r'INTERNALDATE\s+"([^"]+)"', text, re.I)
+    return match.group(1) if match else ""
 
 
 def parse_message(uid, account, raw_message):
@@ -257,7 +307,7 @@ def parse_message(uid, account, raw_message):
                         "" if is_bounce else _ticket(f"{subject}\n{body}"), channel, risk)
 
 
-def fetch_provider_mail(account, limit=100, unread_only=False, date_from=None, date_to=None, progress_callback=None):
+def fetch_provider_mail(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None):
     host = account.get("imap_host") or account.get("host")
     if not host or not account.get("username") or not account.get("password"): raise ValueError("Tài khoản thiếu cấu hình IMAP")
     conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)))
@@ -266,20 +316,30 @@ def fetch_provider_mail(account, limit=100, unread_only=False, date_from=None, d
         if status != "OK": raise RuntimeError("Không mở được INBOX")
         criteria = []
         if unread_only: criteria.append("UNSEEN")
-        if date_from: criteria.extend(("SINCE", date_from.strftime("%d-%b-%Y")))
+        # IMAP searches by the server's internal calendar date. Query one extra
+        # day on each side so UTC/local-midnight messages are available; the UI
+        # performs the final exact filter after timezone conversion.
+        if date_from: criteria.extend(("SINCE", (date_from - timedelta(days=1)).strftime("%d-%b-%Y")))
         if date_to:
-            from datetime import timedelta
-            criteria.extend(("BEFORE", (date_to + timedelta(days=1)).strftime("%d-%b-%Y")))
+            criteria.extend(("BEFORE", (date_to + timedelta(days=2)).strftime("%d-%b-%Y")))
         if not criteria: criteria.append("ALL")
         status, data = conn.uid("search", None, *criteria)
         if status != "OK": raise RuntimeError("Không tìm được email")
         result = []
-        selected_uids = list(reversed(data[0].split()[-max(1, min(int(limit), 500)):]))
+        all_uids = data[0].split()
+        if limit is None:
+            selected_uids = list(reversed(all_uids))
+        else:
+            clean_limit = int(limit)
+            if clean_limit <= 0:
+                raise ValueError("Số lượng email phải là số nguyên dương")
+            selected_uids = list(reversed(all_uids[-clean_limit:]))
         total = len(selected_uids)
         for position, uid in enumerate(selected_uids, start=1):
-            status, payload = conn.uid("fetch", uid, "(BODY.PEEK[])")
+            status, payload = conn.uid("fetch", uid, "(INTERNALDATE BODY.PEEK[])")
             if status == "OK" and payload and isinstance(payload[0], tuple):
                 item = parse_message(uid.decode(), account["username"], payload[0][1])
+                item.server_date = _imap_internal_date(payload[0][0])
                 # Giữ lại: email từ provider đã nhận diện, HOẶC email có request cụ thể (không phải manual_review)
                 # Bỏ qua: provider unknown + manual_review = email rác không liên quan
                 if item.provider != "unknown" or item.request_type != "manual_review":
@@ -350,6 +410,128 @@ def clear_mail_cache(account_name=None):
         except FileNotFoundError: pass
 
 
+def reply_log_key(mail):
+    """Stable key for one received message across UI reruns and cache reloads."""
+    identity = mail.uid or mail.message_id or f"{mail.ticket}|{mail.subject}"
+    return f"{mail.account}|{identity}"
+
+
+def load_reply_log():
+    try:
+        with open(REPLY_LOG_PATH, encoding="utf-8") as handle:
+            value = json.load(handle)
+            return value if isinstance(value, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def record_reply_sent(mail, subject, recipient):
+    """Persist a successful provider reply; credentials and body are not stored."""
+    data = load_reply_log()
+    record = {
+        "account": mail.account,
+        "uid": mail.uid,
+        "message_id": mail.message_id,
+        "provider": mail.provider_label,
+        "domain": mail.domain,
+        "ticket": mail.ticket,
+        "subject": subject,
+        "recipient": recipient,
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    }
+    data[reply_log_key(mail)] = record
+    temp_path = REPLY_LOG_PATH + ".tmp"
+    with open(temp_path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2)
+    os.replace(temp_path, REPLY_LOG_PATH)
+    return record
+
+
+def _sent_message_matches(mail, sent_message):
+    """Match a Sent message to its Inbox request using thread headers or ticket."""
+    thread_headers = " ".join((
+        sent_message.get("In-Reply-To", ""),
+        sent_message.get("References", ""),
+    ))
+    if mail.message_id and mail.message_id in thread_headers:
+        return True
+    sent_subject = _decode(sent_message.get("Subject", ""))
+    if mail.ticket and len(mail.ticket) >= 6 and mail.ticket.lower() in sent_subject.lower():
+        return True
+    return False
+
+
+def sync_sent_reply_status(account, mails, date_from=None, date_to=None):
+    """Import reply status from the IMAP Sent folder for the supplied Inbox mails."""
+    if not mails:
+        return {"success": True, "matched": 0, "error": ""}
+    host = account.get("imap_host") or account.get("host")
+    if not host or not account.get("username") or not account.get("password"):
+        return {"success": False, "matched": 0, "error": "Tài khoản thiếu cấu hình IMAP"}
+    conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)))
+    try:
+        conn.login(account["username"], account["password"])
+        status, folders = conn.list()
+        if status != "OK":
+            return {"success": False, "matched": 0, "error": "Không đọc được danh sách thư mục IMAP"}
+        sent_folder = account.get("imap_sent_mailbox", "")
+        if not sent_folder:
+            for raw_line in folders or []:
+                flags, _, mailbox = _parse_imap_list_line(raw_line)
+                if "\\sent" in flags.lower() and mailbox:
+                    sent_folder = mailbox
+                    break
+        if not sent_folder:
+            known = ("Sent", "Sent Items", "Sent Messages", "INBOX.Sent")
+            parsed_names = [_parse_imap_list_line(line)[2] for line in (folders or [])]
+            sent_folder = next((actual for actual in parsed_names for name in known if actual.lower() == name.lower()), "Sent")
+        status, _ = conn.select(sent_folder, readonly=True)
+        if status != "OK":
+            return {"success": False, "matched": 0, "error": f"Không mở được thư mục {sent_folder}"}
+        criteria = []
+        if date_from: criteria.extend(("SINCE", (date_from - timedelta(days=1)).strftime("%d-%b-%Y")))
+        if date_to: criteria.extend(("BEFORE", (date_to + timedelta(days=2)).strftime("%d-%b-%Y")))
+        if not criteria: criteria.append("ALL")
+        status, data = conn.uid("search", None, *criteria)
+        if status != "OK":
+            return {"success": False, "matched": 0, "error": "Không tìm được email trong thư mục Đã gửi"}
+        sent_messages = []
+        for uid in reversed(data[0].split()):
+            status, payload = conn.uid(
+                "fetch", uid,
+                "(BODY.PEEK[HEADER.FIELDS (SUBJECT TO DATE MESSAGE-ID IN-REPLY-TO REFERENCES)])",
+            )
+            if status == "OK" and payload and isinstance(payload[0], tuple):
+                sent_messages.append(email.message_from_bytes(payload[0][1]))
+        reply_log = load_reply_log()
+        matched = 0
+        for mail in mails:
+            if reply_log_key(mail) in reply_log:
+                continue
+            sent = next((message for message in sent_messages if _sent_message_matches(mail, message)), None)
+            if not sent:
+                continue
+            reply_log[reply_log_key(mail)] = {
+                "account": mail.account, "uid": mail.uid, "message_id": mail.message_id,
+                "provider": mail.provider_label, "domain": mail.domain, "ticket": mail.ticket,
+                "subject": _decode(sent.get("Subject", "")),
+                "recipient": parseaddr(_decode(sent.get("To", "")))[1],
+                "sent_at": sent.get("Date", ""), "source": "imap_sent",
+            }
+            matched += 1
+        if matched:
+            temp_path = REPLY_LOG_PATH + ".tmp"
+            with open(temp_path, "w", encoding="utf-8") as handle:
+                json.dump(reply_log, handle, ensure_ascii=False, indent=2)
+            os.replace(temp_path, REPLY_LOG_PATH)
+        return {"success": True, "matched": matched, "error": ""}
+    except Exception as exc:
+        return {"success": False, "matched": 0, "error": str(exc)}
+    finally:
+        try: conn.logout()
+        except Exception: pass
+
+
 def mark_mails_seen(account, uids):
     """Mark the supplied IMAP UIDs as read and return a per-call summary."""
     clean_uids = [str(uid).strip() for uid in uids if str(uid).strip()]
@@ -376,8 +558,10 @@ def mark_mails_seen(account, uids):
 
 
 def build_reply(mail, details):
-    warnings = []; target = (details.get("reported_url") or "").strip(); official = (details.get("official_url") or "").strip(); evidence = (details.get("evidence") or "").strip()
+    warnings = []; target = (details.get("reported_url") or "").strip(); official = (details.get("official_url") or "").strip(); evidence = (details.get("evidence") or "").strip(); redirect_url = (details.get("redirect_url") or "").strip(); button_label = (details.get("button_label") or "Register/Login").strip()
     subject = "Re: " + re.sub(r"^(re:\s*)+", "", mail.subject, flags=re.I)
+    if mail.provider == "cloudflare" and mail.request_type in ("technical_evidence", "clarification") and mail.ticket:
+        subject = f"Re: Phishing Report - Report ID {mail.ticket}"
     intro = f"Dear {mail.provider_label} Abuse Team,\n\nThank you for your response.\n" + (f"Reference/Ticket: {mail.ticket}\n" if mail.ticket else "") + "\n"
     if mail.request_type == "full_url": core = f"The complete reported URL is:\n{target or '[PLEASE ADD THE COMPLETE REPORTED URL]'}"; warnings += [] if target else ["NCC yêu cầu URL đầy đủ nhưng chưa có URL."]
     elif mail.request_type == "official_url": core = f"The official website for comparison is:\n{official or '[PLEASE ADD THE OFFICIAL WEBSITE URL]'}"; warnings += [] if official else ["NCC yêu cầu website chính thức nhưng chưa có URL."]
@@ -387,15 +571,146 @@ def build_reply(mail, details):
             if details.get("urlscan_result"): core += f"\nURLScan analysis: {details['urlscan_result']}"
         else:
             core = "[ATTACH VERIFIED SCREENSHOTS BEFORE SENDING]"; warnings.append("Cần tạo hoặc đính kèm ảnh thật trước khi gửi.")
-    elif mail.request_type in ("technical_evidence", "clarification"): core = f"Please find the requested information below:\n{evidence or '[PLEASE ADD VERIFIED INFORMATION]'}"; warnings += [] if evidence else ["Chưa có thông tin bổ sung đã xác minh."]
+    elif mail.request_type in ("technical_evidence", "clarification"):
+        if mail.provider == "cloudflare":
+            core = (
+                f"Regarding Report ID: {mail.ticket or '[REPORT ID]'},\n\n"
+                "We are providing additional technical evidence regarding the reported domain:\n\n"
+                f"Reported URL:\n{target}"
+            )
+            if redirect_url:
+                core += (
+                    f"\n\nThe website contains a \"{button_label}\" button that directly links users to an external destination:\n\n"
+                    f"{redirect_url}\n\n"
+                    "This behavior was verified directly in the page DOM. The button contains:\n\n"
+                    f'href="{redirect_url}"\n\n'
+                    "Steps to reproduce:\n\n"
+                    f"1. Visit {target}\n"
+                    f"2. Locate the \"{button_label}\" button.\n"
+                    "3. Click the button.\n"
+                    f"4. The user is directed to {redirect_url}."
+                )
+            if evidence:
+                core += f"\n\nAdditional verified observations:\n{evidence}"
+            if details.get("screenshot_attached") and redirect_url:
+                core += (
+                    "\n\nWe have attached a screenshot showing the reported website, the "
+                    f"\"{button_label}\" button, and the corresponding DOM element confirming the external destination URL."
+                )
+            if target and redirect_url:
+                source_domain = re.sub(r"^https?://", "", target, flags=re.I).split("/", 1)[0]
+                destination_domain = re.sub(r"^https?://", "", redirect_url, flags=re.I).split("/", 1)[0]
+                core += (
+                    "\n\nPlease investigate this redirect/linking behavior and the relationship between "
+                    f"{source_domain} and {destination_domain}, including whether the destination is being used "
+                    "in connection with fraudulent or phishing activity."
+                )
+            if not target: warnings.append("Chưa có URL website vi phạm đầy đủ.")
+            if not redirect_url: warnings.append("Chưa có URL href/redirect đã xác minh.")
+        else:
+            core = f"Please find the requested information below:\n{evidence or '[PLEASE ADD VERIFIED INFORMATION]'}"
+            warnings += [] if evidence else ["Chưa có thông tin bổ sung đã xác minh."]
     elif mail.request_type in ("legal_evidence", "identity"): core = "We are reviewing your request. The requested legal or identity documentation will only be supplied after authorization by the appropriate representative."; warnings.append("Bắt buộc duyệt thủ công; không tự tạo tuyên bố hoặc giấy tờ.")
     elif mail.request_type == "acknowledgement": core = "Thank you for confirming receipt. Please keep us informed of any action taken or additional information required."
     elif mail.request_type == "resolved": core = "Thank you for the update. We acknowledge the status of this case."
     else: core = evidence or "[PLEASE WRITE A RESPONSE BASED ON THE PROVIDER REQUEST]"; warnings.append("Không nhận diện chắc chắn yêu cầu; cần đọc và sửa thủ công.")
-    if target and mail.request_type != "full_url": core += f"\n\nReported URL:\n{target}"
+    if target and mail.request_type != "full_url" and not (mail.provider == "cloudflare" and mail.request_type in ("technical_evidence", "clarification")): core += f"\n\nReported URL:\n{target}"
     body = intro + core + f"\n\nKind regards,\n{(details.get('contact_name') or 'Reporter').strip()}"
     if details.get("contact_email"): body += f"\n{details['contact_email'].strip()}"
     return subject, body, warnings
+
+
+def provider_message_vi(mail):
+    """Vietnamese reading aid for the provider request; never used as sent content."""
+    context = extract_reply_context(mail)
+    target = context.get("reported_url") or mail.domain or "(không xác định)"
+    ticket = mail.ticket or "(không có)"
+    if mail.provider == "cloudflare" and mail.request_type in ("technical_evidence", "clarification"):
+        return (
+            "Xin chào,\n\n"
+            f"Cloudflare đã nhận báo cáo phishing liên quan đến: {target}.\n\n"
+            "Cloudflare chưa phát hiện được nội dung lạm dụng hoặc độc hại. Nếu muốn Cloudflare "
+            "điều tra thêm, người báo cáo cần cung cấp thông tin liên quan, cụ thể để họ tiếp tục đánh giá vụ việc.\n\n"
+            "Khi phản hồi, hãy gửi tới abusereply@cloudflare.com và cung cấp:\n"
+            f"- Mã báo cáo trong tiêu đề: {ticket}\n"
+            "- Chi tiết, bối cảnh hoặc bằng chứng bổ sung về nội dung đã báo cáo.\n\n"
+            "Phần còn lại của email là bản sao báo cáo ban đầu Cloudflare đã nhận."
+        )
+    if mail.provider == "cloudflare" and mail.request_type == "acknowledgement":
+        return (
+            f"Cloudflare đã tiếp nhận báo cáo {ticket} liên quan đến {target}. "
+            "Báo cáo đã được chuyển cho chủ website và/hoặc nhà cung cấp hosting liên quan. "
+            "Đây là thông báo tiếp nhận/chuyển tiếp, không yêu cầu phản hồi."
+        )
+    messages = {
+        "full_url": "NCC yêu cầu cung cấp URL vi phạm đầy đủ và chính xác.",
+        "official_url": "NCC yêu cầu cung cấp URL website chính thức để đối chiếu.",
+        "screenshot": "NCC yêu cầu cung cấp ảnh chụp màn hình làm bằng chứng.",
+        "technical_evidence": "NCC yêu cầu bổ sung bằng chứng hoặc chi tiết kỹ thuật.",
+        "clarification": "NCC yêu cầu giải thích và cung cấp thêm thông tin về báo cáo.",
+        "legal_evidence": "NCC yêu cầu bằng chứng pháp lý hoặc giấy tờ chứng minh quyền sở hữu thương hiệu.",
+        "identity": "NCC yêu cầu giấy tờ xác minh danh tính hoặc doanh nghiệp.",
+        "acknowledgement": "NCC xác nhận đã nhận báo cáo; hiện không yêu cầu phản hồi.",
+        "resolved": "NCC thông báo vụ việc đã được xử lý hoặc đóng.",
+        "delivery_failed": "Đây là thông báo gửi thư thất bại, không phải yêu cầu phản hồi từ NCC.",
+    }
+    return (
+        f"Bản dịch/tóm tắt theo nội dung đã nhận diện:\n\n{messages.get(mail.request_type, 'Email cần được đọc và đánh giá thủ công.')}\n\n"
+        f"NCC: {mail.provider_label}\nMã vụ việc: {ticket}\nURL/domain liên quan: {target}"
+    )
+
+
+def build_reply_vi(mail, details):
+    """Vietnamese review copy matching the generated English reply."""
+    target = (details.get("reported_url") or "").strip()
+    redirect_url = (details.get("redirect_url") or "").strip()
+    button_label = (details.get("button_label") or "Đăng ký/Đăng nhập").strip()
+    evidence = (details.get("evidence") or "").strip()
+    ticket = mail.ticket or "[MÃ BÁO CÁO]"
+    if mail.provider == "cloudflare" and mail.request_type in ("technical_evidence", "clarification"):
+        source_domain = re.sub(r"^https?://", "", target, flags=re.I).split("/", 1)[0]
+        destination_domain = re.sub(r"^https?://", "", redirect_url, flags=re.I).split("/", 1)[0]
+        value = (
+            "Kính gửi Đội ngũ Trust & Safety của Cloudflare,\n\n"
+            "Cảm ơn phản hồi của quý vị.\n\n"
+            f"Liên quan đến mã báo cáo: {ticket},\n\n"
+            "Chúng tôi cung cấp thêm bằng chứng kỹ thuật về domain đã báo cáo:\n\n"
+            f"URL đã báo cáo:\n{target}"
+        )
+        if redirect_url:
+            value += (
+                f"\n\nWebsite có nút \"{button_label}\" liên kết trực tiếp người dùng tới một địa chỉ bên ngoài:\n\n"
+                f"{redirect_url}\n\n"
+                "Hành vi này đã được xác minh trực tiếp trong DOM của trang. Nút có thuộc tính:\n\n"
+                f'href="{redirect_url}"\n\n'
+                "Các bước tái hiện:\n\n"
+                f"1. Truy cập {target}\n"
+                f"2. Tìm nút \"{button_label}\".\n"
+                "3. Bấm vào nút.\n"
+                f"4. Người dùng được chuyển tới {redirect_url}."
+            )
+        if evidence:
+            value += f"\n\nQuan sát bổ sung đã xác minh:\n{evidence}"
+        if details.get("screenshot_attached") and redirect_url:
+            value += (
+                f"\n\nẢnh đính kèm hiển thị website vi phạm, nút \"{button_label}\" và element DOM "
+                "tương ứng xác nhận URL đích bên ngoài."
+            )
+        if target and redirect_url:
+            value += (
+                f"\n\nVui lòng điều tra hành vi redirect/liên kết và mối quan hệ giữa {source_domain} với "
+                f"{destination_domain}, bao gồm khả năng URL đích được sử dụng cho hoạt động gian lận hoặc phishing."
+            )
+        value += "\n\nTrân trọng."
+        return value
+    translations = {
+        "full_url": f"Nội dung trả lời cung cấp URL vi phạm đầy đủ:\n{target}",
+        "official_url": f"Nội dung trả lời cung cấp website chính thức:\n{details.get('official_url') or '[CHƯA NHẬP]'}",
+        "screenshot": "Nội dung trả lời thông báo ảnh bằng chứng được đính kèm.",
+        "technical_evidence": f"Nội dung trả lời cung cấp bằng chứng kỹ thuật:\n{evidence or '[CHƯA NHẬP]'}",
+        "clarification": f"Nội dung trả lời cung cấp thông tin giải thích bổ sung:\n{evidence or '[CHƯA NHẬP]'}",
+    }
+    return translations.get(mail.request_type, "Vui lòng đối chiếu kỹ nội dung tiếng Anh trước khi gửi.")
 
 
 def download_evidence_image(image_url, domain="evidence"):
@@ -412,6 +727,119 @@ def download_evidence_image(image_url, domain="evidence"):
     path = os.path.join(EVIDENCE_DIR, f"{safe_domain}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.png")
     with open(path, "wb") as handle: handle.write(response.content)
     return path
+
+
+def save_uploaded_evidence(filename, content, domain="evidence"):
+    """Validate and persist a manually captured PNG/JPEG evidence image."""
+    extension = os.path.splitext(filename or "")[1].lower()
+    signatures = {
+        ".png": b"\x89PNG\r\n\x1a\n",
+        ".jpg": b"\xff\xd8\xff",
+        ".jpeg": b"\xff\xd8\xff",
+    }
+    signature = signatures.get(extension)
+    if not signature or not content.startswith(signature):
+        raise ValueError("Chỉ chấp nhận ảnh PNG hoặc JPEG hợp lệ")
+    if len(content) > 15 * 1024 * 1024:
+        raise ValueError("Ảnh vượt quá giới hạn 15 MB")
+    safe_domain = re.sub(r"[^a-zA-Z0-9._-]", "_", domain or "evidence")[:100]
+    os.makedirs(EVIDENCE_DIR, exist_ok=True)
+    path = os.path.join(EVIDENCE_DIR, f"{safe_domain}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}{extension}")
+    with open(path, "wb") as handle:
+        handle.write(content)
+    return path
+
+
+def capture_dom_link_evidence(target_url, domain="evidence"):
+    """Capture a browser screenshot with a highlighted Register/Login DOM link.
+
+    The page is inspected without clicking the element or submitting any form.
+    A clearly labelled evidence panel is injected into the screenshot so the
+    selected element and its resolved href are visible in one image.
+    """
+    if not (target_url or "").lower().startswith(("http://", "https://")):
+        return {"success": False, "error": "URL phải bắt đầu bằng http:// hoặc https://", "path": "", "href": "", "label": ""}
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return {"success": False, "error": "Chưa cài Playwright", "path": "", "href": "", "label": ""}
+
+    browser = None
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                accept_downloads=False,
+                service_workers="block",
+                ignore_https_errors=True,
+            )
+            page = context.new_page()
+            page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+            try:
+                page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
+            result = page.evaluate("""
+                () => {
+                    const wanted = /(đăng\\s*k[ýy]|đăng\\s*nhập|register|sign\\s*up|login|log\\s*in)/i;
+                    const nodes = [...document.querySelectorAll('a, button, [role="button"]')];
+                    const candidates = nodes.map((el, index) => {
+                        const text = (el.innerText || el.textContent || el.getAttribute('aria-label') || '').trim();
+                        const href = el.href || el.getAttribute('href') || el.getAttribute('data-href') || '';
+                        const rect = el.getBoundingClientRect();
+                        const style = getComputedStyle(el);
+                        const visible = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+                        return {el, index, text, href, visible};
+                    }).filter(x => x.visible && wanted.test(x.text));
+                    candidates.sort((a, b) => Number(Boolean(b.href)) - Number(Boolean(a.href)) || a.index - b.index);
+                    const picked = candidates[0];
+                    if (!picked) return {error: 'Không tìm thấy nút Đăng ký/Đăng nhập hiển thị trên trang'};
+                    const el = picked.el;
+                    el.scrollIntoView({block: 'center', inline: 'center'});
+                    el.style.setProperty('outline', '5px solid #ff1f1f', 'important');
+                    el.style.setProperty('outline-offset', '5px', 'important');
+                    el.style.setProperty('box-shadow', '0 0 0 8px rgba(255,255,0,.8)', 'important');
+                    const href = el.href || el.getAttribute('href') || el.getAttribute('data-href') || '';
+                    const outer = el.outerHTML.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    const panel = document.createElement('section');
+                    panel.id = '__codex_dom_evidence';
+                    panel.innerHTML = `
+                      <div style="font:700 15px Arial;color:#fff;margin-bottom:5px">Automated read-only DOM inspection</div>
+                      <div style="font:13px Arial;color:#aab4bf;margin-bottom:18px">No button click or form submission was performed</div>
+                      <div style="font:700 14px Arial;color:#ffd54f;margin-bottom:6px">Source URL</div>
+                      <div style="font:13px Consolas;word-break:break-all;color:#fff;margin-bottom:12px">${location.href.replace(/</g, '&lt;')}</div>
+                      <div style="font:700 14px Arial;color:#ffd54f;margin-bottom:6px">Captured at (UTC)</div>
+                      <div style="font:13px Consolas;color:#fff;margin-bottom:18px">${new Date().toISOString()}</div>
+                      <div style="font:700 17px Arial;color:#ffd54f;margin-bottom:8px">Selected control</div>
+                      <div style="font:16px Arial;margin-bottom:18px;color:#fff">${picked.text.replace(/</g, '&lt;')}</div>
+                      <div style="font:700 17px Arial;color:#ffd54f;margin-bottom:8px">Resolved href / destination</div>
+                      <div style="font:15px Consolas;word-break:break-all;color:#7ee787;margin-bottom:20px">${String(href).replace(/</g, '&lt;')}</div>
+                      <div style="font:700 17px Arial;color:#ffd54f;margin-bottom:8px">DOM element</div>
+                      <pre style="white-space:pre-wrap;word-break:break-all;font:13px Consolas;line-height:1.5;color:#fff;background:#252c35;border:1px solid #647382;padding:14px">${outer}</pre>`;
+                    panel.style.cssText = 'position:fixed;z-index:2147483647;right:0;top:0;width:42vw;height:100vh;box-sizing:border-box;padding:30px;background:#151a20;border-left:5px solid #ff1f1f;overflow:auto;text-align:left';
+                    document.documentElement.appendChild(panel);
+                    document.body.style.setProperty('width', '58vw', 'important');
+                    document.body.style.setProperty('overflow-x', 'hidden', 'important');
+                    return {href, label: picked.text, html: el.outerHTML};
+                }
+            """)
+            if result.get("error"):
+                return {"success": False, "error": result["error"], "path": "", "href": "", "label": ""}
+            page.wait_for_timeout(500)
+            safe_domain = re.sub(r"[^a-zA-Z0-9._-]", "_", domain or "evidence")[:100]
+            os.makedirs(EVIDENCE_DIR, exist_ok=True)
+            path = os.path.join(EVIDENCE_DIR, f"{safe_domain}_dom_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}.png")
+            page.screenshot(path=path, full_page=False)
+            context.close()
+            return {"success": True, "error": "", "path": path, "href": result.get("href", ""),
+                    "label": result.get("label", ""), "html": result.get("html", "")}
+    except Exception as exc:
+        return {"success": False, "error": str(exc), "path": "", "href": "", "label": ""}
+    finally:
+        if browser:
+            try: browser.close()
+            except Exception: pass
 
 
 def _parse_imap_list_line(raw_line):

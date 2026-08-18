@@ -2,17 +2,18 @@
 
 import os
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 import streamlit as st
 import phishing_toolkit as pt
 from provider_replies import (
-    ACTION_REQUIRED_TYPES, build_reply, clear_mail_cache, download_evidence_image,
+    ACTION_REQUIRED_TYPES, build_reply, build_reply_vi, capture_dom_link_evidence, clear_mail_cache, download_evidence_image,
     extract_reply_context, fetch_provider_mail,
     instructed_reply_address, is_delivery_failure, load_mail_cache, mark_mails_seen,
-    received_datetime, save_mail_cache,
+    load_reply_log, needs_reply, provider_message_vi, received_datetime, record_reply_sent,
+    reply_log_key, save_mail_cache, save_uploaded_evidence, sync_sent_reply_status,
     send_threaded_reply,
 )
 
@@ -28,20 +29,56 @@ if not accounts:
 labels = [a.get("username", f"Tài khoản {i + 1}") for i, a in enumerate(accounts)]
 c1, c2, c3 = st.columns([3, 1, 1])
 with c1: selected_label = st.selectbox("Hộp thư", labels)
-with c2: limit = st.number_input("Số mail gần nhất", 10, 500, 100, 10)
+with c2:
+    limit_input = st.text_input(
+        "Số mail gần nhất", value="", placeholder="Để trống = tất cả",
+        help="Để trống để lấy tất cả email trong khoảng ngày; hoặc nhập số lượng muốn lấy.",
+    ).strip()
 with c3: unread_only = st.checkbox("Chỉ mail chưa đọc")
+limit = None
+limit_error = ""
+if limit_input:
+    try:
+        limit = int(limit_input)
+        if limit <= 0:
+            raise ValueError
+    except ValueError:
+        limit_error = "Số lượng email phải là số nguyên dương hoặc để trống để lấy tất cả."
+        st.error(limit_error)
 account = accounts[labels.index(selected_label)]
 account_name = account.get("username", selected_label)
+if st.session_state.pop("provider_reply_sent_notice", None):
+    st.success("Đã gửi phản hồi và cập nhật trạng thái trong danh sách.")
 if st.session_state.get("provider_cache_account") != account_name:
     st.session_state.provider_cache_account = account_name
     st.session_state.provider_mails = load_mail_cache(account_name)
     st.session_state.show_action_required = False
 
 d1, d2 = st.columns(2)
-with d1: date_from = st.date_input("Từ ngày", value=date.today() - timedelta(days=30))
+with d1: date_from = st.date_input("Từ ngày", value=date.today())
 with d2: date_to = st.date_input("Đến ngày", value=date.today())
 if date_from > date_to:
     st.error("Từ ngày không được lớn hơn Đến ngày.")
+
+# Luôn dùng thời gian nhận thư của IMAP server và đổi sang múi giờ địa phương
+# trước khi lọc/hiển thị, kể cả trong bảng tiến trình đang đồng bộ.
+_local_tz = datetime.now().astimezone().tzinfo
+
+def local_received_datetime(mail):
+    value = received_datetime(mail)
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=_local_tz)
+    return value.astimezone(_local_tz)
+
+def display_received_date(mail):
+    value = local_received_datetime(mail)
+    return value.strftime("%Y/%m/%d %H:%M:%S %z") if value else (mail.date or "—")
+
+def mail_is_in_selected_dates(mail):
+    value = local_received_datetime(mail)
+    return value is not None and date_from <= value.date() <= date_to
 
 sync_col, clear_col, cache_col = st.columns([1, 1, 3])
 with clear_col:
@@ -55,56 +92,51 @@ with cache_col:
     st.caption(f"Cache hiện có: {cached_count} email. Cache được giữ khi F5 và không chứa mật khẩu.")
 
 with sync_col:
-    sync_clicked = st.button("Đồng bộ Inbox theo ngày", type="primary", disabled=date_from > date_to)
+    sync_clicked = st.button("Đồng bộ Inbox theo ngày", type="primary", disabled=date_from > date_to or bool(limit_error))
 if sync_clicked:
     try:
         progress_bar = st.progress(0, text="Đang chuẩn bị đọc inbox...")
-        live_table = st.empty()
         def show_progress(current, position, total):
             percent = int(position * 100 / total) if total else 100
-            progress_bar.progress(percent, text=f"Đang xử lý {position}/{total} email — đã nhận diện {len(current)}")
-            if current:
-                live_table.dataframe(pd.DataFrame([{
-                    "NCC": m.provider_label, "Domain": m.domain or "—", "Phân loại": m.request_label,
-                    "Tiêu đề": m.subject, "Ngày": m.date,
-                } for m in current]), width="stretch", hide_index=True)
-        with st.spinner("Email sẽ xuất hiện dần trong bảng bên dưới..."):
+            visible = [mail for mail in current if mail_is_in_selected_dates(mail)]
+            progress_bar.progress(
+                percent,
+                text=f"Đang quét Inbox {position}/{total} — tìm thấy {len(visible)} email đúng ngày đã chọn",
+            )
+        with st.spinner("Đang đồng bộ và lọc email theo ngày server..."):
             st.session_state.provider_mails = fetch_provider_mail(
-                account, int(limit), unread_only, date_from=date_from, date_to=date_to,
+                account, limit, unread_only, date_from=date_from, date_to=date_to,
                 progress_callback=show_progress,
             )
             save_mail_cache(account_name, st.session_state.provider_mails)
+            sent_sync = sync_sent_reply_status(
+                account, st.session_state.provider_mails,
+                date_from=date_from, date_to=date_to,
+            )
             st.session_state.show_action_required = False
         progress_bar.progress(100, text="Đồng bộ hoàn tất")
-        # Không xóa live_table — giữ nguyên để người dùng thấy ngay kết quả
-        # (all_table bên dưới sẽ hiển thị đầy đủ sau khi rerun)
-        st.success(f"Đã nhận diện {len(st.session_state.provider_mails)} email liên quan. Cuộn xuống để xem bảng đầy đủ.")
+        synced_for_day = [mail for mail in st.session_state.provider_mails if mail_is_in_selected_dates(mail)]
+        sent_note = f"; nhận diện thêm {sent_sync['matched']} thư đã phản hồi từ Sent" if sent_sync.get("success") else ""
+        st.success(f"Đã đồng bộ {len(synced_for_day)} email đúng ngày đã chọn{sent_note}.")
+        if not sent_sync.get("success"):
+            st.warning(f"Không đối soát được thư mục Đã gửi: {sent_sync.get('error')}")
     except Exception as exc: st.error(f"Không đọc được inbox: {exc}")
 
 all_mails = st.session_state.get("provider_mails", [])
 if not all_mails:
     st.info("Chưa có email trong khoảng ngày đã chọn. Hãy đổi ngày hoặc bấm đồng bộ lại."); st.stop()
 
-# Dùng buffer ±1 ngày để bù timezone discrepancy giữa Date header và IMAP server receipt date.
-# IMAP SINCE/BEFORE đã lọc theo server date; Date header của email có thể lệch múi giờ.
-_buf = timedelta(days=1)
 all_filtered = []
 for item in all_mails:
-    received_at = received_datetime(item)
-    if received_at is None:
-        all_filtered.append(item)  # không có Date header → không lọc bỏ
-        continue
-    item_date = received_at.date()
-    if date_from and date_to and not (date_from - _buf <= item_date <= date_to + _buf):
-        continue
-    all_filtered.append(item)
+    if mail_is_in_selected_dates(item):
+        all_filtered.append(item)
 if not all_filtered:
     st.warning("Không có email trong khoảng ngày đã chọn."); st.stop()
 
 st.subheader("1. Tất cả email NCC theo ngày")
 all_table = pd.DataFrame([{"NCC": m.provider_label, "Domain": m.domain or "—", "Phân loại": m.request_label,
     "Cách phản hồi": {"email": "Email", "portal": "Portal", "no_reply": "Không reply", "manual": "Thủ công"}.get(m.channel, m.channel),
-    "Ticket": m.ticket or "—", "Tiêu đề": m.subject, "Ngày": m.date} for m in all_filtered])
+    "Ticket": m.ticket or "—", "Tiêu đề": m.subject, "Ngày": display_received_date(m)} for m in all_filtered])
 st.dataframe(all_table, width="stretch", hide_index=True)
 
 seen_col, count_col = st.columns([1, 4])
@@ -123,23 +155,44 @@ with seen_col:
 with count_col:
     st.caption(f"Danh sách phía trên có {len(all_filtered)} email trong khoảng ngày đã chọn.")
 
-if st.button("Lọc thư NCC yêu cầu cung cấp bằng chứng", type="primary"):
+if st.button("Lọc email cần phản hồi", type="primary"):
+    reply_candidates = [mail for mail in all_filtered if needs_reply(mail)]
+    with st.spinner("Đang đối soát trạng thái với thư mục Đã gửi để tránh gửi trùng..."):
+        sent_filter_sync = sync_sent_reply_status(
+            account, reply_candidates, date_from=date_from, date_to=date_to,
+        )
+    if sent_filter_sync.get("success"):
+        st.success(
+            f"Đã kiểm tra thư mục Đã gửi; cập nhật thêm {sent_filter_sync['matched']} email đã phản hồi."
+        )
+    else:
+        st.error(
+            "Không đối soát được thư mục Đã gửi nên chưa mở danh sách phản hồi, "
+            f"để tránh gửi trùng: {sent_filter_sync.get('error')}"
+        )
+        st.stop()
     st.session_state.show_action_required = True
 if not st.session_state.get("show_action_required", False):
-    st.info("Bấm **Lọc thư NCC yêu cầu cung cấp bằng chứng** để chỉ lấy email có yêu cầu bổ sung URL, ảnh, thông tin hoặc tài liệu.")
+    st.info("Bấm **Lọc email cần phản hồi** để chỉ lấy thư NCC yêu cầu bổ sung URL, ảnh, thông tin hoặc bằng chứng. Thư Cloudflare chỉ xác nhận đã chuyển tiếp báo cáo sẽ được bỏ qua.")
     st.stop()
 
-actionable = [m for m in all_filtered if m.request_type in ACTION_REQUIRED_TYPES]
+actionable = [m for m in all_filtered if needs_reply(m)]
+reply_log = load_reply_log()
 st.subheader("2. Thư NCC yêu cầu phản hồi bằng chứng")
 if not actionable:
     st.success("Không có email nào cần phản hồi trong danh sách theo ngày này."); st.stop()
 providers = ["Tất cả"] + sorted({m.provider_label for m in actionable})
 provider_filter = st.selectbox("Lọc NCC cần phản hồi", providers)
 filtered = [m for m in actionable if provider_filter == "Tất cả" or m.provider_label == provider_filter]
-st.caption(f"Tìm thấy {len(filtered)} email cần xử lý. Click một dòng để xem email gốc và câu trả lời riêng.")
-mail_table = pd.DataFrame([{"NCC": m.provider_label, "Domain": m.domain or "—", "Yêu cầu": m.request_label,
+sent_count = sum(reply_log_key(item) in reply_log for item in filtered)
+st.caption(
+    f"Tìm thấy {len(filtered)} email: {len(filtered) - sent_count} chưa phản hồi, "
+    f"{sent_count} đã phản hồi. Thứ tự và STT được giữ nguyên sau khi gửi."
+)
+mail_table = pd.DataFrame([{"STT": position, "Trạng thái": "✅ Đã phản hồi" if reply_log_key(m) in reply_log else "Chưa phản hồi",
+    "NCC": m.provider_label, "Domain": m.domain or "—", "Yêu cầu": m.request_label,
     "Cách phản hồi": {"email": "Email", "portal": "Portal", "no_reply": "Không reply", "manual": "Thủ công"}.get(m.channel, m.channel),
-    "Ticket": m.ticket or "—", "Tiêu đề": m.subject, "Ngày": m.date} for m in filtered])
+    "Ticket": m.ticket or "—", "Tiêu đề": m.subject, "Ngày": display_received_date(m)} for position, m in enumerate(filtered, start=1)])
 st.caption("Click vào một dòng trong bảng để xem email NCC và nội dung phản hồi dự kiến.")
 table_event = st.dataframe(
     mail_table, width="stretch", hide_index=True, key="provider_reply_table",
@@ -157,6 +210,12 @@ else:
         format_func=lambda i: row_labels[i], help="Click một dòng trong bảng hoặc chọn email tại đây.",
     )
 mail = filtered[idx]; left, right = st.columns(2)
+sent_record = reply_log.get(reply_log_key(mail))
+if sent_record:
+    st.warning(
+        f"Email này đã được phản hồi lúc {sent_record.get('sent_at', 'không rõ thời gian')} "
+        f"tới {sent_record.get('recipient', mail.reply_to)}. Mặc định hệ thống không cho gửi lại."
+    )
 if is_delivery_failure(mail.sender, mail.subject):
     st.error("Đây là thư báo gửi thất bại (bounce/MAILER-DAEMON), không phải yêu cầu của NCC. Tool đã chặn tạo và gửi phản hồi.")
     st.stop()
@@ -166,7 +225,11 @@ if instructed_address:
     mail.channel = "email"
 with left:
     st.subheader("1. Nội dung NCC phản hồi"); st.write(f"**From:** {mail.sender}"); st.write(f"**Reply-To:** {mail.reply_to or '—'}"); st.write(f"**Ticket:** {mail.ticket or '—'}")
-    st.text_area("Nội dung gốc", mail.body, height=380, disabled=True)
+    original_col, translated_col = st.columns(2)
+    with original_col:
+        st.text_area("Nội dung gốc", mail.body, height=430, disabled=True)
+    with translated_col:
+        st.text_area("Bản tiếng Việt để đọc", provider_message_vi(mail), height=430, disabled=True)
     if mail.urls:
         with st.expander("Các URL tìm thấy trong email"):
             for url in mail.urls: st.code(url, language=None)
@@ -191,11 +254,59 @@ with right:
         st.session_state[f"{key}_evidence"] = extracted["evidence"]
         st.session_state[auto_url_key] = extracted["reported_url"]
     reported_url = st.text_input("URL vi phạm đầy đủ", key=f"{key}_url")
+    detected_redirect_key = f"{key}_detected_redirect"
+    detected_button_key = f"{key}_detected_button"
+    redirect_widget_key = f"{key}_redirect_url"
+    button_widget_key = f"{key}_button_label"
+    if detected_redirect_key in st.session_state:
+        st.session_state[redirect_widget_key] = st.session_state.pop(detected_redirect_key)
+    if detected_button_key in st.session_state:
+        st.session_state[button_widget_key] = st.session_state.pop(detected_button_key)
+    button_label = st.text_input(
+        "Tên nút đã kiểm tra", value="Đăng ký/Đăng nhập", key=button_widget_key,
+        help="Tên nút/link hiển thị trên trang mà bạn đã kiểm tra bằng DevTools.",
+    )
+    redirect_url = st.text_input(
+        "URL trong href hoặc URL sau redirect", key=redirect_widget_key,
+        help="Dán chính xác URL quan sát được trong href hoặc sau khi bấm nút. Chỉ nhập dữ liệu đã xác minh.",
+    )
     official_url = st.text_input("Website chính thức", key=f"{key}_official")
     evidence = st.text_area("Thông tin/bằng chứng bổ sung đã xác minh", height=120, key=f"{key}_evidence")
     attachment_key = f"{key}_screenshot_path"
-    if mail.request_type == "screenshot":
-        st.markdown("**Ảnh chụp NCC yêu cầu**")
+    requires_redirect_evidence = mail.provider == "cloudflare" and mail.request_type in ("clarification", "technical_evidence")
+    if mail.request_type == "screenshot" or requires_redirect_evidence:
+        st.markdown("**Ảnh chụp bằng chứng**")
+        st.caption("Ưu tiên ảnh DOM tự động. Công cụ chỉ đọc element và href, không click nút hoặc gửi form.")
+        if st.button(
+            "Tạo ảnh DOM + href tự động", key=f"{key}_capture_dom",
+            disabled=not bool(reported_url), type="primary",
+        ):
+            with st.spinner("Đang mở trang trong Chromium cô lập và tìm nút Đăng ký/Đăng nhập..."):
+                dom_capture = capture_dom_link_evidence(reported_url, mail.domain or reported_url)
+            if dom_capture["success"]:
+                st.session_state[attachment_key] = dom_capture["path"]
+                if dom_capture.get("href"):
+                    st.session_state[detected_redirect_key] = dom_capture["href"]
+                if dom_capture.get("label"):
+                    st.session_state[detected_button_key] = dom_capture["label"]
+                st.session_state[f"{key}_capture_notice"] = "Đã tạo ảnh DOM và tự điền href từ element."
+                st.rerun()
+            else:
+                st.error(f"Không tạo được ảnh DOM: {dom_capture['error']}")
+        if st.session_state.pop(f"{key}_capture_notice", None):
+            st.success("Đã tạo ảnh DOM và tự điền href từ element.")
+        uploaded_image = st.file_uploader(
+            "Upload ảnh chụp sau khi bấm nút đăng ký / kiểm tra redirect",
+            type=["png", "jpg", "jpeg"], key=f"{key}_evidence_upload",
+        )
+        if uploaded_image is not None and st.button("Dùng ảnh upload này", key=f"{key}_save_upload"):
+            try:
+                st.session_state[attachment_key] = save_uploaded_evidence(
+                    uploaded_image.name, uploaded_image.getvalue(), mail.domain or reported_url,
+                )
+                st.success("Đã lưu ảnh để đính kèm vào email phản hồi.")
+            except Exception as exc:
+                st.error(f"Không lưu được ảnh: {exc}")
         if not cfg.get("urlscan_api_key"):
             st.warning("Chưa có URLScan API key trong config.ini nên chưa thể tự chụp ảnh.")
         if st.button("Chụp ảnh bằng URLScan", key=f"{key}_capture", disabled=not bool(reported_url and cfg.get("urlscan_api_key"))):
@@ -217,7 +328,7 @@ with right:
             if result_url: st.link_button("Mở báo cáo URLScan", result_url)
     else:
         screenshot_path = st.session_state.get(attachment_key, "")
-    details = {"reported_url": reported_url, "official_url": official_url, "evidence": evidence,
+    details = {"reported_url": reported_url, "button_label": button_label, "redirect_url": redirect_url, "official_url": official_url, "evidence": evidence,
                "screenshot_attached": bool(screenshot_path and os.path.isfile(screenshot_path)),
                "urlscan_result": st.session_state.get(f"{key}_urlscan_result", ""),
                "contact_name": cfg.get("contact_name", ""), "contact_email": cfg.get("contact_email", "")}
@@ -230,18 +341,34 @@ with right:
     if st.button("Tạo / cập nhật draft theo dữ liệu trên", key=f"{key}_refresh"):
         st.session_state[subject_key] = default_subject; st.session_state[body_key] = default_body
     subject = st.text_input("Subject", key=subject_key)
-    body = st.text_area("Nội dung phản hồi (có thể sửa)", height=340, key=body_key)
+    english_col, vietnamese_col = st.columns(2)
+    with english_col:
+        body = st.text_area("Nội dung phản hồi tiếng Anh (có thể sửa)", height=420, key=body_key)
+    with vietnamese_col:
+        st.text_area(
+            "Bản tiếng Việt để kiểm tra (không gửi)", build_reply_vi(mail, details),
+            height=420, disabled=True,
+        )
     for warning in warnings: st.warning(warning)
     reviewed = st.checkbox("Tôi đã đọc email gốc và xác nhận nội dung phản hồi chính xác", key=f"{key}_reviewed")
+    resend_ok = True
+    if sent_record:
+        resend_ok = st.checkbox(
+            "Tôi xác nhận muốn gửi lại email đã được phản hồi trước đó",
+            key=f"{key}_confirm_resend",
+        )
     legal_ok = True
     if mail.risk == "approval_required": legal_ok = st.checkbox("Người có thẩm quyền đã duyệt nội dung pháp lý/định danh", key=f"{key}_legal")
-    screenshot_ok = mail.request_type != "screenshot" or bool(screenshot_path and os.path.isfile(screenshot_path))
-    can_send = reviewed and legal_ok and screenshot_ok and mail.channel == "email" and bool(mail.reply_to) and "[PLEASE" not in body
+    screenshot_ok = (mail.request_type != "screenshot" and not requires_redirect_evidence) or bool(screenshot_path and os.path.isfile(screenshot_path))
+    redirect_ok = not requires_redirect_evidence or bool(redirect_url)
+    can_send = reviewed and resend_ok and legal_ok and screenshot_ok and redirect_ok and mail.channel == "email" and bool(mail.reply_to) and "[PLEASE" not in body
     if not can_send:
         blocked_reasons = []
         if not reviewed: blocked_reasons.append("chưa xác nhận đã kiểm tra nội dung")
+        if not resend_ok: blocked_reasons.append("email đã phản hồi; chưa xác nhận gửi lại")
         if not legal_ok: blocked_reasons.append("chưa duyệt nội dung pháp lý")
         if not screenshot_ok: blocked_reasons.append("chưa có ảnh chụp đính kèm")
+        if not redirect_ok: blocked_reasons.append("chưa có URL href/redirect đã xác minh")
         if mail.channel != "email" or not mail.reply_to: blocked_reasons.append("không có địa chỉ email phản hồi hợp lệ")
         if "[PLEASE" in body: blocked_reasons.append("draft còn placeholder cần điền")
         st.caption("Chưa thể gửi: " + "; ".join(blocked_reasons) + ".")
@@ -249,11 +376,17 @@ with right:
         attachments = [screenshot_path] if screenshot_path and os.path.isfile(screenshot_path) else []
         proxies = cfg.get("smtp_proxies", [])
         proxy_str = proxies[0] if proxies else None
-        result = send_threaded_reply(account, mail, subject, body, attachments=attachments, proxy_str=proxy_str)
+        with st.spinner("Đang gửi phản hồi và lưu bản sao vào thư mục Đã gửi..."):
+            result = send_threaded_reply(
+                account, mail, subject, body,
+                attachments=attachments, proxy_str=proxy_str,
+            )
         if result["success"]:
-            st.success("SMTP server đã chấp nhận và gửi phản hồi.")
+            record_reply_sent(mail, subject, mail.reply_to)
             if result.get("sent_copy_saved"):
-                st.success("Đã lưu một bản sao trong thư mục Đã gửi trên mail server.")
+                st.session_state["provider_reply_sent_notice"] = "sent-and-saved"
             else:
                 st.warning(f"Thư đã gửi nhưng chưa lưu được vào thư mục Đã gửi: {result.get('sent_copy_error') or 'không rõ lỗi'}")
+                st.session_state["provider_reply_sent_notice"] = "sent"
+            st.rerun()
         else: st.error(f"Gửi thất bại: {result['error']}")
