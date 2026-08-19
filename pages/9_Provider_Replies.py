@@ -276,12 +276,16 @@ with right:
     requires_redirect_evidence = mail.provider == "cloudflare" and mail.request_type in ("clarification", "technical_evidence")
     if mail.request_type == "screenshot" or requires_redirect_evidence:
         st.markdown("**Ảnh chụp bằng chứng**")
-        st.caption("Ưu tiên ảnh DOM tự động. Công cụ chỉ đọc element và href, không click nút hoặc gửi form.")
+        st.caption(
+            "Ưu tiên ảnh DOM tự động. Công cụ chỉ đọc element và href, không click nút hoặc gửi form. "
+            "Khi Chrome mở, hãy giữ cửa sổ mở và hoàn tất xác minh Cloudflare (nếu có); "
+            "công cụ sẽ tự đọc nút rồi đóng Chrome sau khi chụp xong."
+        )
         if st.button(
             "Tạo ảnh DOM + href tự động", key=f"{key}_capture_dom",
             disabled=not bool(reported_url), type="primary",
         ):
-            with st.spinner("Đang mở trang trong Chromium cô lập và tìm nút Đăng ký/Đăng nhập..."):
+            with st.spinner("Đang mở Chrome; hãy hoàn tất Cloudflare nếu được hỏi và đừng đóng cửa sổ..."):
                 dom_capture = capture_dom_link_evidence(reported_url, mail.domain or reported_url)
             if dom_capture["success"]:
                 st.session_state[attachment_key] = dom_capture["path"]

@@ -767,7 +767,14 @@ def capture_dom_link_evidence(target_url, domain="evidence"):
     browser = None
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            # Một số website đặt Cloudflare challenge trước nội dung thật và luôn
+            # giữ browser headless ở trang "Just a moment...". Dùng Chrome có
+            # giao diện để challenge có thể hoàn tất (hoặc người dùng xác minh)
+            # trước khi đọc DOM; công cụ vẫn không click hay submit element nào.
+            try:
+                browser = playwright.chromium.launch(channel="chrome", headless=False)
+            except Exception:
+                browser = playwright.chromium.launch(headless=False)
             context = browser.new_context(
                 viewport={"width": 1920, "height": 1080},
                 accept_downloads=False,
@@ -778,6 +785,17 @@ def capture_dom_link_evidence(target_url, domain="evidence"):
             page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
             try:
                 page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
+            try:
+                page.wait_for_function(
+                    """
+                    () => [...document.querySelectorAll('a, button, [role="button"]')]
+                        .some(el => /(đăng\\s*k[ýy]|đăng\\s*nhập|register|sign\\s*up|login|log\\s*in)/i
+                            .test((el.innerText || el.textContent || el.getAttribute('aria-label') || '').trim()))
+                    """,
+                    timeout=45000,
+                )
             except Exception:
                 pass
             result = page.evaluate("""
@@ -794,7 +812,12 @@ def capture_dom_link_evidence(target_url, domain="evidence"):
                     }).filter(x => x.visible && wanted.test(x.text));
                     candidates.sort((a, b) => Number(Boolean(b.href)) - Number(Boolean(a.href)) || a.index - b.index);
                     const picked = candidates[0];
-                    if (!picked) return {error: 'Không tìm thấy nút Đăng ký/Đăng nhập hiển thị trên trang'};
+                    if (!picked) {
+                        const challenge = /just a moment|security verification|cloudflare/i.test(document.title + ' ' + document.body.innerText);
+                        return {error: challenge
+                            ? 'Trang vẫn đang ở bước xác minh Cloudflare. Hãy hoàn tất xác minh trong cửa sổ Chrome rồi thử lại.'
+                            : 'Không tìm thấy nút Đăng ký/Đăng nhập hiển thị trên trang'};
+                    }
                     const el = picked.el;
                     el.scrollIntoView({block: 'center', inline: 'center'});
                     el.style.setProperty('outline', '5px solid #ff1f1f', 'important');

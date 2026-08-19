@@ -9,15 +9,75 @@ từng domain theo thứ tự với 2 form cạnh nhau:
 import os
 import re
 import sys
+import json
+from html import escape
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 import phishing_toolkit as pt
 
 _MAX_CHECK_WORKERS = 1
+
+
+def _render_copy_domain_button(displayed_url: str) -> None:
+    """Show the URL and a compact adjacent button that copies it verbatim."""
+    value = json.dumps(displayed_url)
+    displayed = escape(displayed_url)
+    components.html(
+        f"""
+        <div class="copy-row">
+            <code>{displayed}</code>
+            <button id="copy-domain" type="button" onclick="copyDomain()">📋 Copy</button>
+        </div>
+        <script>
+        async function copyDomain() {{
+            const value = {value};
+            const button = document.getElementById("copy-domain");
+            try {{
+                await navigator.clipboard.writeText(value);
+            }} catch (error) {{
+                const input = document.createElement("textarea");
+                input.value = value;
+                input.style.position = "fixed";
+                input.style.opacity = "0";
+                document.body.appendChild(input);
+                input.select();
+                document.execCommand("copy");
+                input.remove();
+            }}
+            button.textContent = "✅ Đã copy";
+            setTimeout(() => button.textContent = "📋 Copy", 1400);
+        }}
+        </script>
+        <style>
+        body {{
+            margin: 0;
+            background: transparent;
+            color: light-dark(#31333f, #fafafa);
+            font-family: sans-serif;
+        }}
+        .copy-row {{ display: flex; align-items: center; gap: 8px; min-height: 38px; }}
+        code {{
+            padding: 3px 6px; border-radius: 4px; font-family: monospace;
+            color: inherit; background: rgba(128,128,128,.14);
+            font-size: 16px; font-weight: 700; overflow-wrap: anywhere;
+        }}
+        button {{
+            flex: 0 0 auto; min-height: 30px; padding: 4px 9px;
+            border: 1px solid rgba(128,128,128,.45); border-radius: 8px;
+            background: transparent; color: inherit; cursor: pointer;
+            font-size: 13px; font-weight: 600;
+        }}
+        button:hover {{ border-color: #ff4b4b; color: #ff4b4b; }}
+        :root {{ color-scheme: light dark; }}
+        </style>
+        """,
+        height=42,
+    )
 
 
 @st.cache_resource
@@ -108,7 +168,8 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
         # ── Header: URL + nhãn nhỏ ───────────────────────────────────────────
         h_num, h_url = st.columns([1, 11])
         h_num.markdown(f"#### #{idx + 1}")
-        h_url.markdown(f"`{original_url}`")
+        with h_url:
+            _render_copy_domain_button(original_url)
 
         tags = []
         if cf: tags.append("☁️ Cloudflare")
