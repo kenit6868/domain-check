@@ -370,7 +370,7 @@ CCTLD_REGISTRY_CONTACTS = {
     "co": {
         "registry": "Registry Co",
         "abuse_email": "abuse@registry.co",
-        "report_webform": "https://registry.co/#contact",
+        "report_webform": "https://registry.co/report-abuse/form?type=phishing",
         "note": None,
     },
     "biz": {
@@ -529,6 +529,7 @@ WEB_FORM_REGISTRARS = {
     "opensrs":              "https://www.tucowsdomains.com/report-abuse",
     "namesilo":             "https://www.namesilo.com/report_abuse.php",
     "porkbun":              "https://www.porkbun.com/abuse",
+    "namecheap":            "https://support.namecheap.com/index.php?/Tickets/Submit",  # tạm dùng web form, không gửi email
     "sav.com":              "https://abuse.sav.com",
     "key-systems":          "https://abuse.cleandns.space",
     "instra":               "https://abuse.cleandns.space",
@@ -2358,7 +2359,8 @@ def generate_registry_draft(domain, registry_info, cfg):
     if registry_info["source"] == "static_table":
         registry_name = registry_info.get("registry") or "Registry"
         abuse_email = registry_info.get("abuse_email") or "[TRA ABUSE EMAIL TẠI https://www.iana.org/domains/root/db]"
-        note_line = f"\nSpecial note: {registry_info['note']}\n" if registry_info.get("note") else ""
+#         note_line = f"\nSpecial note: {registry_info['note']}\n" if registry_info.get("note") else ""
+        note_line = ""
         raw_section = ""
     else:
         registry_name = f"Registry (via {registry_info.get('whois_server', 'IANA')})"
