@@ -3,6 +3,7 @@ case_log.csv
 sent_log.csv
 provider_mail_cache.json
 provider_mail_cache.json.tmp
+provider_reply_log.json
 evidence/provider_replies/
 reports/
 worker_jobs/

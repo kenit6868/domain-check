@@ -147,6 +147,44 @@ Screenshots: Please attach screenshot evidence."""
         self.assertNotIn(mail.request_type, ACTION_REQUIRED_TYPES)
         self.assertFalse(needs_reply(mail))
 
+    def test_namecheap_is_excluded_even_when_it_requests_evidence(self):
+        mail = self.make_mail(
+            "abuse@namecheap.com", "Additional evidence required",
+            "Please provide proof of trademark ownership.",
+        )
+        self.assertFalse(needs_reply(mail))
+
+    def test_spaceship_receipt_with_legal_footer_is_not_actionable(self):
+        mail = self.make_mail(
+            "legal@spaceship.com", "Abuse report received",
+            """We confirm receipt of your report. It will be reviewed following our legal policies.
+            When replying, please ensure the engagement ID remains in the subject line.
+            Our team will contact you if additional information is required.""",
+        )
+        self.assertFalse(needs_reply(mail))
+
+    def test_dynadot_receipt_with_additional_information_notice_is_not_actionable(self):
+        mail = self.make_mail(
+            "abuse@dynadot.com", "Abuse Complaint Received",
+            "We will investigate. Please note we cannot disclose additional information without a court order.",
+        )
+        self.assertFalse(needs_reply(mail))
+
+    def test_non_cloudflare_explicit_evidence_request_is_actionable(self):
+        mail = self.make_mail(
+            "abuse@nic.top", "More evidence required",
+            "The website cannot be opened. Please provide more evidence to prove it is phishing.",
+        )
+        self.assertTrue(needs_reply(mail))
+
+    def test_receipt_followed_by_real_evidence_request_is_actionable(self):
+        mail = self.make_mail(
+            "abuse@dynadot.com", "Report received",
+            "We received your report. Please provide additional evidence so we can investigate.",
+        )
+        self.assertEqual(mail.request_type, "technical_evidence")
+        self.assertTrue(needs_reply(mail))
+
     def test_request_before_quoted_report_remains_actionable(self):
         body = """We could not verify the reported content. Please provide additional evidence.
 Below is the report we received:

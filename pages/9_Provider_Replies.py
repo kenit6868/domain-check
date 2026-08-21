@@ -173,7 +173,7 @@ if st.button("Lọc email cần phản hồi", type="primary"):
         st.stop()
     st.session_state.show_action_required = True
 if not st.session_state.get("show_action_required", False):
-    st.info("Bấm **Lọc email cần phản hồi** để chỉ lấy thư NCC yêu cầu bổ sung URL, ảnh, thông tin hoặc bằng chứng. Thư Cloudflare chỉ xác nhận đã chuyển tiếp báo cáo sẽ được bỏ qua.")
+    st.info("Bấm **Lọc email cần phản hồi** để chỉ lấy thư NCC có yêu cầu rõ ràng về URL, ảnh, thông tin hoặc bằng chứng. Thư chỉ xác nhận tiếp nhận và toàn bộ thư Namecheap sẽ được bỏ qua.")
     st.stop()
 
 actionable = [m for m in all_filtered if needs_reply(m)]
@@ -201,10 +201,13 @@ table_event = st.dataframe(
 
 row_labels = [f"{m.provider_label} · {m.subject[:80]} · {m.date}" for m in filtered]
 selected_rows = table_event.selection.rows
-if selected_rows:
-    idx = selected_rows[0]
+selected_idx = selected_rows[0] if selected_rows else None
+if selected_idx is not None and 0 <= selected_idx < len(filtered):
+    idx = selected_idx
     st.info(f"Đang xem: {row_labels[idx]}")
 else:
+    # Streamlit can retain a row index from the previous, longer filtered
+    # table. Ignore that stale selection after the provider/date filter changes.
     idx = st.selectbox(
         "Email đang xem", range(len(filtered)),
         format_func=lambda i: row_labels[i], help="Click một dòng trong bảng hoặc chọn email tại đây.",

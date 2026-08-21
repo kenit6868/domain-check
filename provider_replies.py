@@ -63,6 +63,18 @@ ACTION_REQUIRED_TYPES = {
     "legal_evidence", "identity", "screenshot", "full_url", "official_url",
     "technical_evidence", "clarification",
 }
+# These providers remain visible in the inbox/history table but are never
+# offered by the reply workflow.
+EXCLUDED_REPLY_PROVIDERS = {"namecheap"}
+REQUESTED_TERMS = {
+    "legal_evidence": r"(?:trademark|authorization letter|power of attorney|copyright|legal declaration|proof of ownership)",
+    "identity": r"(?:identity|passport|government-issued|company registration|document)",
+    "screenshot": r"(?:screenshot|screen shot|image evidence|image)",
+    "full_url": r"(?:full|complete|exact|affected|reported)?\s*(?:url|link|web address)",
+    "official_url": r"(?:official|legitimate)\s*(?:website|url|site)",
+    "technical_evidence": r"(?:additional evidence|supporting evidence|technical details|redirect chain|logs?)",
+    "clarification": r"(?:information|details|clarification|evidence|proof)",
+}
 CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "provider_mail_cache.json")
 REPLY_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "provider_reply_log.json")
 EVIDENCE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "evidence", "provider_replies")
@@ -144,6 +156,20 @@ def provider_request_text(body):
     return text[:min(positions)] if positions else text
 
 
+def _has_explicit_request(text, request_type):
+    """Require an actual instruction, not a keyword found in a legal footer."""
+    term = REQUESTED_TERMS.get(request_type)
+    if not term:
+        return False
+    normalized = " ".join((text or "").lower().split())
+    patterns = (
+        rf"(?:please|kindly)\s+(?:provide|send|submit|attach|share|supply|confirm|clarify)[^.!?]{{0,180}}{term}",
+        rf"(?<!if )(?<!should )(?:we|our team)\s+(?:need|require|request)[^.!?]{{0,180}}{term}",
+        rf"(?:^|[.!?]\s+)(?:provide|send|submit|attach|share|supply)\s+(?:us\s+)?{term}",
+    )
+    return any(re.search(pattern, normalized, re.I) for pattern in patterns)
+
+
 def classify_request(subject, body):
     subject_lower = (subject or "").lower()
     status_text = f"{subject}\n{provider_request_text(body)}".lower()
@@ -157,6 +183,11 @@ def classify_request(subject, body):
         or "report to the relevant hosting provider" in status_text
         or "report has been forwarded to the relevant hosting provider" in status_text
     )
+    # A provider can acknowledge receipt and request evidence in the same
+    # message. In that case the explicit instruction wins over the receipt.
+    for kind, _ in RULES:
+        if kind in ACTION_REQUIRED_TYPES and _has_explicit_request(status_text, kind):
+            return kind, LABELS[kind], "approval_required" if kind in ("legal_evidence", "identity") else "review"
     if forwarded_notice or any(value in subject_lower for value in (
         "abuse complaint submitted", "thanks for your report", "report confirmation",
         "report received", "submission received",
@@ -174,6 +205,8 @@ def classify_request(subject, body):
 def needs_reply(mail):
     """Return whether a provider message explicitly requires a reviewed response."""
     if is_delivery_failure(mail.sender, mail.subject):
+        return False
+    if mail.provider in EXCLUDED_REPLY_PROVIDERS:
         return False
     if mail.request_type not in ACTION_REQUIRED_TYPES:
         return False
@@ -195,7 +228,10 @@ def needs_reply(mail):
             "please provide additional evidence",
             "please provide additional information",
         ))
-    return True
+    # Do not promote acknowledgements merely because a footer contains words
+    # such as "legal", "additional information" or "reply". Require an
+    # explicit request for the particular evidence/information category.
+    return _has_explicit_request(provider_request_text(mail.body), mail.request_type)
 
 
 def is_delivery_failure(sender, subject, content_type=""):
