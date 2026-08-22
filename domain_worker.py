@@ -398,7 +398,7 @@ def run_job(job_path: str):
     # trước vẫn được coi là "chưa gửi" cho hôm nay, vì mỗi ngày cho phép report lại.
     reported_domain_accounts = _successfully_reported_domain_accounts_today()
     previous_results = []
-    if os.path.exists(status_path) and not os.path.exists(preflight_path):
+    if os.path.exists(status_path):
         try:
             with open(status_path, encoding="utf-8") as f:
                 previous_status = json.load(f)
@@ -425,6 +425,9 @@ def run_job(job_path: str):
             with open(preflight_path, encoding="utf-8") as f:
                 preflight = json.load(f)
             ready = preflight.get("ready") or [] if preflight.get("version") == 2 else []
+            # Resume cùng job: chỉ giữ các domain chưa có kết quả. Domain đang
+            # xử lý lúc bị dừng chưa được append nên vẫn được chạy lại an toàn.
+            ready = [item for item in ready if item.get("target_url") not in completed_targets]
             status["excluded_no_email"] = preflight.get("excluded_no_email") or []
             status["excluded_already_sent"] = preflight.get("excluded_already_sent") or []
             status["precheck_processed"] = len(targets)
@@ -526,19 +529,33 @@ def run_job(job_path: str):
                     if (domain.lower().rstrip("."), str(account.get("username") or "").strip().lower())
                     not in reported_domain_accounts
                 ]
-                try:
-                    domain_result, successful_accounts, stopped_during_send = _run_prechecked_domain(
-                        prepared, cfg, unsent_accounts, include_vncert, events_path, stop_path,
-                    )
-                    domain = domain_result["domain"]
-                except Exception as exc:
+                if not unsent_accounts:
                     successful_accounts = set()
                     stopped_during_send = False
                     domain_result = {
-                        "target_url": target, "domain": domain, "success": False,
-                        "error": str(exc),
+                        "target_url": target, "domain": domain, "success": True,
+                        "skipped": "already_sent", "drafts_total": 0,
+                        "drafts_sendable": 0, "sent_ok": len(configured_accounts),
+                        "sent_failed": 0, "sent_to": [],
                     }
-                    _append_event(events_path, {"type": "domain_error", "target_url": target, "error": str(exc)})
+                    _append_event(events_path, {
+                        "type": "domain_skipped", "target_url": target,
+                        "reason": "already_sent",
+                    })
+                else:
+                    try:
+                        domain_result, successful_accounts, stopped_during_send = _run_prechecked_domain(
+                            prepared, cfg, unsent_accounts, include_vncert, events_path, stop_path,
+                        )
+                        domain = domain_result["domain"]
+                    except Exception as exc:
+                        successful_accounts = set()
+                        stopped_during_send = False
+                        domain_result = {
+                            "target_url": target, "domain": domain, "success": False,
+                            "error": str(exc),
+                        }
+                        _append_event(events_path, {"type": "domain_error", "target_url": target, "error": str(exc)})
                 status["results"].append(domain_result)
                 status["processed"] += 1
                 status["current_domain"] = None
