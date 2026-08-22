@@ -9,6 +9,32 @@ import domain_worker
 
 
 class DomainWorkerTests(unittest.TestCase):
+    def test_precheck_only_resolves_recipients_without_full_pipeline(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            job_path = os.path.join(job_dir, "job.json")
+            with open(job_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "job_id": "precheck-only", "domains": ["target.example"],
+                    "batch_size": 5, "interval_seconds": 0,
+                    "include_vncert": False, "precheck_only": True,
+                    "preflight_version": 2,
+                }, f)
+            recipients = [{"channel": "registry", "email": "abuse@example.net"}]
+            with (
+                patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
+                patch.object(domain_worker, "_precheck_report_recipients", return_value=recipients),
+                patch.object(domain_worker.pt, "run_check") as run_check,
+            ):
+                domain_worker.run_job(job_path)
+            with open(os.path.join(job_dir, "status.json"), encoding="utf-8") as f:
+                status = json.load(f)
+            with open(os.path.join(job_dir, "preflight.json"), encoding="utf-8") as f:
+                preflight = json.load(f)
+            self.assertEqual(status["state"], "ready")
+            self.assertEqual(status["ready_total"], 1)
+            self.assertEqual(preflight["ready"][0]["recipients"], recipients)
+            run_check.assert_not_called()
+
     def test_reads_only_successful_domain_accounts_from_current_day(self):
         with tempfile.TemporaryDirectory() as job_dir:
             sent_log = os.path.join(job_dir, "sent_log.csv")
@@ -108,6 +134,7 @@ class DomainWorkerTests(unittest.TestCase):
             with (
                 patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
                 patch.object(domain_worker, "_successfully_reported_domain_accounts", return_value=set()),
+                patch.object(domain_worker, "_precheck_report_recipients", return_value=[{"channel": "registry", "email": "abuse@example.net"}]),
                 patch.object(domain_worker.pt, "run_check", return_value=fake_result) as run_check,
                 patch.object(domain_worker.pt, "parse_draft_email", return_value=parsed) as parse_draft,
                 patch.object(domain_worker.pt, "send_report_email_single", return_value=send_result[0]) as send,
@@ -159,6 +186,7 @@ class DomainWorkerTests(unittest.TestCase):
                     "_successfully_reported_domain_accounts",
                     return_value={("target.example", "sender1@example.org")},
                 ),
+                patch.object(domain_worker, "_precheck_report_recipients", return_value=[{"channel": "registry", "email": "abuse@example.net"}]),
                 patch.object(domain_worker.pt, "run_check", return_value=fake_result),
                 patch.object(
                     domain_worker.pt,
@@ -202,6 +230,7 @@ class DomainWorkerTests(unittest.TestCase):
             with (
                 patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
                 patch.object(domain_worker, "_successfully_reported_domain_accounts", return_value=set()),
+                patch.object(domain_worker, "_precheck_report_recipients", return_value=[{"channel": "registry", "email": "abuse@example.net"}]),
                 patch.object(
                     domain_worker.pt,
                     "run_check",
@@ -217,8 +246,9 @@ class DomainWorkerTests(unittest.TestCase):
             with open(status_path, encoding="utf-8") as f:
                 status = json.load(f)
             self.assertEqual(status["state"], "completed")
+            # The completed target remains in results; only the remaining target
+            # runs through the full pipeline after its lightweight precheck.
             self.assertEqual(status["processed"], 2)
-            self.assertEqual(status["current_batch"], 2)
             self.assertEqual(run_check.call_count, 1)
             self.assertEqual(run_check.call_args.args[0], "remaining.example")
 
