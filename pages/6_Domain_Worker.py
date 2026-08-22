@@ -15,19 +15,14 @@ import streamlit as st
 
 import phishing_toolkit as pt
 import domain_worker
-from domain_worker import _successfully_reported_domain_accounts, stop_job_process
+from domain_worker import stop_job_process
 from domain_utils import extract_domains_from_text
 
-WORKER_DIR = os.path.join(pt.BASE_DIR, "worker_jobs")
+WORKER_DIR = domain_worker.WORKER_DIR
 
 
 def _sent_domain_accounts_today() -> dict[str, set[str]]:
-    """Return {normalised_domain: {account_username, ...}} for successful sends made *today* (local day).
-
-    Chỉ tính trong ngày hiện tại — khớp với logic dedup của domain_worker.py
-    (_successfully_reported_domain_accounts_today). Domain đã gửi ở các ngày trước
-    vẫn được coi là "chưa gửi" cho hôm nay, vì mỗi ngày cho phép report lại.
-    """
+    """Return successful sender accounts per domain for the current local day."""
     sent: dict[str, set[str]] = {}
     if not os.path.exists(pt.SENT_LOG_PATH):
         return sent
@@ -57,10 +52,7 @@ def _sent_domain_accounts_today() -> dict[str, set[str]]:
 
 
 def _no_email_domains_today() -> set[str]:
-    """Return normalised domains that worker already checked *today* and found no
-    sendable email for (registrar chỉ nhận web form, chưa tra được abuse email...).
-    Đọc từ no_email_log.csv (domain_worker.NO_EMAIL_LOG_PATH) — tách khỏi sent_log.csv
-    vì đây không phải 1 lần gửi thành/thất bại."""
+    """Return domains checked without a sendable recipient on the current local day."""
     domains: set[str] = set()
     path = domain_worker.NO_EMAIL_LOG_PATH
     if not os.path.exists(path):
@@ -90,10 +82,14 @@ def _no_email_domains_today() -> set[str]:
 st.set_page_config(page_title="Domain Worker", page_icon="⚙️", layout="wide")
 st.title("⚙️ Domain Report Worker")
 st.caption("Nhận danh sách domain, xử lý theo batch và tự gửi các email report có địa chỉ người nhận hợp lệ.")
-cached_sends = _successfully_reported_domain_accounts()
+cached_sends = {
+    (domain, account)
+    for domain, accounts in _sent_domain_accounts_today().items()
+    for account in accounts
+}
 st.caption(
-    f"💾 Cache gửi thành công: {len(cached_sends)} cặp domain/tài khoản. "
-    "Worker mới tự bỏ qua các cặp đã gửi; lần gửi lỗi vẫn được thử lại."
+    f"💾 Cache gửi thành công hôm nay: {len(cached_sends)} cặp domain/tài khoản. "
+    "Qua ngày mới cache tự reset; lần gửi lỗi vẫn được thử lại."
 )
 
 with st.expander("🧹 Lọc domain từ nội dung thô", expanded=True):
@@ -123,7 +119,7 @@ with st.expander("🧹 Lọc domain từ nội dung thô", expanded=True):
             new_domains = []       # chưa account nào gửi hôm nay
             partial_domains = []   # 1 số account đã gửi hôm nay, còn account khác chưa
             fully_sent = []        # tất cả account đều đã gửi hôm nay → skip
-            no_email_found = []    # đã check hôm nay nhưng không có email nào để gửi → skip
+            no_email_found = []    # đã check hôm nay nhưng không có email để gửi → skip
 
             for entry in filtered_domains:
                 domain_key = pt.normalize_domain(entry).lower().rstrip(".")
@@ -159,19 +155,21 @@ with st.expander("🧹 Lọc domain từ nội dung thô", expanded=True):
 
             if partial_domains:
                 with st.expander(f"⚠️ {len(partial_domains)} domain đã gửi một phần hôm nay — vẫn đưa vào worker", expanded=True):
-                    st.caption("Các domain này đã được gửi bởi một số tài khoản trong hôm nay nhưng vẫn còn tài khoản chưa gửi. Worker sẽ tự bỏ qua tài khoản đã gửi và chỉ gửi qua tài khoản còn lại.")
+                    st.caption("Domain còn sống sẽ được worker kiểm tra; worker bỏ qua tài khoản đã gửi hôm nay và chỉ gửi bằng tài khoản còn lại.")
                     for entry, accs in partial_domains:
                         st.markdown(f"- `{entry}` — đã gửi hôm nay qua: {', '.join(sorted(accs)) or '(không rõ)'}")
 
             if fully_sent:
-                with st.expander(f"⏭ {len(fully_sent)} domain đã gửi đủ tất cả tài khoản hôm nay — bị bỏ qua", expanded=not keep_domains):
-                    st.caption("Tất cả tài khoản đã gửi report cho các domain này trong hôm nay. Domain đã gửi ở các ngày trước vẫn được coi là gửi được lại hôm nay.")
+                with st.expander(f"⏭ {len(fully_sent)} domain đã gửi đủ hôm nay — bị bỏ qua", expanded=True):
+                    st.caption("Các domain này đã được gửi thành công bằng tất cả tài khoản cấu hình trong ngày hôm nay.")
                     st.code("\n".join(fully_sent), language=None)
+                    st.download_button("⬇️ Tải danh sách đã gửi", "\n".join(fully_sent) + "\n", "domains_already_sent.txt")
 
             if no_email_found:
-                with st.expander(f"⏭ {len(no_email_found)} domain đã check hôm nay nhưng không có email để gửi — bị bỏ qua", expanded=not keep_domains):
-                    st.caption("Worker đã chạy check cho các domain này trong hôm nay nhưng không tìm được draft nào có địa chỉ email hợp lệ (registrar chỉ nhận web form, chưa tra được abuse email...). Bỏ qua để tránh dò lại vô ích trong cùng ngày — sang ngày mai sẽ được thử lại.")
+                with st.expander(f"⏭ {len(no_email_found)} domain không có email hôm nay — bị bỏ qua", expanded=True):
+                    st.caption("Các domain này đã được kiểm tra trong hôm nay nhưng không có email hợp lệ. Sang ngày mới cache tự reset và chúng được phép kiểm tra lại.")
                     st.code("\n".join(no_email_found), language=None)
+                    st.download_button("⬇️ Tải danh sách không có email", "\n".join(no_email_found) + "\n", "domains_without_email.txt")
 
 
             if not keep_domains:

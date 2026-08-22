@@ -17,13 +17,13 @@ import phishing_toolkit as pt
 from domain_utils import extract_domains_from_text
 
 
-WORKER_DIR = os.path.join(pt.BASE_DIR, "worker_jobs")
+WORKER_DIR = pt._runtime_path("worker_jobs")
 # Log riêng các domain đã được worker check nhưng KHÔNG tìm được email report nào để gửi
 # (registrar chỉ nhận web form, chưa tra được abuse email...). Tách khỏi sent_log.csv vì
 # đây không phải 1 lần gửi thành/thất bại — chỉ là "đã thử, không có gì để gửi". Dùng để
 # Trang Domain Worker (nút Lọc domain) tự động bỏ qua, tránh dò lại abuse email vô ích
 # trong cùng 1 ngày cho domain đã biết chắc không gửi được.
-NO_EMAIL_LOG_PATH = os.path.join(pt.BASE_DIR, "no_email_log.csv")
+NO_EMAIL_LOG_PATH = pt._runtime_path("no_email_log.csv")
 
 
 def _now() -> str:

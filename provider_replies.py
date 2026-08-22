@@ -76,11 +76,25 @@ REQUESTED_TERMS = {
     "clarification": r"(?:information|details|clarification|evidence|proof)",
 }
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CACHE_PATH = os.path.join(BASE_DIR, "provider_mail_cache.json")
 DATA_DIR = os.path.join(BASE_DIR, "data")
-REPLY_LOG_PATH = os.path.join(DATA_DIR, "provider_reply_log.json")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+
+def _runtime_path(name):
+    destination = os.path.join(DATA_DIR, name)
+    legacy = os.path.join(BASE_DIR, name)
+    if not os.path.exists(destination) and os.path.exists(legacy):
+        try:
+            os.replace(legacy, destination)
+        except OSError:
+            pass
+    return destination
+
+
+CACHE_PATH = _runtime_path("provider_mail_cache.json")
+REPLY_LOG_PATH = _runtime_path("provider_reply_log.json")
 LEGACY_REPLY_LOG_PATH = os.path.join(BASE_DIR, "provider_reply_log.json")
-EVIDENCE_DIR = os.path.join(BASE_DIR, "evidence", "provider_replies")
+EVIDENCE_DIR = os.path.join(_runtime_path("evidence"), "provider_replies")
 
 
 @dataclass

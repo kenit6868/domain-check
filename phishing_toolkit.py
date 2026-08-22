@@ -99,9 +99,25 @@ if getattr(sys, "frozen", False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.ini")
-LOG_PATH = os.path.join(BASE_DIR, "case_log.csv")
-REPORTS_DIR = os.path.join(BASE_DIR, "reports")
-SENT_LOG_PATH = os.path.join(BASE_DIR, "sent_log.csv")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+
+def _runtime_path(name):
+    """Return a data path and migrate its legacy root-level counterpart once."""
+    destination = os.path.join(DATA_DIR, name)
+    legacy = os.path.join(BASE_DIR, name)
+    if not os.path.exists(destination) and os.path.exists(legacy):
+        try:
+            os.replace(legacy, destination)
+        except OSError:
+            pass
+    return destination
+
+
+LOG_PATH = _runtime_path("case_log.csv")
+REPORTS_DIR = _runtime_path("reports")
+SENT_LOG_PATH = _runtime_path("sent_log.csv")
 
 CA_ABUSE_NOTES = {
     "google trust services": {

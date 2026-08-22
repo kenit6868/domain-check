@@ -1,3 +1,4 @@
+data/
 config.ini
 case_log.csv
 sent_log.csv
@@ -5,7 +6,6 @@ no_email_log.csv
 provider_mail_cache.json
 provider_mail_cache.json.tmp
 provider_reply_log.json
-data/
 evidence/provider_replies/
 reports/
 worker_jobs/
