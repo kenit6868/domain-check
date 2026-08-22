@@ -27,6 +27,19 @@ class DomainWorkerTests(unittest.TestCase):
                     {("sent.example", "sender1@example.org")},
                 )
 
+    def test_worker_cache_reads_successful_sends_from_all_days(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            sent_log = os.path.join(job_dir, "sent_log.csv")
+            with open(sent_log, "w", newline="", encoding="utf-8") as f:
+                f.write("timestamp,domain,account,success\n")
+                f.write("2020-01-01T00:00:00+00:00,old.example,sender@example.org,True\n")
+                f.write("2020-01-01T00:00:00+00:00,failed.example,sender@example.org,False\n")
+            with patch.object(domain_worker.pt, "SENT_LOG_PATH", sent_log):
+                self.assertEqual(
+                    domain_worker._successfully_reported_domain_accounts(),
+                    {("old.example", "sender@example.org")},
+                )
+
     def test_atomic_status_write_retries_windows_file_lock(self):
         with tempfile.TemporaryDirectory() as job_dir:
             path = os.path.join(job_dir, "status.json")
@@ -45,6 +58,27 @@ class DomainWorkerTests(unittest.TestCase):
             with open(path, encoding="utf-8") as f:
                 self.assertEqual(json.load(f), {"state": "running"})
             self.assertEqual(attempts["count"], 3)
+
+    def test_force_stop_marks_job_stopped_and_terminates_process_group(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            status_path = os.path.join(job_dir, "status.json")
+            with open(status_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "job_id": "stop-test", "state": "running", "pid": 4321,
+                    "processed": 3, "current_domain": "active.example",
+                }, f)
+            with patch.object(domain_worker.os, "name", "posix"), patch.object(
+                domain_worker.os, "killpg"
+            ) as killpg:
+                stopped, _message = domain_worker.stop_job_process(job_dir)
+            self.assertTrue(stopped)
+            killpg.assert_called_once_with(4321, domain_worker.signal.SIGTERM)
+            self.assertTrue(os.path.exists(os.path.join(job_dir, "stop.requested")))
+            with open(status_path, encoding="utf-8") as f:
+                status = json.load(f)
+            self.assertEqual(status["state"], "stopped")
+            self.assertEqual(status["processed"], 3)
+            self.assertTrue(status["stop_forced"])
 
     def test_job_processes_domains_and_skips_vncert_by_default(self):
         with tempfile.TemporaryDirectory() as job_dir:
@@ -73,10 +107,10 @@ class DomainWorkerTests(unittest.TestCase):
 
             with (
                 patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
-                patch.object(domain_worker, "_successfully_reported_domain_accounts_today", return_value=set()),
+                patch.object(domain_worker, "_successfully_reported_domain_accounts", return_value=set()),
                 patch.object(domain_worker.pt, "run_check", return_value=fake_result) as run_check,
                 patch.object(domain_worker.pt, "parse_draft_email", return_value=parsed) as parse_draft,
-                patch.object(domain_worker.pt, "send_report_email_bulk", return_value=send_result) as send,
+                patch.object(domain_worker.pt, "send_report_email_single", return_value=send_result[0]) as send,
                 patch.object(domain_worker.pt, "log_sent"),
             ):
                 domain_worker.run_job(job_path)
@@ -114,18 +148,15 @@ class DomainWorkerTests(unittest.TestCase):
                 "reputation": {"verdict": "unknown"},
             }
 
-            def fake_send(_to, _subject, _body, send_cfg):
-                self.assertEqual(
-                    [account["username"] for account in send_cfg["smtp_accounts"]],
-                    ["sender2@example.org"],
-                )
-                return [{"account": "sender2@example.org", "success": True, "error": None}]
+            def fake_send(_to, _subject, _body, account, _proxy):
+                self.assertEqual(account["username"], "sender2@example.org")
+                return {"account": "sender2@example.org", "success": True, "error": None}
 
             with (
                 patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": accounts}),
                 patch.object(
                     domain_worker,
-                    "_successfully_reported_domain_accounts_today",
+                    "_successfully_reported_domain_accounts",
                     return_value={("target.example", "sender1@example.org")},
                 ),
                 patch.object(domain_worker.pt, "run_check", return_value=fake_result),
@@ -134,7 +165,7 @@ class DomainWorkerTests(unittest.TestCase):
                     "parse_draft_email",
                     return_value={"to": "abuse@example.net", "subject": "Report", "body": "Body"},
                 ),
-                patch.object(domain_worker.pt, "send_report_email_bulk", side_effect=fake_send) as send,
+                patch.object(domain_worker.pt, "send_report_email_single", side_effect=fake_send) as send,
                 patch.object(domain_worker.pt, "log_sent"),
             ):
                 domain_worker.run_job(job_path)
@@ -170,7 +201,7 @@ class DomainWorkerTests(unittest.TestCase):
 
             with (
                 patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
-                patch.object(domain_worker, "_successfully_reported_domain_accounts_today", return_value=set()),
+                patch.object(domain_worker, "_successfully_reported_domain_accounts", return_value=set()),
                 patch.object(
                     domain_worker.pt,
                     "run_check",

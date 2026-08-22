@@ -15,6 +15,7 @@ import streamlit as st
 
 import phishing_toolkit as pt
 import domain_worker
+from domain_worker import _successfully_reported_domain_accounts, stop_job_process
 from domain_utils import extract_domains_from_text
 
 WORKER_DIR = os.path.join(pt.BASE_DIR, "worker_jobs")
@@ -89,6 +90,11 @@ def _no_email_domains_today() -> set[str]:
 st.set_page_config(page_title="Domain Worker", page_icon="⚙️", layout="wide")
 st.title("⚙️ Domain Report Worker")
 st.caption("Nhận danh sách domain, xử lý theo batch và tự gửi các email report có địa chỉ người nhận hợp lệ.")
+cached_sends = _successfully_reported_domain_accounts()
+st.caption(
+    f"💾 Cache gửi thành công: {len(cached_sends)} cặp domain/tài khoản. "
+    "Worker mới tự bỏ qua các cặp đã gửi; lần gửi lỗi vẫn được thử lại."
+)
 
 with st.expander("🧹 Lọc domain từ nội dung thô", expanded=True):
     st.caption(
@@ -366,7 +372,7 @@ else:
     a, b = st.columns(2)
     if a.button("🔄 Làm mới trạng thái"):
         st.rerun()
-    if b.button("⏹ Yêu cầu dừng", disabled=status.get("state") in ("completed", "failed", "stopped")):
-        with open(os.path.join(job_dir, "stop.requested"), "w", encoding="utf-8") as f:
-            f.write(datetime.now(timezone.utc).isoformat())
-        st.warning("Đã gửi yêu cầu dừng. Worker sẽ dừng sau bước đang chạy hiện tại.")
+    if b.button("⏹ Dừng hẳn tiến trình", disabled=status.get("state") in ("completed", "failed", "stopped")):
+        stopped, message = stop_job_process(job_dir)
+        (st.success if stopped else st.warning)(message)
+        st.rerun()
