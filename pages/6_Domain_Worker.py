@@ -429,13 +429,16 @@ def load_status(job_dir):
     return None
 
 
-def _render_job_metrics(status):
+def _render_job_metrics(status, total_sent=None):
     """Render the compact progress bar beside the table it describes."""
-    c1, c2, c3, c4 = st.columns(4)
+    columns = st.columns(5 if total_sent is not None else 4)
+    c1, c2, c3, c4 = columns[:4]
     c1.metric("Trạng thái", status.get("state", "?"))
     c2.metric("Tiến độ", f"{status.get('processed', 0)}/{status.get('total', 0)}")
     c3.metric("Batch", f"{status.get('current_batch', 0)}/{status.get('total_batches', 0)}")
     c4.metric("Batch tiếp theo", f"{status.get('next_batch_in_seconds', 0)} giây")
+    if total_sent is not None:
+        columns[4].metric("Tổng gửi thành công", total_sent)
 
 
 def launch_job_process(job_path):
@@ -831,7 +834,8 @@ else:
         results_df.insert(0, "STT", range(1, len(results_df) + 1))
         if status.get("state") != "ready":
             st.subheader("Theo dõi worker")
-            _render_job_metrics(status)
+            total_sent = sum(int(row.get("✅ Sent", 0) or 0) for row in summary_rows)
+            _render_job_metrics(status, total_sent=total_sent)
         current_target = status.get("current_domain")
         if current_target:
             st.info(
