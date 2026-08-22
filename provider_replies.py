@@ -75,9 +75,12 @@ REQUESTED_TERMS = {
     "technical_evidence": r"(?:additional evidence|supporting evidence|technical details|redirect chain|logs?)",
     "clarification": r"(?:information|details|clarification|evidence|proof)",
 }
-CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "provider_mail_cache.json")
-REPLY_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "provider_reply_log.json")
-EVIDENCE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "evidence", "provider_replies")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CACHE_PATH = os.path.join(BASE_DIR, "provider_mail_cache.json")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+REPLY_LOG_PATH = os.path.join(DATA_DIR, "provider_reply_log.json")
+LEGACY_REPLY_LOG_PATH = os.path.join(BASE_DIR, "provider_reply_log.json")
+EVIDENCE_DIR = os.path.join(BASE_DIR, "evidence", "provider_replies")
 
 
 @dataclass
@@ -453,6 +456,14 @@ def reply_log_key(mail):
 
 
 def load_reply_log():
+    # Keep runtime data outside the tracked source tree.  Migrate installations
+    # that still have the legacy root-level file without losing reply history.
+    if not os.path.exists(REPLY_LOG_PATH) and os.path.exists(LEGACY_REPLY_LOG_PATH):
+        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+            os.replace(LEGACY_REPLY_LOG_PATH, REPLY_LOG_PATH)
+        except OSError:
+            pass
     try:
         with open(REPLY_LOG_PATH, encoding="utf-8") as handle:
             value = json.load(handle)
@@ -476,6 +487,7 @@ def record_reply_sent(mail, subject, recipient):
         "sent_at": datetime.now(timezone.utc).isoformat(),
     }
     data[reply_log_key(mail)] = record
+    os.makedirs(os.path.dirname(REPLY_LOG_PATH), exist_ok=True)
     temp_path = REPLY_LOG_PATH + ".tmp"
     with open(temp_path, "w", encoding="utf-8") as handle:
         json.dump(data, handle, ensure_ascii=False, indent=2)
@@ -556,6 +568,7 @@ def sync_sent_reply_status(account, mails, date_from=None, date_to=None):
             }
             matched += 1
         if matched:
+            os.makedirs(os.path.dirname(REPLY_LOG_PATH), exist_ok=True)
             temp_path = REPLY_LOG_PATH + ".tmp"
             with open(temp_path, "w", encoding="utf-8") as handle:
                 json.dump(reply_log, handle, ensure_ascii=False, indent=2)
