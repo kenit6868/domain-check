@@ -5,6 +5,8 @@ import argparse
 import csv
 import json
 import os
+import signal
+import subprocess
 import sys
 import time
 import traceback
@@ -109,10 +111,75 @@ def _successfully_reported_domain_accounts_today(
     return reported
 
 
-def _send_domain_drafts(domain: str, drafts: list, cfg: dict, include_vncert: bool, events_path: str) -> tuple[dict, set[str]]:
+def _successfully_reported_domain_accounts() -> set[tuple[str, str]]:
+    """Return every successful ``(domain, sender account)`` pair in the sent cache."""
+    reported = set()
+    if not os.path.exists(pt.SENT_LOG_PATH):
+        return reported
+    try:
+        with pt.sent_log_lock():
+            if not os.path.exists(pt.SENT_LOG_PATH):
+                return reported
+            with open(pt.SENT_LOG_PATH, newline="", encoding="utf-8-sig") as f:
+                for row in csv.DictReader(f):
+                    success = str(row.get("success", "")).strip().lower()
+                    domain = pt.normalize_domain(str(row.get("domain", "")).strip()).lower().rstrip(".")
+                    account = str(row.get("account", "")).strip().lower()
+                    if domain and account and success in {"true", "1", "yes"}:
+                        reported.add((domain, account))
+    except (OSError, csv.Error):
+        pass
+    return reported
+
+
+def stop_job_process(job_dir: str) -> tuple[bool, str]:
+    """Request a stop and terminate the dedicated worker process/process group."""
+    status_path = os.path.join(job_dir, "status.json")
+    stop_path = os.path.join(job_dir, "stop.requested")
+    with open(stop_path, "w", encoding="utf-8") as f:
+        f.write(_now())
+    try:
+        with open(status_path, encoding="utf-8") as f:
+            status = json.load(f)
+    except (OSError, ValueError):
+        return False, "Không đọc được PID của worker; đã lưu yêu cầu dừng."
+    pid = status.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return False, "Worker chưa ghi PID; đã lưu yêu cầu dừng."
+    try:
+        if os.name == "nt":
+            completed = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True,
+                text=True, timeout=10, check=False,
+            )
+            if completed.returncode != 0:
+                raise OSError((completed.stderr or completed.stdout).strip())
+        else:
+            os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"Đã lưu yêu cầu dừng nhưng không thể kết thúc process: {exc}"
+    status.update({
+        "state": "stopped", "current_domain": None, "next_batch_in_seconds": 0,
+        "finished_at": _now(), "stop_forced": True,
+    })
+    _atomic_json(status_path, status)
+    _append_event(os.path.join(job_dir, "events.jsonl"), {
+        "type": "job_force_stopped", "processed": status.get("processed", 0),
+    })
+    return True, "Đã dừng hẳn worker. Các email gửi thành công trước đó đã nằm trong cache."
+
+
+def _send_domain_drafts(
+    domain: str, drafts: list, cfg: dict, include_vncert: bool,
+    events_path: str, stop_path: str | None = None,
+) -> tuple[dict, set[str], bool]:
     summary = {"drafts_total": len(drafts), "drafts_sendable": 0, "sent_ok": 0, "sent_failed": 0, "sent_to": []}
     successful_accounts = set()
     for path in drafts:
+        if stop_path and _should_stop(stop_path):
+            return summary, successful_accounts, True
         filename = os.path.basename(path)
         if not include_vncert and filename.endswith("_vncert_report.txt"):
             _append_event(events_path, {"type": "draft_skipped", "domain": domain, "draft": filename, "reason": "vncert_disabled"})
@@ -128,8 +195,15 @@ def _send_domain_drafts(domain: str, drafts: list, cfg: dict, include_vncert: bo
             continue
 
         summary["drafts_sendable"] += 1
-        results = pt.send_report_email_bulk(parsed["to"], parsed["subject"], parsed["body"], cfg)
-        for result in results:
+        accounts = cfg.get("smtp_accounts") or []
+        proxies = cfg.get("smtp_proxies") or []
+        for index, account_cfg in enumerate(accounts):
+            if stop_path and _should_stop(stop_path):
+                return summary, successful_accounts, True
+            proxy = proxies[index % len(proxies)] if proxies else None
+            result = pt.send_report_email_single(
+                parsed["to"], parsed["subject"], parsed["body"], account_cfg, proxy
+            )
             ok = bool(result.get("success"))
             account = str(result.get("account") or "").strip()
             if ok and account:
@@ -162,7 +236,7 @@ def _send_domain_drafts(domain: str, drafts: list, cfg: dict, include_vncert: bo
                 "to": parsed["to"], "account": result.get("account"), "success": ok,
                 "error": result.get("error") or "",
             })
-    return summary, successful_accounts
+    return summary, successful_accounts, False
 
 
 def run_job(job_path: str):
@@ -180,7 +254,7 @@ def run_job(job_path: str):
     interval_seconds = max(0, int(job.get("interval_seconds", 300)))
     include_vncert = bool(job.get("include_vncert", False))
     cfg = pt.load_config()
-    reported_domain_accounts = _successfully_reported_domain_accounts_today()
+    reported_domain_accounts = _successfully_reported_domain_accounts()
     previous_status = None
     if os.path.exists(status_path):
         try:
@@ -289,8 +363,9 @@ def run_job(job_path: str):
                     domain = result["domain"]
                     send_cfg = dict(cfg)
                     send_cfg["smtp_accounts"] = unsent_accounts
-                    mail, successful_accounts = _send_domain_drafts(
-                        domain, result.get("drafts") or [], send_cfg, include_vncert, events_path
+                    mail, successful_accounts, stopped_during_send = _send_domain_drafts(
+                        domain, result.get("drafts") or [], send_cfg, include_vncert,
+                        events_path, stop_path,
                     )
                     domain_result = {
                         "target_url": target, "domain": domain, "success": True,
@@ -301,6 +376,8 @@ def run_job(job_path: str):
                     reported_domain_accounts.update(
                         (normalized_domain, account) for account in successful_accounts
                     )
+                    if stopped_during_send:
+                        status["state"] = "stopped"
                 except Exception as exc:
                     domain_result = {
                         "target_url": target, "domain": pt.normalize_domain(target), "success": False,
@@ -313,6 +390,8 @@ def run_job(job_path: str):
                 status["current_domain"] = None
                 _atomic_json(status_path, status)
                 _append_event(events_path, {"type": "domain_finished", **domain_result})
+                if status["state"] == "stopped":
+                    break
 
             if status["state"] == "stopped":
                 break
