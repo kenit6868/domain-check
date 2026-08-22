@@ -16,6 +16,12 @@ from domain_utils import extract_domains_from_text
 
 
 WORKER_DIR = os.path.join(pt.BASE_DIR, "worker_jobs")
+# Log riêng các domain đã được worker check nhưng KHÔNG tìm được email report nào để gửi
+# (registrar chỉ nhận web form, chưa tra được abuse email...). Tách khỏi sent_log.csv vì
+# đây không phải 1 lần gửi thành/thất bại — chỉ là "đã thử, không có gì để gửi". Dùng để
+# Trang Domain Worker (nút Lọc domain) tự động bỏ qua, tránh dò lại abuse email vô ích
+# trong cùng 1 ngày cho domain đã biết chắc không gửi được.
+NO_EMAIL_LOG_PATH = os.path.join(pt.BASE_DIR, "no_email_log.csv")
 
 
 def _now() -> str:
@@ -52,6 +58,20 @@ def _atomic_json(path: str, data: dict):
 def _append_event(path: str, event: dict):
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps({"timestamp": _now(), **event}, ensure_ascii=False) + "\n")
+
+
+def _log_no_email(domain: str, target_url: str):
+    """Ghi 1 dòng vào no_email_log.csv khi 1 domain check xong nhưng không có draft nào
+    có email hợp lệ để gửi. Best-effort — lỗi ghi file không được phá job (giống log_sent)."""
+    is_new = not os.path.exists(NO_EMAIL_LOG_PATH)
+    try:
+        with open(NO_EMAIL_LOG_PATH, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["timestamp", "domain", "target_url"])
+            if is_new:
+                writer.writeheader()
+            writer.writerow({"timestamp": _now(), "domain": domain, "target_url": target_url})
+    except OSError:
+        pass
 
 
 def _should_stop(stop_path: str) -> bool:
@@ -179,7 +199,16 @@ def run_job(job_path: str):
     batch_size = max(1, int(job.get("batch_size", 5)))
     interval_seconds = max(0, int(job.get("interval_seconds", 300)))
     include_vncert = bool(job.get("include_vncert", False))
+    allowed_accounts = job.get("allowed_accounts")  # list of usernames, or None = all
     cfg = pt.load_config()
+
+    # Filter smtp_accounts to only those selected in the UI (if specified)
+    if allowed_accounts is not None:
+        allowed_lower = {a.lower() for a in allowed_accounts}
+        cfg["smtp_accounts"] = [
+            acc for acc in (cfg.get("smtp_accounts") or [])
+            if str(acc.get("username", "")).strip().lower() in allowed_lower
+        ]
     reported_domain_accounts = _successfully_reported_domain_accounts_today()
     previous_status = None
     if os.path.exists(status_path):
@@ -297,6 +326,16 @@ def run_job(job_path: str):
                         "duration_seconds": round(time.time() - started, 1),
                         "reputation": result.get("reputation", {}).get("verdict"), **mail,
                     }
+                    if mail.get("drafts_sendable", 0) == 0:
+                        # Không có draft nào có địa chỉ email hợp lệ để gửi (vd. registrar chỉ
+                        # nhận report qua web form, chưa tra được abuse email...). Đánh dấu rõ
+                        # ràng để UI không nhầm với domain đã gửi thành công.
+                        domain_result["skipped"] = "no_sendable_email"
+                        _log_no_email(domain, target)
+                        _append_event(events_path, {
+                            "type": "domain_skipped", "target_url": target, "domain": domain,
+                            "reason": "no_sendable_email", "drafts_total": mail.get("drafts_total", 0),
+                        })
                     normalized_domain = domain.lower().rstrip(".")
                     reported_domain_accounts.update(
                         (normalized_domain, account) for account in successful_accounts
