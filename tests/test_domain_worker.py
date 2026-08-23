@@ -2,13 +2,89 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from datetime import datetime, timedelta, timezone
 
 import domain_worker
 
 
 class DomainWorkerTests(unittest.TestCase):
+    def setUp(self):
+        self._cache_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._cache_dir.cleanup)
+        cache_path = os.path.join(self._cache_dir.name, "domain_precheck_cache.json")
+        cache_patch = patch.object(domain_worker, "PRECHECK_CACHE_PATH", cache_path)
+        cache_patch.start()
+        self.addCleanup(cache_patch.stop)
+
+    def test_precheck_cache_reuses_only_current_day_entries(self):
+        now = datetime.now(timezone.utc)
+        yesterday = now - timedelta(days=1)
+        with open(domain_worker.PRECHECK_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump({"version": 1, "entries": {
+                "fresh.example": {"checked_at": now.isoformat(), "recipients": [{"email": "fresh@example.org"}]},
+                "old.example": {"checked_at": yesterday.isoformat(), "recipients": [{"email": "old@example.org"}]},
+            }}, f)
+        cached = domain_worker._load_precheck_cache(local_day=now.date(), local_tz=timezone.utc)
+        self.assertEqual(set(cached), {"fresh.example"})
+
+    def test_email_body_uses_each_sender_account_address(self):
+        cfg = {"contact_name": "Byc", "contact_email": "byc@camellrp.com"}
+        body = "Regards,\nByc\nbyc@camellrp.com"
+        gmail = {"username": "byc.okwin@gmail.com"}
+        custom = {
+            "username": "sender@example.org",
+            "contact_name": "Security Team",
+            "contact_email": "abuse@example.org",
+        }
+        self.assertIn("byc.okwin@gmail.com", domain_worker.pt.personalize_email_body(body, cfg, gmail))
+        custom_body = domain_worker.pt.personalize_email_body(body, cfg, custom)
+        self.assertIn("Security Team", custom_body)
+        self.assertIn("abuse@example.org", custom_body)
+
+    def test_old_draft_placeholder_is_removed_when_urlscan_evidence_exists(self):
+        with tempfile.TemporaryDirectory() as draft_dir:
+            path = os.path.join(draft_dir, "target.example_registrar_report.txt")
+            screenshot = "https://urlscan.io/screenshots/scan-id.png"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(
+                    "To: abuse@example.org\nSubject: Report\n\n"
+                    "Screenshots: [ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]\n"
+                    "(Ảnh chụp phải hiển thị rõ URL \"https://target.example/\" trên thanh địa chỉ của trình duyệt)\n"
+                    f"\n--- Evidence: URLScan.io Analysis ---\nScreenshot: {screenshot}\n"
+                )
+            domain_worker.pt.append_urlscan_evidence_to_drafts(
+                [path], {"status": "done", "screenshot_url": screenshot, "result_url": "https://urlscan.io/result/id/"}
+            )
+            parsed = domain_worker.pt.parse_draft_email(path)
+            self.assertNotIn("ĐÍNH KÈM", parsed["body"])
+            self.assertNotIn("Ảnh chụp phải hiển thị", parsed["body"])
+            self.assertIn(f"Screenshot: {screenshot}", parsed["body"])
+
+    def test_external_body_never_sends_internal_vietnamese_instructions(self):
+        body = (
+            "[NOTE: Verify this address before sending.]\n"
+            "Evidence:\n"
+            "Screenshots: [ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]\n"
+            "(Ảnh chụp phải hiển thị rõ URL \"https://target.example/\" trên thanh địa chỉ của trình duyệt)\n"
+            "Regards,\nByc\nbyc@camellrp.com"
+        )
+        rendered = domain_worker.pt.prepare_external_email_body(body)
+        self.assertNotIn("NOTE", rendered)
+        self.assertNotIn("ĐÍNH KÈM", rendered)
+        self.assertNotIn("Ảnh chụp", rendered)
+        self.assertNotIn("Screenshot", rendered)
+
+    def test_urlscan_404_placeholder_is_not_treated_as_screenshot(self):
+        placeholder = Mock(status_code=404, headers={"content-type": "image/png"})
+        placeholder.close = Mock()
+        screenshot = Mock(status_code=200, headers={"content-type": "image/png"})
+        screenshot.close = Mock()
+        with patch.object(domain_worker.pt.requests, "get", return_value=placeholder):
+            self.assertFalse(domain_worker.pt._urlscan_screenshot_available("https://urlscan.io/screenshots/x.png"))
+        with patch.object(domain_worker.pt.requests, "get", return_value=screenshot):
+            self.assertTrue(domain_worker.pt._urlscan_screenshot_available("https://urlscan.io/screenshots/x.png"))
+
     def test_precheck_only_resolves_recipients_without_full_pipeline(self):
         with tempfile.TemporaryDirectory() as job_dir:
             job_path = os.path.join(job_dir, "job.json")
@@ -22,6 +98,7 @@ class DomainWorkerTests(unittest.TestCase):
             recipients = [{"channel": "registry", "email": "abuse@example.net"}]
             with (
                 patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
                 patch.object(domain_worker, "_precheck_report_recipients", return_value=recipients),
                 patch.object(domain_worker.pt, "run_check") as run_check,
             ):
@@ -94,7 +171,7 @@ class DomainWorkerTests(unittest.TestCase):
                     "processed": 3, "current_domain": "active.example",
                 }, f)
             with patch.object(domain_worker.os, "name", "posix"), patch.object(
-                domain_worker.os, "killpg"
+                domain_worker.os, "killpg", create=True
             ) as killpg:
                 stopped, _message = domain_worker.stop_job_process(job_dir)
             self.assertTrue(stopped)
@@ -123,19 +200,21 @@ class DomainWorkerTests(unittest.TestCase):
                     "include_vncert": False,
                 }, f)
 
-            fake_result = {
-                "domain": "checked.example",
-                "drafts": [normal_draft, vncert_draft],
-                "reputation": {"verdict": "unknown"},
-            }
+            def fake_run_check(target, _submit, _cfg):
+                return {
+                    "domain": target,
+                    "drafts": [normal_draft, vncert_draft],
+                    "reputation": {"verdict": "unknown"},
+                }
             parsed = {"to": "abuse@example.net", "subject": "Report", "body": "Body"}
             send_result = [{"account": "sender@example.org", "success": True, "error": None}]
 
             with (
                 patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
                 patch.object(domain_worker, "_successfully_reported_domain_accounts", return_value=set()),
                 patch.object(domain_worker, "_precheck_report_recipients", return_value=[{"channel": "registry", "email": "abuse@example.net"}]),
-                patch.object(domain_worker.pt, "run_check", return_value=fake_result) as run_check,
+                patch.object(domain_worker.pt, "run_check", side_effect=fake_run_check) as run_check,
                 patch.object(domain_worker.pt, "parse_draft_email", return_value=parsed) as parse_draft,
                 patch.object(domain_worker.pt, "send_report_email_single", return_value=send_result[0]) as send,
                 patch.object(domain_worker.pt, "log_sent"),
@@ -183,8 +262,11 @@ class DomainWorkerTests(unittest.TestCase):
                 patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": accounts}),
                 patch.object(
                     domain_worker,
-                    "_successfully_reported_domain_accounts",
-                    return_value={("target.example", "sender1@example.org")},
+                    "_successfully_sent_deliveries_today",
+                    return_value={(
+                        "target.example", "sender1@example.org",
+                        "target.example_registrar_report.txt", "abuse@example.net",
+                    )},
                 ),
                 patch.object(domain_worker, "_precheck_report_recipients", return_value=[{"channel": "registry", "email": "abuse@example.net"}]),
                 patch.object(domain_worker.pt, "run_check", return_value=fake_result),
@@ -229,6 +311,7 @@ class DomainWorkerTests(unittest.TestCase):
 
             with (
                 patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
                 patch.object(domain_worker, "_successfully_reported_domain_accounts", return_value=set()),
                 patch.object(domain_worker, "_precheck_report_recipients", return_value=[{"channel": "registry", "email": "abuse@example.net"}]),
                 patch.object(

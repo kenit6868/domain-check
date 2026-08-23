@@ -200,7 +200,8 @@ def render_send_email_ui(path: str, cfg: dict, key_prefix: str):
                 results = pt.send_report_email_bulk(parsed["to"], parsed["subject"], parsed["body"], cfg)
             else:
                 r = pt.send_report_email_single(
-                    parsed["to"], parsed["subject"], parsed["body"],
+                    parsed["to"], parsed["subject"],
+                    pt.personalize_email_body(parsed["body"], cfg, chosen_account),
                     chosen_account, chosen_proxy
                 )
                 results = [r]

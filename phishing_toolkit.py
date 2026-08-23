@@ -1513,6 +1513,20 @@ def urlscan_submit(domain: str, api_key: str = "", use_http: bool = False) -> di
         return {"error": str(e)}
 
 
+def _urlscan_screenshot_available(screenshot_url: str) -> bool:
+    """URLScan serves a PNG placeholder with HTTP 404 when capture failed."""
+    if not screenshot_url or requests is None:
+        return False
+    try:
+        response = requests.get(screenshot_url, timeout=15, stream=True)
+        try:
+            return response.status_code == 200 and "image/" in response.headers.get("content-type", "").lower()
+        finally:
+            response.close()
+    except Exception:
+        return False
+
+
 def urlscan_result(scan_uuid: str, api_key: str = "") -> dict:
     """Lấy kết quả scan đã submit lên URLScan.io. Cần truyền api_key giống lúc submit.
 
@@ -1534,9 +1548,12 @@ def urlscan_result(scan_uuid: str, api_key: str = "") -> dict:
         data = r.json()
         verdicts = ((data.get("verdicts") or {}).get("overall")) or {}
         page = data.get("page") or {}
+        screenshot_url = f"https://urlscan.io/screenshots/{scan_uuid}.png"
+        if not _urlscan_screenshot_available(screenshot_url):
+            screenshot_url = ""
         return {
             "status": "done",
-            "screenshot_url": f"https://urlscan.io/screenshots/{scan_uuid}.png",
+            "screenshot_url": screenshot_url,
             "result_url": f"https://urlscan.io/result/{scan_uuid}/",
             "malicious": verdicts.get("malicious", False),
             "score": verdicts.get("score", 0),
@@ -1574,8 +1591,62 @@ def urlscan_submit_and_wait(domain: str, api_key: str, timeout: int = 65, poll_i
             return res
         _time.sleep(poll_interval)
     return {"status": "pending", "scan_id": scan_id,
-            "screenshot_url": f"https://urlscan.io/screenshots/{scan_id}.png",
+            "screenshot_url": "",
             "result_url": f"https://urlscan.io/result/{scan_id}/"}
+
+
+def _replace_screenshot_placeholder(content: str, screenshot_url: str) -> str:
+    """Replace legacy/manual screenshot instructions with a real URLScan image URL."""
+    if not screenshot_url:
+        return content
+    content = re.sub(
+        r"(?mi)^Screenshots?(?: evidence)?:\s*Not available at the time of submission\.\s*$",
+        f"Screenshot: {screenshot_url}",
+        content,
+    )
+    content = re.sub(
+        r"(?mi)^Screenshots?:\s*\[ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH[^\]]*\]\s*$",
+        f"Screenshot: {screenshot_url}",
+        content,
+    )
+    content = re.sub(
+        r"(?mi)^\[ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH[^\]]*\]\s*$",
+        f"Screenshot: {screenshot_url}",
+        content,
+    )
+    content = re.sub(
+        r'(?mi)^\(Ảnh chụp phải hiển thị rõ URL ["“].*?["”] trên thanh địa chỉ của trình duyệt\)\s*$',
+        "",
+        content,
+    )
+    return content
+
+
+def prepare_external_email_body(body: str) -> str:
+    """Remove internal drafting instructions before a body is sent externally."""
+    rendered = body or ""
+    rendered = re.sub(
+        r"(?mi)^Screenshots?:\s*\[ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH[^\]]*\]\s*$",
+        "",
+        rendered,
+    )
+    rendered = re.sub(
+        r"(?mi)^\[ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH[^\]]*\]\s*$",
+        "",
+        rendered,
+    )
+    rendered = re.sub(
+        r"(?mi)^Screenshots?(?: evidence)?:\s*Not available(?: at the time of submission)?\.\s*$",
+        "",
+        rendered,
+    )
+    rendered = re.sub(
+        r'(?mi)^\(Ảnh chụp phải hiển thị rõ URL ["“].*?["”] trên thanh địa chỉ của trình duyệt\)\s*$',
+        "",
+        rendered,
+    )
+    rendered = re.sub(r"(?ms)^\[NOTE:.*?\]\s*", "", rendered)
+    return re.sub(r"\n{3,}", "\n\n", rendered).strip()
 
 
 def append_urlscan_evidence_to_drafts(drafts: list, urlscan_res: dict) -> list:
@@ -1606,18 +1677,18 @@ def append_urlscan_evidence_to_drafts(drafts: list, urlscan_res: dict) -> list:
             f"Page IP   : {page_ip} ({country})\n"
             f"Tags      : {tags}\n"
             f"Brands    : {brands}\n"
-            f"Screenshot: {screenshot_url}\n"
+            f"{f'Screenshot: {screenshot_url}' + chr(10) if screenshot_url else ''}"
             f"Full report: {result_url}\n"
             f"--- End of URLScan evidence ---\n"
         )
     else:
-        # Timeout hoặc pending — chỉ gắn URL, không có verdict
+        # Timeout hoặc pending — giữ result URL, không khẳng định có screenshot.
         evidence_block = (
             f"\n\n--- Evidence: URLScan.io (kết quả đang xử lý) ---\n"
-            f"Screenshot: {screenshot_url}\n"
+            f"{f'Screenshot: {screenshot_url}' + chr(10) if screenshot_url else ''}"
             f"Full report: {result_url}\n"
             f"--- End of URLScan evidence ---\n"
-        ) if screenshot_url else ""
+        ) if result_url else ""
 
     updated = []
     for path in drafts:
@@ -1626,25 +1697,12 @@ def append_urlscan_evidence_to_drafts(drafts: list, urlscan_res: dict) -> list:
                 continue
             with open(path, encoding="utf-8") as f:
                 content = f.read()
-            # Không xử lý nếu đã có rồi (tránh duplicate)
-            if "URLScan.io" in content and "urlscan.io/screenshots" in content:
-                updated.append(path)
-                continue
             # Thay thế placeholder ảnh chụp màn hình bằng link thật nếu có screenshot_url,
-            # đồng thời xóa dòng instruction "(Ảnh chụp phải hiển thị rõ URL ...)" bên dưới
+            # kể cả draft cũ đã có evidence block nhưng còn sót placeholder.
             if screenshot_url:
-                import re as _re
-                content = content.replace(
-                    "[ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]",
-                    screenshot_url,
-                )
-                # Xóa dòng instruction động bên dưới (dòng này chứa URL trang phishing)
-                content = _re.sub(
-                    r'\(Ảnh chụp phải hiển thị rõ URL ".*?" trên thanh địa chỉ của trình duyệt\)\n?',
-                    "",
-                    content,
-                )
-            new_content = content + evidence_block if evidence_block else content
+                content = _replace_screenshot_placeholder(content, screenshot_url)
+            has_evidence = "Evidence: URLScan.io" in content
+            new_content = content if has_evidence else (content + evidence_block if evidence_block else content)
             with open(path, "w", encoding="utf-8") as f:
                 f.write(new_content)
             updated.append(path)
@@ -2039,8 +2097,6 @@ Name: {contact_name}
 Email: {contact_email}
 
 --- FIELD: Bằng chứng đính kèm ---
-[ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]
-(Ảnh chụp phải hiển thị rõ URL "{reported_url}" trên thanh địa chỉ của trình duyệt)
 """)
         written.append(path)
 
@@ -2122,8 +2178,6 @@ Evidence:
 - Domain        : {domain}
 {chr(10).join(f'- {b}' for b in extra_bullets)}
 
-Screenshots: [ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]
-(Ảnh chụp phải hiển thị rõ URL "{reported_url}" trên thanh địa chỉ của trình duyệt)
 
 {request}
 
@@ -2180,8 +2234,6 @@ Certificate details:
 - VirusTotal     : {vt.get('link', 'N/A')}
 - First detected : {detected_date}
 
-Screenshots: [ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]
-(Ảnh chụp phải hiển thị rõ URL "{reported_url}" trên thanh địa chỉ của trình duyệt)
 
 {revoke_text}
 {signature}""")
@@ -2416,7 +2468,6 @@ Name: {contact_name}
 Email: {contact_email}
 
 --- FIELD: Bằng chứng đính kèm ---
-[ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]
 """)
         return path
 
@@ -2466,60 +2517,49 @@ def generate_vncert_draft(domain, cert, vt, cfg):
     """Sinh draft report VNCERT — LUÔN sinh, người dùng tự quyết định có gửi không."""
     contact_name = cfg.get("contact_name") or ""
     contact_email = cfg.get("contact_email") or ""
-    signature = f"\nTrân trọng,\n{contact_name}\n{contact_email}\n" if contact_name else "\nTrân trọng,\n"
+    signature = f"\nRegards,\n{contact_name}\n{contact_email}\n" if contact_name else "\nRegards,\n"
     detected_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     rng = _draft_rng(domain + "_vncert")
     vt_count = vt.get("malicious", 0) or 0
 
     subject = f"Abuse Report: Active Phishing Site - {domain}"
     opening = _pick(rng, [
-        f"Chúng tôi xin phản ánh domain {domain} đang thực hiện hành vi giả mạo thương hiệu của chúng tôi nhằm lừa đảo, đánh cắp thông tin nhạy cảm của người dùng (tài khoản đăng nhập, mã OTP, thông tin thẻ ngân hàng...).",
-        f"Chúng tôi phát hiện domain {domain} đang giả mạo thương hiệu của chúng tôi để đánh cắp thông tin đăng nhập, mã OTP và dữ liệu tài chính của người dùng.",
-        f"Chúng tôi báo cáo domain {domain} đang thực hiện tấn công phishing nhắm vào người dùng của chúng tôi bằng cách giả mạo giao diện chính thức của thương hiệu.",
-        f"Chúng tôi kính báo VNCERT/CC về domain {domain} — một trang web phishing đang hoạt động, giả mạo thương hiệu chúng tôi nhằm đánh cắp thông tin người dùng.",
+        f"We are reporting {domain}, an active phishing domain impersonating our brand to steal user credentials and sensitive information.",
+        f"We identified {domain} as an active brand-impersonation phishing site targeting users and collecting login and financial data.",
     ])
     description = _pick(rng, [
-        "Domain giả mạo hoạt động bằng cách sao chép giao diện đăng nhập chính thức của thương hiệu chúng tôi, dụ người dùng nhập thông tin vào trang giả mạo.",
-        "Trang web này sao chép giao diện đăng nhập của chúng tôi để lừa người dùng cung cấp tên đăng nhập, mật khẩu, mã OTP và thông tin thẻ ngân hàng.",
-        "Website phishing này nhái lại thiết kế trang đăng nhập chính thống của chúng tôi, đánh lừa người dùng nhập thông tin nhạy cảm vào trang giả mạo.",
-        "Kẻ tấn công đã tạo bản sao y hệt trang đăng nhập của chúng tôi tại domain này để thu thập thông tin xác thực và dữ liệu cá nhân của người dùng.",
+        "The site copies our official login interface and deceives users into submitting usernames, passwords, OTP codes, and payment information.",
+        "The fraudulent site reproduces our brand and login experience to collect credentials and personal data from users.",
     ])
     vt_note = ""
     if vt_count:
         vt_note = _pick(rng, [
-            f"\nDomain này đã bị {vt_count} công cụ bảo mật trên VirusTotal gắn cờ là độc hại.",
-            f"\nTheo VirusTotal, {vt_count} nhà cung cấp bảo mật đã xác nhận domain này là phishing/malicious.",
-            f"\nKiểm tra trên VirusTotal ngày {detected_date} cho thấy {vt_count} engine bảo mật đã phát hiện domain này là mối đe dọa.",
+            f"\nVirusTotal currently shows {vt_count} security-engine detections for this domain.",
+            f"\nAs of {detected_date}, {vt_count} VirusTotal engines identify this domain as malicious or phishing.",
         ])
     request = _pick(rng, [
-        "Kính mong VNCERT/CC hỗ trợ xử lý, phối hợp với registrar/hosting để gỡ bỏ domain này nhằm bảo vệ người dùng Việt Nam.",
-        "Chúng tôi kính đề nghị VNCERT/CC hỗ trợ can thiệp, yêu cầu registrar/hosting đình chỉ domain này để bảo vệ người dùng.",
-        "Kính nhờ VNCERT/CC phối hợp xử lý khẩn cấp, liên hệ registrar/hosting để gỡ bỏ trang phishing này sớm nhất có thể.",
-        "Chúng tôi mong nhận được sự hỗ trợ của VNCERT/CC trong việc yêu cầu đình chỉ domain phishing này nhằm ngăn chặn thiệt hại thêm cho người dùng.",
+        "Please coordinate with the registrar and hosting provider to suspend this domain and protect affected users.",
+        "We request VNCERT/CC's assistance in securing the immediate suspension of this phishing domain.",
     ])
 
     os.makedirs(REPORTS_DIR, exist_ok=True)
     path = os.path.join(REPORTS_DIR, f"{domain}_vncert_report.txt")
     with open(path, "w", encoding="utf-8") as f:
-        f.write(f"""LƯU Ý: CHỈ gửi report này nếu domain nhắm vào nạn nhân tại Việt Nam
-(vd. giả mạo thương hiệu/dịch vụ Việt Nam, nội dung tiếng Việt, nhắm vào người
-dùng Việt Nam). Tool không tự xác định được điều này — tự đánh giá trước khi gửi.
-
-To: report@vncert.vn
+        f.write(f"""To: report@vncert.vn
 Subject: {subject}
 
-Kính gửi VNCERT/CC,
+Dear VNCERT/CC Team,
 
 {opening}
 
 {description}{vt_note}
 
-Thông tin kỹ thuật:
+Technical details:
 - Domain: {domain}
 - SSL Issuer: {cert.get('issuer', 'N/A')}
 - SSL Serial: {cert.get('serial', 'N/A')}
 - VirusTotal: {vt.get('link', 'N/A')}
-- Phát hiện lúc: {detected_date}
+- First detected: {detected_date}
 
 {request}
 {signature}""")
@@ -2717,6 +2757,24 @@ def _send_via_account(account: dict, proxy_str: str | None, to: str, subject: st
         return {"account": username, "proxy": proxy_label, "success": False, "error": str(e)}
 
 
+def personalize_email_body(body: str, cfg: dict, account: dict) -> str:
+    """Render shared draft contact fields for one SMTP sender account.
+
+    By default the signature email is the SMTP username. An account may override
+    it with ``contact_email`` and may optionally provide its own ``contact_name``.
+    """
+    rendered = prepare_external_email_body(body)
+    company_email = str(cfg.get("contact_email") or "").strip()
+    company_name = str(cfg.get("contact_name") or "").strip()
+    sender_email = str(account.get("contact_email") or account.get("username") or company_email).strip()
+    sender_name = str(account.get("contact_name") or company_name).strip()
+    if company_email and sender_email:
+        rendered = rendered.replace(company_email, sender_email)
+    if company_name and sender_name and sender_name != company_name:
+        rendered = rendered.replace(company_name, sender_name)
+    return rendered
+
+
 def send_report_email_bulk(to: str, subject: str, body: str, cfg: dict) -> list:
     """Gửi email qua TẤT CẢ smtp_accounts đã cấu hình, mỗi account dùng 1 proxy xoay vòng
     (cycle nếu ít proxy hơn account), tất cả chạy ĐỒNG THỜI (ThreadPoolExecutor).
@@ -2739,7 +2797,10 @@ def send_report_email_bulk(to: str, subject: str, body: str, cfg: dict) -> list:
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(pairs)) as pool:
         futures = {
-            pool.submit(_send_via_account, account, proxy, to, subject, body): i
+            pool.submit(
+                _send_via_account, account, proxy, to, subject,
+                personalize_email_body(body, cfg, account),
+            ): i
             for i, (account, proxy) in enumerate(pairs)
         }
         # Giữ thứ tự theo index account (as_completed trả về không theo thứ tự)
@@ -2777,11 +2838,9 @@ def domain_from_draft_filename(filename: str) -> str:
 def parse_draft_email(path: str) -> dict:
     """Đọc 1 file draft đã sinh bởi generate_*_draft() ở trên, tách ra {"to", "subject", "body"}.
 
-    KHÔNG giả định "To:"/"Subject:" luôn nằm ở 2 dòng đầu file: generate_vncert_draft() ghi 1
-    đoạn cảnh báo ("LƯU Ý: CHỈ gửi report này nếu...") đứng TRƯỚC khối header, có dòng trống ở
-    giữa — nếu chỉ lấy "dòng trống đầu tiên trong cả file" làm ranh giới body thì sẽ cắt nhầm
-    ngay sau đoạn cảnh báo, làm "to"/"subject" thật ở phía dưới lẫn vào phần đầu của "body". Vì
-    vậy hàm này quét toàn file tìm dòng "To:" đầu tiên (có thể không tồn tại — draft CA report
+    KHÔNG giả định "To:"/"Subject:" luôn nằm ở 2 dòng đầu file vì draft legacy hoặc draft hướng
+    dẫn web form có thể có phần mô tả đứng trước header. Hàm này quét toàn file tìm dòng "To:"
+    đầu tiên (có thể không tồn tại — draft CA report
     của generate_email_drafts() cố ý không có dòng này vì nhiều CA dùng web form thay vì email)
     và dòng "Subject:" đầu tiên (luôn tồn tại, trừ file hỏng), rồi lấy body là phần sau dòng
     trống đầu tiên NGAY SAU dòng Subject đó — không phải dòng trống đầu tiên của cả file.
@@ -2813,6 +2872,10 @@ def parse_draft_email(path: str) -> dict:
             body_start = i + 1
             break
     body = "\n".join(lines[body_start:])
+
+    screenshot_match = re.search(r"https://urlscan\.io/screenshots/[^\s]+\.png", body)
+    if screenshot_match:
+        body = _replace_screenshot_placeholder(body, screenshot_match.group(0))
 
     if to and ("[TRA ABUSE EMAIL" in to or "[KHÔNG CÓ" in to):
         to = None
@@ -3406,8 +3469,8 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
             urlscan_data = {"error": str(e)}
         finally:
             _urlscan_executor.shutdown(wait=False)
-        # Gắn evidence vào tất cả draft nếu URLScan thành công (hoặc ít nhất có screenshot_url)
-        if urlscan_data.get("screenshot_url"):
+        # Gắn result evidence kể cả khi URLScan không chụp được ảnh; URL ảnh 404 không được đưa vào draft.
+        if urlscan_data.get("result_url"):
             append_urlscan_evidence_to_drafts(drafts, urlscan_data)
     else:
         _urlscan_executor.shutdown(wait=False)

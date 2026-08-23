@@ -25,6 +25,7 @@ WORKER_DIR = pt._runtime_path("worker_jobs")
 # Trang Domain Worker (nút Lọc domain) tự động bỏ qua, tránh dò lại abuse email vô ích
 # trong cùng 1 ngày cho domain đã biết chắc không gửi được.
 NO_EMAIL_LOG_PATH = pt._runtime_path("no_email_log.csv")
+PRECHECK_CACHE_PATH = pt._runtime_path("domain_precheck_cache.json")
 
 
 def _now() -> str:
@@ -81,6 +82,37 @@ def _should_stop(stop_path: str) -> bool:
     return os.path.exists(stop_path)
 
 
+def _load_precheck_cache(local_day: date | None = None, local_tz=None) -> dict[str, dict]:
+    """Load reusable recipient prechecks from the current local day only."""
+    local_tz = local_tz or datetime.now().astimezone().tzinfo
+    local_day = local_day or datetime.now(local_tz).date()
+    try:
+        with open(PRECHECK_CACHE_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError, TypeError):
+        return {}
+    entries = data.get("entries") if isinstance(data, dict) else None
+    if not isinstance(entries, dict):
+        return {}
+    valid = {}
+    for domain, entry in entries.items():
+        try:
+            checked_at = datetime.fromisoformat(str(entry.get("checked_at", "")).replace("Z", "+00:00"))
+            if checked_at.tzinfo is None:
+                checked_at = checked_at.replace(tzinfo=timezone.utc)
+            if checked_at.astimezone(local_tz).date() == local_day:
+                valid[domain] = entry
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return valid
+
+
+def _save_precheck_cache(entries: dict[str, dict]):
+    """Persist the current in-memory daily cache atomically."""
+    os.makedirs(os.path.dirname(PRECHECK_CACHE_PATH), exist_ok=True)
+    _atomic_json(PRECHECK_CACHE_PATH, {"version": 1, "entries": entries})
+
+
 def _interruptible_wait(seconds: int, stop_path: str, status_path: str, status: dict) -> bool:
     deadline = time.time() + seconds
     while time.time() < deadline:
@@ -130,6 +162,43 @@ def _successfully_reported_domain_accounts_today(
         # Không chặn job nếu file log đang bị Excel khóa hoặc có một dòng lỗi.
         pass
     return reported
+
+
+def _successfully_sent_deliveries_today(
+    local_day: date | None = None,
+    local_tz=None,
+) -> set[tuple[str, str, str, str]]:
+    """Return successful (domain, account, draft, recipient) deliveries for today."""
+    deliveries = set()
+    if not os.path.exists(pt.SENT_LOG_PATH):
+        return deliveries
+    local_tz = local_tz or datetime.now().astimezone().tzinfo
+    local_day = local_day or datetime.now(local_tz).date()
+    try:
+        with pt.sent_log_lock():
+            with open(pt.SENT_LOG_PATH, newline="", encoding="utf-8-sig") as f:
+                for row in csv.DictReader(f):
+                    if str(row.get("success", "")).strip().lower() not in {"true", "1", "yes"}:
+                        continue
+                    try:
+                        sent_at = datetime.fromisoformat(
+                            str(row.get("timestamp", "")).strip().replace("Z", "+00:00")
+                        )
+                        if sent_at.tzinfo is None:
+                            sent_at = sent_at.replace(tzinfo=timezone.utc)
+                        if sent_at.astimezone(local_tz).date() != local_day:
+                            continue
+                    except (TypeError, ValueError):
+                        continue
+                    domain = pt.normalize_domain(str(row.get("domain", ""))).lower().rstrip(".")
+                    account = str(row.get("account", "")).strip().lower()
+                    draft = str(row.get("draft_file", "")).strip().lower()
+                    recipient = str(row.get("to", "")).strip().lower()
+                    if domain and account and draft and recipient:
+                        deliveries.add((domain, account, draft, recipient))
+    except (OSError, csv.Error):
+        pass
+    return deliveries
 
 
 def _successfully_reported_domain_accounts() -> set[tuple[str, str]]:
@@ -195,9 +264,11 @@ def stop_job_process(job_dir: str) -> tuple[bool, str]:
 def _send_domain_drafts(
     domain: str, drafts: list, cfg: dict, include_vncert: bool,
     events_path: str, stop_path: str | None = None, prepared_drafts: list | None = None,
+    sent_deliveries: set[tuple[str, str, str, str]] | None = None,
 ) -> tuple[dict, set[str], bool]:
-    summary = {"drafts_total": len(drafts), "drafts_sendable": 0, "sent_ok": 0, "sent_failed": 0, "sent_to": []}
+    summary = {"drafts_total": len(drafts), "drafts_sendable": 0, "sent_ok": 0, "sent_failed": 0, "already_sent": 0, "sent_to": []}
     successful_accounts = set()
+    sent_deliveries = sent_deliveries if sent_deliveries is not None else set()
     items = prepared_drafts if prepared_drafts is not None else [{"path": path} for path in drafts]
     for item in items:
         if stop_path and _should_stop(stop_path):
@@ -226,13 +297,28 @@ def _send_domain_drafts(
             if stop_path and _should_stop(stop_path):
                 return summary, successful_accounts, True
             proxy = proxies[index % len(proxies)] if proxies else None
+            account_username = str(account_cfg.get("username") or "").strip().lower()
+            delivery_key = (
+                domain.lower().rstrip("."), account_username, filename.lower(),
+                str(parsed["to"]).strip().lower(),
+            )
+            if delivery_key in sent_deliveries:
+                summary["already_sent"] += 1
+                _append_event(events_path, {
+                    "type": "draft_skipped", "domain": domain, "draft": filename,
+                    "account": account_username, "reason": "already_sent_today",
+                })
+                continue
             result = pt.send_report_email_single(
-                parsed["to"], parsed["subject"], parsed["body"], account_cfg, proxy
+                parsed["to"], parsed["subject"],
+                pt.personalize_email_body(parsed["body"], cfg, account_cfg),
+                account_cfg, proxy,
             )
             ok = bool(result.get("success"))
             account = str(result.get("account") or "").strip()
             if ok and account:
                 successful_accounts.add(account.lower())
+                sent_deliveries.add(delivery_key)
             summary["sent_ok" if ok else "sent_failed"] += 1
             # Track địa chỉ đã gửi để hiển thị trong UI
             summary["sent_to"].append({
@@ -345,17 +431,17 @@ def _precheck_report_recipients(domain: str) -> list[dict]:
     return unique
 
 
-def _run_prechecked_domain(prepared, cfg, unsent_accounts, include_vncert, events_path, stop_path):
+def _run_prechecked_domain(prepared, cfg, selected_accounts, include_vncert, events_path, stop_path, sent_deliveries):
     """Run the full investigation once, then send only after revalidating draft recipients."""
     target = prepared["target_url"]
     started = time.time()
     send_cfg = dict(cfg)
-    send_cfg["smtp_accounts"] = unsent_accounts
+    send_cfg["smtp_accounts"] = selected_accounts
     result = pt.run_check(target, False, cfg)
     domain = result["domain"]
     mail, successful_accounts, stopped_during_send = _send_domain_drafts(
         domain, result.get("drafts") or [], send_cfg, include_vncert,
-        events_path, stop_path,
+        events_path, stop_path, sent_deliveries=sent_deliveries,
     )
     domain_result = {
         "target_url": target, "domain": domain, "success": True,
@@ -365,6 +451,8 @@ def _run_prechecked_domain(prepared, cfg, unsent_accounts, include_vncert, event
     if mail.get("drafts_sendable", 0) == 0:
         domain_result["skipped"] = "no_sendable_email"
         _log_no_email(domain, target)
+    elif mail.get("sent_ok", 0) == 0 and mail.get("sent_failed", 0) == 0 and mail.get("already_sent", 0):
+        domain_result["skipped"] = "already_sent"
     return domain_result, successful_accounts, stopped_during_send
 
 
@@ -384,6 +472,7 @@ def run_job(job_path: str):
     interval_seconds = max(0, int(job.get("interval_seconds", 300)))
     include_vncert = bool(job.get("include_vncert", False))
     precheck_only = bool(job.get("precheck_only", False))
+    force_precheck = bool(job.get("force_precheck", False))
     allowed_accounts = job.get("allowed_accounts")  # list of usernames, or None = all
     cfg = pt.load_config()
 
@@ -396,7 +485,8 @@ def run_job(job_path: str):
         ]
     # Dedup CHỈ theo ngày hiện tại (không phải all-time): domain đã gửi ở các ngày
     # trước vẫn được coi là "chưa gửi" cho hôm nay, vì mỗi ngày cho phép report lại.
-    reported_domain_accounts = _successfully_reported_domain_accounts_today()
+    sent_deliveries = _successfully_sent_deliveries_today()
+    precheck_cache = _load_precheck_cache()
     previous_results = []
     if os.path.exists(status_path):
         try:
@@ -413,6 +503,7 @@ def run_job(job_path: str):
         "job_id": job.get("job_id"), "state": "prechecking", "pid": os.getpid(),
         "started_at": _now(), "finished_at": None, "total": len(targets), "processed": 0,
         "precheck_total": len(targets), "precheck_processed": 0, "ready_total": 0,
+        "precheck_cached": 0,
         "current_domain": None, "current_batch": 0, "total_batches": 0,
         "next_batch_in_seconds": 0, "results": previous_results, "excluded_no_email": [],
         "excluded_already_sent": [], "error": None,
@@ -448,16 +539,22 @@ def run_job(job_path: str):
                 _append_event(events_path, {"type": "precheck_started", "target_url": target})
                 started = time.time()
                 target_domain = pt.normalize_domain(target).lower().rstrip(".")
-                unsent_accounts = [
-                    account for account in configured_accounts
-                    if (target_domain, str(account.get("username") or "").strip().lower())
-                    not in reported_domain_accounts
-                ]
-                if not unsent_accounts:
-                    status["excluded_already_sent"].append({"target_url": target, "domain": target_domain})
-                else:
+                if configured_accounts:
                     try:
-                        recipients = _precheck_report_recipients(target_domain)
+                        cached_precheck = None if force_precheck else precheck_cache.get(target_domain)
+                        if cached_precheck is not None:
+                            recipients = cached_precheck.get("recipients") or []
+                            status["precheck_cached"] += 1
+                            _append_event(events_path, {
+                                "type": "precheck_cache_hit", "target_url": target,
+                                "domain": target_domain,
+                            })
+                        else:
+                            recipients = _precheck_report_recipients(target_domain)
+                            precheck_cache[target_domain] = {
+                                "checked_at": _now(), "recipients": recipients,
+                            }
+                            _save_precheck_cache(precheck_cache)
                         if recipients:
                             ready.append({
                                 "target_url": target, "domain": target_domain,
@@ -524,28 +621,11 @@ def run_job(job_path: str):
                 status["current_domain"] = target
                 _atomic_json(status_path, status)
                 configured_accounts = cfg.get("smtp_accounts") or []
-                unsent_accounts = [
-                    account for account in configured_accounts
-                    if (domain.lower().rstrip("."), str(account.get("username") or "").strip().lower())
-                    not in reported_domain_accounts
-                ]
-                if not unsent_accounts:
-                    successful_accounts = set()
-                    stopped_during_send = False
-                    domain_result = {
-                        "target_url": target, "domain": domain, "success": True,
-                        "skipped": "already_sent", "drafts_total": 0,
-                        "drafts_sendable": 0, "sent_ok": len(configured_accounts),
-                        "sent_failed": 0, "sent_to": [],
-                    }
-                    _append_event(events_path, {
-                        "type": "domain_skipped", "target_url": target,
-                        "reason": "already_sent",
-                    })
-                else:
+                if configured_accounts:
                     try:
                         domain_result, successful_accounts, stopped_during_send = _run_prechecked_domain(
-                            prepared, cfg, unsent_accounts, include_vncert, events_path, stop_path,
+                            prepared, cfg, configured_accounts, include_vncert, events_path, stop_path,
+                            sent_deliveries,
                         )
                         domain = domain_result["domain"]
                     except Exception as exc:
@@ -556,12 +636,16 @@ def run_job(job_path: str):
                             "error": str(exc),
                         }
                         _append_event(events_path, {"type": "domain_error", "target_url": target, "error": str(exc)})
+                else:
+                    successful_accounts = set()
+                    stopped_during_send = False
+                    domain_result = {
+                        "target_url": target, "domain": domain, "success": False,
+                        "error": "No selected SMTP accounts are available in config.ini",
+                    }
                 status["results"].append(domain_result)
                 status["processed"] += 1
                 status["current_domain"] = None
-                reported_domain_accounts.update(
-                    (domain.lower().rstrip("."), account) for account in successful_accounts
-                )
                 _atomic_json(status_path, status)
                 _append_event(events_path, {"type": "domain_finished", **domain_result})
                 if stopped_during_send:

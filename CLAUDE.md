@@ -469,6 +469,46 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
 
 ## Chỉ dẫn bảo trì (quan trọng)
 
+### Domain Worker — chọn nhiều tài khoản và cache theo delivery
+
+- Trang `pages/6_Domain_Worker.py` có một bộ chọn tài khoản SMTP duy nhất nằm trước cả bước lọc nội dung thô,
+  mặc định toàn bộ account từ `config.ini`. Lọc domain/hiển thị cache dùng đúng tập account đang chọn; lựa chọn
+  sau đó được lưu vào `job.json` và giữ nguyên từ precheck đến khi gửi.
+- Worker không còn coi một lần gửi thành công là hoàn tất toàn domain/account. Cache trong ngày xét theo
+  `(domain, account, draft_file, recipient)`, nên draft lỗi vẫn được retry mà draft đã thành công không bị gửi lại.
+- Không được dùng cache `(domain, account)` để loại domain trước khi sinh draft: ở thời điểm precheck chưa thể
+  biết tất cả delivery của domain đã hoàn tất hay chưa.
+- Bảng theo dõi worker có cột `Account đã gửi thành công`, hợp nhất account thành công trong cache hôm nay và
+  kết quả lượt chạy hiện tại; cột `Địa chỉ gửi` vẫn là danh sách account đã thử gửi, kể cả lần lỗi.
+- UI chỉ giữ một bảng theo dõi chính. Preview trước precheck là dòng đếm (chỉ mở danh sách khi có input lỗi),
+  domain đã gửi đủ/không có email được gộp vào một bảng `Domain bị bỏ qua`, bảng ready chỉ hiện ở state `ready`,
+  và metric đổi theo phase để không hiển thị sai kiểu `ready 0/N`.
+- Khi job ở state `completed`, panel trên bảng không được nói “có thể chạy worker ngay”: phải tổng hợp số email
+  gửi mới/số delivery bỏ qua do cache/số lỗi, đổi form thành `Retry phần còn thiếu`, và nhắc rõ retry không gửi
+  trùng delivery đã thành công trong ngày.
+- Kết quả “Lọc domain” phân loại tương đối theo tập account đang chọn: chưa account được chọn nào gửi, đã gửi
+  một phần (hiện rõ account đã gửi/còn thiếu), hoặc đã gửi đủ. Thông báo tổng hợp luôn nêu riêng số domain thực
+  sự được đưa xuống worker để tránh gọi domain đã gửi một phần là domain mới.
+- Precheck recipient dùng cache chung `data/domain_precheck_cache.json` theo ngày địa phương, độc lập account;
+  job mới chỉ gọi WHOIS/RDAP/registry/hosting cho domain chưa cache. Checkbox `Bỏ qua cache và check lại toàn bộ
+  domain` tạo lại dữ liệu khi cần; lỗi precheck không được cache. Test phải patch `PRECHECK_CACHE_PATH` sang thư
+  mục tạm để không ghi dữ liệu giả vào cache vận hành.
+- Draft vẫn sinh một bản dùng thông tin `[company]`, nhưng ngay trước SMTP phải gọi
+  `personalize_email_body(body, cfg, account)`: email chữ ký mặc định đổi sang `account.username`; từng account
+  có thể override bằng `contact_name`/`contact_email`. Cả bulk send, gửi một account trong UI và Domain Worker
+  đều phải đi qua bước này để địa chỉ From và chữ ký không lệch nhau.
+- `append_urlscan_evidence_to_drafts()` phải dọn placeholder ảnh thủ công trước khi kiểm tra evidence đã tồn tại;
+  draft legacy có thể đã chứa cả placeholder và URLScan block. `parse_draft_email()` cũng dọn lần cuối khi body có
+  URL `urlscan.io/screenshots/*.png`, đảm bảo draft cũ gửi lại không lộ chỉ dẫn `[ĐÍNH KÈM ...]`.
+- Mọi đường gửi SMTP đi qua `personalize_email_body()` và do đó `prepare_external_email_body()`: lớp cuối này
+  loại `[NOTE: ...]`, chỉ dẫn/placeholder tiếng Việt và dùng câu tiếng Anh production-safe khi chưa có screenshot.
+  Template email sendable (kể cả VNCERT) phải là tiếng Anh; tiếng Việt chỉ được dùng trong UI hoặc draft hướng
+  dẫn web form không có `To:` nên không thể gửi tự động.
+- URLScan có thể trả PNG placeholder “No Screenshot Available” với HTTP 404 tại URL screenshot dự đoán.
+  `_urlscan_screenshot_available()` phải GET dạng stream và chỉ nhận HTTP 200 + content-type image; pending/404
+  để `screenshot_url` rỗng. Draft vẫn giữ Full report URL nhưng bỏ hoàn toàn trường Screenshot khi không có ảnh
+  thật; không gửi link 404 hay câu `Screenshot: Not available` để email không lộ dấu vết của tool.
+
 **Sau bất kỳ thay đổi code nào trong dự án này, cập nhật CLAUDE.md này trong cùng phiên làm việc**
 (thêm/chỉnh phần liên quan ở trên) để phiên Claude tiếp theo hiểu được trạng thái hiện tại của dự án
 chỉ bằng cách đọc file này, không cần đọc lại toàn bộ source. Giữ phần cập nhật ngắn gọn — mô tả cái
