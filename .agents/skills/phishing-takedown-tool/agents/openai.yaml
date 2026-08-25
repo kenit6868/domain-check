@@ -1,0 +1,3 @@
+interface:
+  display_name: "Phishing takedown"
+  short_description: "Xử lý workflow điều tra và takedown phishing của dự án"
