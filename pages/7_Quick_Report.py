@@ -21,6 +21,7 @@ import streamlit.components.v1 as components
 import phishing_toolkit as pt
 
 _MAX_CHECK_WORKERS = 1
+_FILTER_CACHE_PATH = pt._runtime_path("quick_report_filter_cache.json")
 
 
 def _render_copy_domain_button(displayed_url: str) -> None:
@@ -90,6 +91,34 @@ def _check_executor() -> ThreadPoolExecutor:
 def _quick_report_cache() -> dict:
     """Cache sống qua F5, cho tới khi bấm Xóa cache hoặc restart server."""
     return {}
+
+
+@st.cache_resource
+def _quick_report_filter_cache() -> set[str]:
+    """URLs accepted by the filter, restored from disk after app restarts."""
+    try:
+        from domain_utils import domain_cache_key
+        with open(_FILTER_CACHE_PATH, encoding="utf-8") as file:
+            data = json.load(file)
+        seen = {
+            domain_cache_key(str(item))
+            for item in data.get("seen", [])
+            if str(item).strip()
+        }
+        seen.discard("")
+        # Ghi lại ngay để cache cũ dạng domain/path được nâng cấp thành URL.
+        _save_quick_report_filter_cache(seen)
+        return seen
+    except (OSError, ValueError, TypeError):
+        return set()
+
+
+def _save_quick_report_filter_cache(seen: set[str]) -> None:
+    os.makedirs(os.path.dirname(_FILTER_CACHE_PATH), exist_ok=True)
+    temp_path = f"{_FILTER_CACHE_PATH}.tmp.{os.getpid()}"
+    with open(temp_path, "w", encoding="utf-8") as file:
+        json.dump({"version": 1, "seen": sorted(seen)}, file, ensure_ascii=False, indent=2)
+    os.replace(temp_path, _FILTER_CACHE_PATH)
 
 
 def _netcraft_status_text(result: dict) -> str:
@@ -322,16 +351,33 @@ python -m playwright install chromium
 # Lọc từ nội dung thô
 with st.expander("🧹 Lọc domain từ nội dung thô (tùy chọn)", expanded=False):
     st.caption("Dán nguyên văn bản hỗn hợp — tool tách domain/URL rồi đưa xuống ô bên dưới.")
+    st.info(
+        f"Cache lọc đang ghi nhớ **{len(_quick_report_filter_cache())} URL** "
+        "theo domain + subpath. Dùng nút Xóa cache bên dưới để làm lại từ đầu."
+    )
     raw_paste = st.text_area("Nội dung thô", height=120, placeholder="789win\nhttps://example.com/vi-vn/ (top3)\nGhi chú...", key="raw_paste")
     if st.button("🔍 Lọc domain", key="btn_filter"):
         try:
-            from domain_utils import extract_domains_from_text
+            from domain_utils import extract_domains_from_text, filter_unseen_domains
             found = extract_domains_from_text(raw_paste)
+            fresh, duplicate = filter_unseen_domains(found, _quick_report_filter_cache())
+            _save_quick_report_filter_cache(_quick_report_filter_cache())
         except ImportError:
             found, _ = _parse_domains(raw_paste)
-        if found:
-            st.session_state["qr_domain_input"] = "\n".join(found)
-            st.success(f"Đã lọc {len(found)} domain — đưa xuống danh sách.")
+            seen = _quick_report_filter_cache()
+            fresh = [item for item in found if pt.normalize_domain(item).lower().rstrip(".") not in seen]
+            duplicate = [item for item in found if item not in fresh]
+            seen.update(pt.normalize_domain(item).lower().rstrip(".") for item in fresh)
+            _save_quick_report_filter_cache(seen)
+        if fresh:
+            st.session_state["qr_domain_input"] = "\n".join(fresh)
+            message = f"Đã đưa xuống **{len(fresh)}** URL mới."
+            if duplicate:
+                message += f" Đã loại **{len(duplicate)}** URL trùng domain + subpath trong cache."
+            st.success(message)
+        elif found:
+            st.session_state["qr_domain_input"] = ""
+            st.warning(f"Toàn bộ {len(duplicate)} URL đã có cùng domain + subpath trong cache nên được loại bỏ.")
         else:
             st.warning("Không tìm thấy domain hợp lệ.")
 
@@ -347,20 +393,28 @@ with st.form("quick_report_form"):
     go = st.form_submit_button("⚡ Kiểm tra tất cả", type="primary")
 
 cache = _quick_report_cache()
+filter_cache = _quick_report_filter_cache()
 cache_col, cache_info_col = st.columns([1, 4])
 if cache_col.button(
     "🗑️ Xóa cache",
     use_container_width=True,
-    disabled=not cache,
+    disabled=not cache and not filter_cache,
 ):
     for future in cache.get("pending", {}).values():
         future.cancel()
     cache.clear()
+    filter_cache.clear()
+    try:
+        os.remove(_FILTER_CACHE_PATH)
+    except FileNotFoundError:
+        pass
     st.success("Đã xóa cache Quick Report. Bạn có thể dán danh sách mới.")
-if cache:
+if cache or filter_cache:
+    result_count = sum(r is not None for r in cache.get("results", []))
+    result_total = len(cache.get("results", []))
     cache_info_col.caption(
-        f"💾 Đang giữ {sum(r is not None for r in cache.get('results', []))}/"
-        f"{len(cache.get('results', []))} kết quả. Cache vẫn còn sau khi F5."
+        f"💾 Cache lọc: {len(filter_cache)} URL · "
+        f"kết quả kiểm tra: {result_count}/{result_total}. Cache vẫn còn sau khi F5."
     )
 
 if go:

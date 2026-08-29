@@ -335,6 +335,52 @@ class DomainWorkerTests(unittest.TestCase):
             self.assertEqual(run_check.call_count, 1)
             self.assertEqual(run_check.call_args.args[0], "remaining.example")
 
+    def test_retry_reprocesses_failed_result_from_cached_preflight(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            job_path = os.path.join(job_dir, "job.json")
+            status_path = os.path.join(job_dir, "status.json")
+            preflight_path = os.path.join(job_dir, "preflight.json")
+            target = "https://failed.example/path"
+            prepared = {
+                "target_url": target,
+                "domain": "failed.example",
+                "recipients": [{"channel": "registry", "email": "abuse@example.net"}],
+            }
+            with open(job_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "job_id": "retry-failed", "domains": [target],
+                    "batch_size": 1, "interval_seconds": 0,
+                    "include_vncert": False, "precheck_only": False,
+                    "preflight_version": 2,
+                }, f)
+            with open(preflight_path, "w", encoding="utf-8") as f:
+                json.dump({"version": 2, "ready": [prepared]}, f)
+            with open(status_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "job_id": "retry-failed", "state": "completed",
+                    "results": [{
+                        "target_url": target, "domain": "failed.example",
+                        "sent_ok": 0, "sent_failed": 1,
+                    }],
+                }, f)
+
+            retried = {
+                "target_url": target, "domain": "failed.example",
+                "sent_ok": 1, "sent_failed": 0,
+            }
+            with (
+                patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                patch.object(domain_worker, "_run_prechecked_domain", return_value=(retried, set(), False)) as run_domain,
+            ):
+                domain_worker.run_job(job_path)
+
+            with open(status_path, encoding="utf-8") as f:
+                status = json.load(f)
+            self.assertEqual(run_domain.call_count, 1)
+            self.assertEqual(status["results"][-1]["sent_ok"], 1)
+            self.assertEqual(status["results"][-1]["sent_failed"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

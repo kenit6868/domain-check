@@ -496,8 +496,22 @@ def run_job(job_path: str):
                 previous_results = previous_status.get("results") or []
         except (OSError, ValueError, TypeError):
             pass
+    # A previous result is complete only when no delivery still needs retrying.
+    # In particular, keep fully and partially failed domains in ``ready``: the
+    # delivery cache below will skip accounts/recipients that already succeeded.
     completed_targets = {
-        item.get("target_url") for item in previous_results if item.get("target_url")
+        item.get("target_url")
+        for item in previous_results
+        if item.get("target_url")
+        and not item.get("error")
+        and not int(item.get("sent_failed", 0) or 0)
+        and (
+            int(item.get("sent_ok", 0) or 0) > 0
+            # Backward compatibility for results written before delivery
+            # counters were added.
+            or item.get("success") is True
+            or item.get("skipped") in ("already_sent", "no_sendable_email")
+        )
     }
     status = {
         "job_id": job.get("job_id"), "state": "prechecking", "pid": os.getpid(),
