@@ -23,6 +23,15 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   preview.
 - Khi đổi phân loại link, chốt semantics của `LIVE`, `BLOCKED`, `DIE`,
   `GEO-BLOCK`, `TEMP ERROR` và `UNREACHABLE`, rồi đồng bộ code, test và UI.
+- Detector cloaking phải thụ động: HTTP dùng session tách biệt theo profile;
+  Playwright không click, type hoặc submit. Chỉ chạy Playwright sau lớp HTTP,
+  ưu tiên cho `POSSIBLE`/`INCONCLUSIVE`.
+- Worker chỉ tự gửi case cloaking khi verdict cuối là `LIKELY` và bằng chứng đã
+  được ghi/đính kèm. `POSSIBLE`/`INCONCLUSIVE` phải dừng riêng domain để duyệt;
+  chỉ retry gửi sau khi URL nằm trong `approved_cloaking_targets`.
+- Mọi nội dung do tool soạn để gửi nhà cung cấp phải dùng tiếng Anh. Không tái
+  sử dụng trực tiếp label/detail tiếng Việt của UI trong draft; dữ liệu quan sát
+  nguyên gốc như page title hoặc matched keyword có thể giữ nguyên làm bằng chứng.
 
 ## Tài liệu và kiểm tra
 

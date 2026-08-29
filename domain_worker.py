@@ -265,6 +265,7 @@ def _send_domain_drafts(
     domain: str, drafts: list, cfg: dict, include_vncert: bool,
     events_path: str, stop_path: str | None = None, prepared_drafts: list | None = None,
     sent_deliveries: set[tuple[str, str, str, str]] | None = None,
+    attachments: list[str] | None = None,
 ) -> tuple[dict, set[str], bool]:
     summary = {"drafts_total": len(drafts), "drafts_sendable": 0, "sent_ok": 0, "sent_failed": 0, "already_sent": 0, "sent_to": []}
     successful_accounts = set()
@@ -309,11 +310,15 @@ def _send_domain_drafts(
                     "account": account_username, "reason": "already_sent_today",
                 })
                 continue
-            result = pt.send_report_email_single(
+            send_args = (
                 parsed["to"], parsed["subject"],
                 pt.personalize_email_body(parsed["body"], cfg, account_cfg),
                 account_cfg, proxy,
             )
+            if attachments:
+                result = pt.send_report_email_single(*send_args, attachments=attachments)
+            else:
+                result = pt.send_report_email_single(*send_args)
             ok = bool(result.get("success"))
             account = str(result.get("account") or "").strip()
             if ok and account:
@@ -431,7 +436,10 @@ def _precheck_report_recipients(domain: str) -> list[dict]:
     return unique
 
 
-def _run_prechecked_domain(prepared, cfg, selected_accounts, include_vncert, events_path, stop_path, sent_deliveries):
+def _run_prechecked_domain(
+    prepared, cfg, selected_accounts, include_vncert, events_path, stop_path,
+    sent_deliveries, approved_cloaking=False,
+):
     """Run the full investigation once, then send only after revalidating draft recipients."""
     target = prepared["target_url"]
     started = time.time()
@@ -439,14 +447,67 @@ def _run_prechecked_domain(prepared, cfg, selected_accounts, include_vncert, eve
     send_cfg["smtp_accounts"] = selected_accounts
     result = pt.run_check(target, False, cfg)
     domain = result["domain"]
+    cloaking = result.get("cloaking") or {"verdict": "NO_SIGNAL", "score": 0, "signals": []}
+    cloaking_verdict = cloaking.get("verdict", "INCONCLUSIVE")
+    if cloaking_verdict in {"POSSIBLE", "INCONCLUSIVE"} and not approved_cloaking:
+        cloaking = pt.run_cloaking_browser_check(target, cloaking)
+        result["cloaking"] = cloaking
+        cloaking_verdict = cloaking.get("verdict", "INCONCLUSIVE")
+        if cloaking_verdict in {"LIKELY", "POSSIBLE"}:
+            refreshed = pt.append_cloaking_evidence_to_drafts(result.get("drafts") or [], cloaking)
+            if len(refreshed) != len(result.get("drafts") or []):
+                result["drafts_error"] = (
+                    str(result.get("drafts_error") or "")
+                    + "; Cloaking evidence could not be appended to every draft"
+                ).strip("; ")
+    evidence_failed = (
+        cloaking_verdict == "LIKELY"
+        and "cloaking evidence" in str(result.get("drafts_error") or "").lower()
+    )
+    needs_review = cloaking_verdict in {"POSSIBLE", "INCONCLUSIVE"} or evidence_failed
+    if needs_review and not approved_cloaking:
+        _append_event(events_path, {
+            "type": "cloaking_manual_review", "domain": domain, "target_url": target,
+            "verdict": cloaking_verdict, "score": cloaking.get("score", 0),
+            "evidence_path": cloaking.get("evidence_path", ""),
+        })
+        return ({
+            "target_url": target, "domain": domain, "success": False,
+            "duration_seconds": round(time.time() - started, 1),
+            "reputation": result.get("reputation", {}).get("verdict"),
+            "drafts_total": len(result.get("drafts") or []), "drafts_sendable": 0,
+            "sent_ok": 0, "sent_failed": 0, "already_sent": 0, "sent_to": [],
+            "skipped": "manual_review_required", "manual_review_required": True,
+            "cloaking_verdict": cloaking_verdict,
+            "cloaking_score": cloaking.get("score", 0),
+            "cloaking_signals": cloaking.get("signals") or [],
+            "cloaking_evidence_path": cloaking.get("evidence_path", ""),
+        }, set(), False)
+    evidence_path = str(cloaking.get("evidence_path") or "").strip()
+    evidence_attachments = (
+        [evidence_path]
+        if cloaking_verdict in {"LIKELY", "POSSIBLE"} and os.path.isfile(evidence_path)
+        else []
+    )
+    evidence_attachments.extend(
+        screenshot.get("path") for screenshot in cloaking.get("screenshots") or []
+        if screenshot.get("path") and os.path.isfile(screenshot["path"])
+    )
     mail, successful_accounts, stopped_during_send = _send_domain_drafts(
         domain, result.get("drafts") or [], send_cfg, include_vncert,
         events_path, stop_path, sent_deliveries=sent_deliveries,
+        attachments=evidence_attachments,
     )
     domain_result = {
         "target_url": target, "domain": domain, "success": True,
         "duration_seconds": round(time.time() - started, 1),
-        "reputation": result.get("reputation", {}).get("verdict"), **mail,
+        "reputation": result.get("reputation", {}).get("verdict"),
+        "cloaking_verdict": cloaking_verdict,
+        "cloaking_score": cloaking.get("score", 0),
+        "cloaking_signals": cloaking.get("signals") or [],
+        "cloaking_evidence_path": cloaking.get("evidence_path", ""),
+        "cloaking_approved": bool(approved_cloaking),
+        **mail,
     }
     if mail.get("drafts_sendable", 0) == 0:
         domain_result["skipped"] = "no_sendable_email"
@@ -474,6 +535,7 @@ def run_job(job_path: str):
     precheck_only = bool(job.get("precheck_only", False))
     force_precheck = bool(job.get("force_precheck", False))
     allowed_accounts = job.get("allowed_accounts")  # list of usernames, or None = all
+    approved_cloaking_targets = set(job.get("approved_cloaking_targets") or [])
     cfg = pt.load_config()
 
     # Filter smtp_accounts to only those selected in the UI (if specified)
@@ -639,7 +701,7 @@ def run_job(job_path: str):
                     try:
                         domain_result, successful_accounts, stopped_during_send = _run_prechecked_domain(
                             prepared, cfg, configured_accounts, include_vncert, events_path, stop_path,
-                            sent_deliveries,
+                            sent_deliveries, approved_cloaking=target in approved_cloaking_targets,
                         )
                         domain = domain_result["domain"]
                     except Exception as exc:

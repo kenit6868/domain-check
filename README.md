@@ -7,6 +7,7 @@ giả mạo thương hiệu công ty để lừa đảo.
 
 ```bash
 pip install -r requirements.txt
+python -m playwright install chromium
 cp config.example.ini config.ini
 ```
 
@@ -35,6 +36,8 @@ Lệnh `check` sẽ tự động:
 - Kiểm tra VirusTotal + Google Safe Browsing (nếu có API key)
 - Ghi log vào `case_log.csv`
 - Sinh sẵn email báo cáo trong thư mục `reports/`
+- So sánh HTTP đa profile để phát hiện cloaking theo thiết bị, Google referrer
+  và đường dẫn `/vi-vn/`
 
 ## Chạy giao diện web
 
@@ -54,6 +57,10 @@ Các trang (xem sidebar bên trái):
 - **Brand Scan** — quét biến thể gõ nhầm domain thật (dnstwist, có thể mất tới 10 phút)
 - **Case Log** — xem/lọc/sửa `case_log.csv`
 - **Report Drafts** — xem, copy, tải các email báo cáo đã sinh sẵn
+- **Quick Report** — kiểm tra nhanh nhiều URL, hiển thị cloaking và cho phép xác
+  minh thụ động bằng Playwright khi HTTP chưa đủ kết luận
+- **Domain Worker** — kiểm tra theo batch, tự xử lý bằng chứng cloaking và chặn
+  gửi các trường hợp còn cần duyệt thủ công
 
 Web UI gọi thẳng cùng các hàm trong `phishing_toolkit.py` mà CLI dùng (không viết
 lại logic riêng), nên kết quả giữa CLI và web luôn khớp nhau.
@@ -67,6 +74,8 @@ thu thập bằng chứng, báo cáo theo đúng thứ tự ưu tiên, tới the
 
 ```
 phishing_toolkit.py       - Tool chính (check / related / brandscan)
+cloaking_detector.py      - Detector HTTP đa profile + xác minh Playwright thụ động
+cloaking_ui.py            - Khối hiển thị kết quả cloaking dùng chung cho Streamlit
 domain_check.py           - Bản đơn giản chỉ check SSL + WHOIS (không cần API key)
 streamlit_app.py           - Trang chủ giao diện web (streamlit run streamlit_app.py)
 pages/                      - Các trang còn lại của giao diện web (multipage app)
@@ -113,3 +122,29 @@ sách mới tự bỏ qua cặp domain/tài khoản đã gửi thành công, k�
 Draft VNCERT mặc định không tự gửi; chỉ bật nếu toàn bộ danh sách thực sự
 nhắm tới nạn nhân tại Việt Nam. Dữ liệu trạng thái được lưu trong
 `worker_jobs/` và thư mục này không được commit.
+
+### Cơ chế cloaking trong worker
+
+Mỗi domain trước tiên được kiểm tra bằng nhiều HTTP profile. Kết quả có bốn mức:
+
+- `LIKELY`: bằng chứng đủ mạnh; draft được bổ sung phần kỹ thuật, manifest JSON
+  được đính kèm và worker tiếp tục gửi tự động.
+- `POSSIBLE` hoặc `INCONCLUSIVE`: worker tự chạy Playwright headless với desktop
+  trực tiếp và mobile từ Google. Playwright chỉ tải trang, đọc DOM/tài nguyên và
+  chụp ảnh; không click, nhập liệu hay gửi form.
+- Nếu Playwright nâng kết quả lên `LIKELY`, worker đính kèm manifest cùng ảnh và
+  tiếp tục gửi. Nếu vẫn chưa chắc chắn, domain chuyển sang **Cần duyệt cloaking**
+  và không gửi email.
+- Sau khi xem tín hiệu/manifest trên trang Domain Worker, chọn các domain đã duyệt
+  trong ô **Domain cloaking đã duyệt để retry**, rồi bấm retry. Cache gửi vẫn ngăn
+  gửi trùng những email đã thành công.
+
+Trên **Check Domain** và **Quick Report**, HTTP detector chạy cùng thao tác check.
+Khi kết quả là `POSSIBLE`/`INCONCLUSIVE`, nút xác minh Playwright xuất hiện để
+người dùng chủ động chạy bước trình duyệt nặng hơn. Bằng chứng nằm trong
+`evidence/cloaking/`; nội dung trang đầy đủ không được đưa vào giao diện hoặc
+manifest, chỉ giữ preview, hash, metadata và ảnh chụp.
+
+Phần cloaking được chèn vào email nhà cung cấp luôn được soạn bằng tiếng Anh.
+Nhãn/mô tả tiếng Việt chỉ dùng trong giao diện nội bộ; page title và matched
+keyword có thể giữ nguyên ngôn ngữ của website vì đó là dữ liệu bằng chứng.

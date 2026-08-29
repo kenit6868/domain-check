@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 
 import phishing_toolkit as pt
+from cloaking_ui import render_cloaking_result
 
 st.title("🎣 Phishing Takedown Toolkit")
 st.caption("Công cụ nội bộ phát hiện, xác minh và báo cáo domain phishing giả mạo thương hiệu")
@@ -41,6 +42,7 @@ if go:
     rep = result["reputation"]
     rep_fn = {"flagged": st.error, "suspicious": st.warning, "unknown": st.info}.get(rep["verdict"], st.success)
     rep_fn(f"**Uy tín:** {rep['label']}" + ("".join(f"\n- {r}" for r in rep["reasons"])))
+    render_cloaking_result(result.get("cloaking", {}), compact=True)
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("VT Malicious", result["virustotal"].get("malicious", "N/A"))

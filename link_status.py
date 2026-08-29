@@ -69,7 +69,7 @@ def _classify_response(response, body_preview: str = "") -> tuple[str, str, str]
     normalized_body = body_preview.lower()
 
     # Detect trang cảnh báo Cloudflare (phishing hoặc malware) — áp dụng với mọi status code
-    cf_warning = provider == "Cloudflare" and "cloudflare" in normalized_body and any(
+    cf_warning = provider == "Cloudflare" and any(
         kw in normalized_body for kw in ("suspected phishing", "suspected malware", "deceptive site", "reported for potential phishing", "reported for potential malware")
     )
     if cf_warning:
@@ -102,8 +102,6 @@ def _classify_response(response, body_preview: str = "") -> tuple[str, str, str]
         return "LIVE", f"HTTP {code}: URL phản hồi thành công", provider
     if code in {401, 403, 407, 418, 423, 429}:
         # 403 từ Cloudflare (không phải warning page) = CF chặn bot checker, site vẫn LIVE với browser thật
-        if code == 403 and provider == "Cloudflare":
-            return "LIVE", "HTTP 403: Cloudflare chặn bot checker — site vẫn hoạt động với browser thật", provider
         protection = f" ({provider}/WAF)" if provider else ""
         return "BLOCKED", f"HTTP {code}: máy chủ còn phản hồi nhưng đang chặn hoặc giới hạn{protection}", provider
     if code in {404, 410}:
@@ -155,7 +153,7 @@ def check_link(target: str, timeout: float = 10.0, timeout_retries: int = 3) -> 
                         body_preview = bytes(preview[:262_144]).decode(
                             response.encoding or "utf-8", errors="ignore"
                         )
-                    except (OSError, requests.RequestException):
+                    except (OSError, TypeError, requests.RequestException):
                         body_preview = ""
                 status, reason, provider = _classify_response(response, body_preview)
                 return {

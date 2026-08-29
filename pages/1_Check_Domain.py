@@ -13,6 +13,7 @@ import pandas as pd
 import streamlit as st
 
 import phishing_toolkit as pt
+from cloaking_ui import render_cloaking_result
 from email_send_ui import render_send_email_ui, render_send_all_ui
 
 st.set_page_config(page_title="Check Domain", page_icon="🔍", layout="wide")
@@ -68,6 +69,7 @@ if "check_domain_result" in st.session_state:
     gsb = result["safebrowsing"]
     ca_note = result["ca_note"]
     http_check = result.get("http_check", {})
+    cloaking = result.get("cloaking", {})
     domain_age_days = result.get("domain_age_days")
     mx_records = result.get("mx_records", {})
     urlscan_auto = result.get("urlscan", {})
@@ -143,6 +145,31 @@ if "check_domain_result" in st.session_state:
 
             if has_pw:
                 st.error("🚨 Trang có form nhập password — dấu hiệu rõ ràng của login page giả mạo. Xác minh ảnh chụp màn hình trước khi report.")
+
+    with st.container(border=True):
+        st.markdown("**Phát hiện cloaking đa profile**")
+        st.caption(
+            "So sánh desktop/mobile, truy cập trực tiếp/Google referrer và `/vi-vn/`. "
+            "Detector chỉ quan sát, không bấm nút hoặc gửi form."
+        )
+        render_cloaking_result(cloaking)
+        if cloaking.get("verdict") in {"POSSIBLE", "INCONCLUSIVE"}:
+            st.caption(
+                "HTTP chưa đủ kết luận. Playwright sẽ mở trang ở chế độ headless với 2 profile, "
+                "chỉ quan sát và chụp ảnh; không click, nhập liệu hay gửi form."
+            )
+            if st.button("Xác minh thụ động bằng Playwright", icon=":material/screenshot_monitor:"):
+                with st.spinner("Đang xác minh bằng trình duyệt thụ động..."):
+                    updated_cloaking = pt.run_cloaking_browser_check(
+                        cloaking.get("target_url") or domain, cloaking,
+                    )
+                    result["cloaking"] = updated_cloaking
+                    if updated_cloaking.get("verdict") in {"LIKELY", "POSSIBLE"}:
+                        pt.append_cloaking_evidence_to_drafts(
+                            result.get("drafts") or [], updated_cloaking,
+                        )
+                    st.session_state["check_domain_result"] = result
+                st.rerun()
 
     # ── B2: MX Record check ───────────────────────────────────────────────────
     mx_recs = mx_records.get("records", [])

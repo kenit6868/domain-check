@@ -33,6 +33,11 @@ try:
 except Exception:
     certifi_datas = []
 
+try:
+    playwright_datas = collect_data_files("playwright")
+except Exception:
+    playwright_datas = []
+
 # Bundle .dist-info metadata - Streamlit doc importlib.metadata lay version khi runtime
 def _distinfo_data(pkg_name):
     try:
@@ -59,17 +64,21 @@ hidden_imports = [
     "cryptography", "cryptography.x509",
     "whois", "ipwhois", "click", "toml",
     "smtplib", "imaplib", "email", "email.mime", "email.mime.text", "email.mime.multipart",
+    "playwright", "playwright.sync_api", "playwright._impl._driver",
 ]
 
 app_datas = [
     ("streamlit_app.py",    "."),
     ("streamlit_home.py",   "."),
     ("phishing_toolkit.py", "."),
+    ("cloaking_detector.py", "."),
+    ("cloaking_ui.py",      "."),
     ("email_send_ui.py",    "."),
     ("domain_worker.py",    "."),
     ("domain_utils.py",     "."),
     ("link_status.py",      "."),
     ("domain_check.py",     "."),
+    ("provider_replies.py", "."),
     ("pages",               "pages"),
     ("config.example.ini",  "."),
 ]
@@ -78,7 +87,7 @@ a = Analysis(
     ["launcher.py"],
     pathex=["."],
     binaries=[],
-    datas=streamlit_datas + altair_datas + whois_datas + dns_datas + certifi_datas + metadata_datas + app_datas,
+    datas=streamlit_datas + altair_datas + whois_datas + dns_datas + certifi_datas + playwright_datas + metadata_datas + app_datas,
     hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},

@@ -676,6 +676,11 @@ else:
                 account for account in (prepared_job_ui.get("allowed_accounts") or [])
                 if account in _account_labels
             ]
+            manual_review_items = {
+                item.get("target_url"): item
+                for item in (status.get("results") or [])
+                if item.get("target_url") and item.get("skipped") == "manual_review_required"
+            }
             st.caption(
                 "Tài khoản gửi đã chọn từ đầu job: "
                 + (", ".join(job_selected_accounts) if job_selected_accounts else "—")
@@ -690,6 +695,20 @@ else:
                     help="Chỉ bật khi toàn bộ domain trong danh sách nhắm tới nạn nhân tại Việt Nam.",
                 )
                 selected_accounts = job_selected_accounts
+                approved_review_targets = []
+                if manual_review_items:
+                    st.warning(
+                        f"Có {len(manual_review_items)} domain cần duyệt thủ công vì tín hiệu cloaking "
+                        "chưa đủ chắc chắn. Chỉ chọn khi bạn đã xem bằng chứng và đồng ý cho gửi."
+                    )
+                    approved_review_targets = st.multiselect(
+                        "Domain cloaking đã duyệt để retry",
+                        options=list(manual_review_items),
+                        format_func=lambda target: (
+                            f"{target} — {manual_review_items[target].get('cloaking_verdict', 'INCONCLUSIVE')} "
+                            f"({manual_review_items[target].get('cloaking_score', 0)} điểm)"
+                        ),
+                    )
                 if not _all_accounts:
                     st.error("⚠️ Chưa cấu hình SMTP account trong config.ini.")
                 confirmed = st.checkbox(
@@ -725,6 +744,9 @@ else:
                         "include_vncert": bool(include_vncert),
                         "allowed_accounts": selected_accounts,
                         "precheck_only": False,
+                        "approved_cloaking_targets": sorted(set(
+                            prepared_job.get("approved_cloaking_targets") or []
+                        ) | set(approved_review_targets)),
                     })
                     with open(prepared_job_path, "w", encoding="utf-8") as f:
                         json.dump(prepared_job, f, ensure_ascii=False, indent=2)
@@ -743,6 +765,7 @@ else:
         worker_items = preflight_ready or results_list
         summary_rows = []
         _SKIP_LABELS = {
+            "manual_review_required": "⚠️ Cần duyệt cloaking",
             "already_sent": "✅ Đã gửi trước đó",
             "no_sendable_email": "⏭ không có email để gửi",
         }
@@ -803,6 +826,10 @@ else:
                 "Domain": r.get("domain") or prepared.get("domain", ""),
                 "Status": row_status,
                 "Verdict": r.get("reputation") or (_SKIP_LABELS.get(skip_reason, "skipped") if skip_reason else "—"),
+                "Cloaking": (
+                    f"{r.get('cloaking_verdict')} ({r.get('cloaking_score', 0)})"
+                    if r.get("cloaking_verdict") else "—"
+                ),
                 "Drafts": r.get("drafts_total", 0),
                 "Sendable": r.get("drafts_sendable", 0),
                 "✅ Sent": display_sent_ok,
@@ -838,6 +865,27 @@ else:
                     f"`{next_item.get('domain', '')}` — `{next_item.get('target_url', '')}`"
                 )
         _dataframe_with_copy(results_df)
+
+        manual_review_results = [
+            item for item in results_list
+            if item.get("skipped") == "manual_review_required"
+        ]
+        if manual_review_results:
+            with st.expander(
+                f"⚠️ Bằng chứng cloaking cần duyệt ({len(manual_review_results)})",
+                expanded=True,
+            ):
+                for item in manual_review_results:
+                    st.markdown(
+                        f"**{item.get('domain', item.get('target_url', ''))}** — "
+                        f"`{item.get('cloaking_verdict', 'INCONCLUSIVE')}` / "
+                        f"{item.get('cloaking_score', 0)} điểm"
+                    )
+                    for signal in item.get("cloaking_signals") or []:
+                        st.caption(f"• {signal.get('message') or signal.get('code') or signal}")
+                    evidence_path = item.get("cloaking_evidence_path")
+                    if evidence_path:
+                        st.caption(f"Manifest bằng chứng: `{evidence_path}`")
 
         error_rows = []
         for item in results_list:

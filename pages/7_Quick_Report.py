@@ -19,6 +19,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import phishing_toolkit as pt
+from cloaking_ui import render_cloaking_result
 
 _MAX_CHECK_WORKERS = 1
 _FILTER_CACHE_PATH = pt._runtime_path("quick_report_filter_cache.json")
@@ -207,6 +208,22 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
         if show_registry: tags.append(f"🌐 {registry_info.get('registry','Registry')[:20]}")
         if tags:
             st.caption("  ·  ".join(tags))
+
+        render_cloaking_result(result.get("cloaking", {}), compact=True)
+        if (result.get("cloaking") or {}).get("profiles"):
+            with st.expander("Chi tiết kiểm tra cloaking", expanded=False):
+                render_cloaking_result(result["cloaking"])
+        cloaking = result.get("cloaking") or {}
+        if cloaking.get("verdict") in {"POSSIBLE", "INCONCLUSIVE"}:
+            if st.button(
+                "Xác minh cloaking bằng Playwright",
+                key=f"cloaking_playwright_{idx}",
+                icon=":material/screenshot_monitor:",
+                help="Chỉ tải và chụp trang bằng 2 profile; không click hay gửi form.",
+            ):
+                with st.spinner("Đang xác minh thụ động..."):
+                    result["cloaking"] = pt.run_cloaking_browser_check(original_url, cloaking)
+                st.rerun()
 
         st.divider()
 

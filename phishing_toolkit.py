@@ -32,6 +32,7 @@ import configparser
 import csv
 import imaplib
 import json
+import mimetypes
 import os
 import random
 import re
@@ -43,8 +44,10 @@ import sys
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from email.mime.text import MIMEText
+from email.message import EmailMessage
 from urllib.parse import urlparse
+
+import cloaking_detector
 
 try:
     import whois
@@ -118,6 +121,7 @@ def _runtime_path(name):
 LOG_PATH = _runtime_path("case_log.csv")
 REPORTS_DIR = _runtime_path("reports")
 SENT_LOG_PATH = _runtime_path("sent_log.csv")
+CLOAKING_EVIDENCE_DIR = _runtime_path(os.path.join("evidence", "cloaking"))
 
 CA_ABUSE_NOTES = {
     "google trust services": {
@@ -2699,7 +2703,10 @@ def _imap_save_sent(account: dict, raw_msg: bytes) -> str | None:
         return str(e)
 
 
-def _send_via_account(account: dict, proxy_str: str | None, to: str, subject: str, body: str) -> dict:
+def _send_via_account(
+    account: dict, proxy_str: str | None, to: str, subject: str, body: str,
+    attachments: list[str] | None = None,
+) -> dict:
     """Gửi email qua 1 SMTP account cụ thể, tùy chọn qua proxy.
 
     Tự detect mode:
@@ -2714,10 +2721,25 @@ def _send_via_account(account: dict, proxy_str: str | None, to: str, subject: st
     use_ssl = bool(account.get("ssl", False)) or port == 465
     proxy_label = proxy_str or "—"
     try:
-        msg = MIMEText(body, "plain", "utf-8")
+        msg = EmailMessage()
         msg["Subject"] = subject
         msg["From"] = username
         msg["To"] = to
+        msg.set_content(body, charset="utf-8")
+
+        for attachment_path in attachments or []:
+            safe_path = os.path.abspath(str(attachment_path))
+            if not os.path.isfile(safe_path):
+                raise FileNotFoundError(f"Evidence attachment not found: {safe_path}")
+            if os.path.getsize(safe_path) > 10 * 1024 * 1024:
+                raise ValueError(f"Evidence attachment exceeds 10 MB: {safe_path}")
+            mime_type, _encoding = mimetypes.guess_type(safe_path)
+            maintype, subtype = (mime_type or "application/octet-stream").split("/", 1)
+            with open(safe_path, "rb") as attachment_file:
+                msg.add_attachment(
+                    attachment_file.read(), maintype=maintype, subtype=subtype,
+                    filename=os.path.basename(safe_path),
+                )
 
         to_list = [a.strip() for a in to.split(",") if a.strip()]
 
@@ -2775,7 +2797,10 @@ def personalize_email_body(body: str, cfg: dict, account: dict) -> str:
     return rendered
 
 
-def send_report_email_bulk(to: str, subject: str, body: str, cfg: dict) -> list:
+def send_report_email_bulk(
+    to: str, subject: str, body: str, cfg: dict,
+    attachments: list[str] | None = None,
+) -> list:
     """Gửi email qua TẤT CẢ smtp_accounts đã cấu hình, mỗi account dùng 1 proxy xoay vòng
     (cycle nếu ít proxy hơn account), tất cả chạy ĐỒNG THỜI (ThreadPoolExecutor).
 
@@ -2800,6 +2825,7 @@ def send_report_email_bulk(to: str, subject: str, body: str, cfg: dict) -> list:
             pool.submit(
                 _send_via_account, account, proxy, to, subject,
                 personalize_email_body(body, cfg, account),
+                attachments,
             ): i
             for i, (account, proxy) in enumerate(pairs)
         }
@@ -2810,12 +2836,15 @@ def send_report_email_bulk(to: str, subject: str, body: str, cfg: dict) -> list:
     return [indexed[i] for i in sorted(indexed)]
 
 
-def send_report_email_single(to: str, subject: str, body: str, account: dict, proxy_str: str | None = None) -> dict:
+def send_report_email_single(
+    to: str, subject: str, body: str, account: dict,
+    proxy_str: str | None = None, attachments: list[str] | None = None,
+) -> dict:
     """Gửi email qua 1 account chỉ định (dùng khi UI cho phép chọn account cụ thể — P3).
 
     Trả về dict {"account", "proxy", "success", "error"} — không raise.
     """
-    return _send_via_account(account, proxy_str, to, subject, body)
+    return _send_via_account(account, proxy_str, to, subject, body, attachments)
 
 # file khi ghi sent_log.csv, không liên quan gì tới parse_draft_email() bên dưới.
 _DRAFT_FILENAME_SUFFIXES = [
@@ -2929,10 +2958,11 @@ def _normalize_to_addresses(to: str) -> str:
             "error": "Chưa cấu hình đủ [smtp] trong config.ini (host/username/password)",
         }
     try:
-        msg = MIMEText(body, "plain", "utf-8")
+        msg = EmailMessage()
         msg["Subject"] = subject
         msg["From"] = cfg["smtp_username"]
         msg["To"] = to
+        msg.set_content(body, charset="utf-8")
         to_list = [a.strip() for a in to.split(",") if a.strip()]
 
         with smtplib.SMTP(cfg["smtp_host"], cfg["smtp_port"], timeout=15) as server:
@@ -3038,12 +3068,79 @@ def append_reported_url_to_drafts(drafts: list, target_url: str) -> list:
     return updated
 
 
+def run_cloaking_check(target: str, mode: str = "full") -> dict:
+    """Run the shared passive cloaking detector used by CLI, UI and worker.
+
+    ``fast`` skips the extra ``/vi-vn/`` profiles. All network failures are
+    converted to an INCONCLUSIVE result so one provider cannot break a check.
+    """
+    try:
+        return cloaking_detector.probe_http_cloaking(
+            target,
+            include_path_variant=mode != "fast",
+            evidence_root=CLOAKING_EVIDENCE_DIR,
+        )
+    except Exception as exc:
+        return {
+            "version": 1, "engine": "http", "target_url": target,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "verdict": "INCONCLUSIVE", "score": 0, "signals": [],
+            "profiles": {}, "comparisons": [], "profiles_available": 0,
+            "profiles_failed": 0, "manual_review_required": True,
+            "evidence_path": "", "playwright": {}, "error": str(exc),
+        }
+
+
+def run_cloaking_browser_check(target: str, http_result: dict) -> dict:
+    """Run passive Playwright verification and merge it with the HTTP result."""
+    try:
+        browser_result = cloaking_detector.probe_playwright_cloaking(
+            target, evidence_root=CLOAKING_EVIDENCE_DIR,
+        )
+    except Exception as exc:
+        browser_result = {
+            "version": 1, "engine": "playwright", "target_url": target,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "verdict": "INCONCLUSIVE", "score": 0, "signals": [],
+            "profiles": {}, "comparisons": [], "profiles_available": 0,
+            "profiles_failed": 2, "manual_review_required": True,
+            "screenshots": [], "evidence_path": "", "available": False,
+            "error": str(exc),
+        }
+    return cloaking_detector.merge_playwright_result(
+        http_result, browser_result, evidence_root=CLOAKING_EVIDENCE_DIR,
+    )
+
+
+def append_cloaking_evidence_to_drafts(drafts: list, cloaking_result: dict) -> list:
+    """Insert or refresh factual LIKELY/POSSIBLE cloaking evidence in drafts."""
+    evidence_block = cloaking_detector.format_evidence_block(cloaking_result)
+    if not evidence_block:
+        return []
+    updated = []
+    for path in drafts or []:
+        try:
+            with open(path, encoding="utf-8") as file:
+                content = file.read()
+            content = re.sub(
+                r"\n*--- Technical Evidence: Multi-profile Cloaking Check ---.*?"
+                r"--- End of Cloaking Evidence ---\n*",
+                "\n", content, flags=re.DOTALL,
+            ).rstrip()
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(content + "\n\n" + evidence_block + "\n")
+            updated.append(path)
+        except OSError:
+            continue
+    return updated
+
+
 # --------------------------------------------------------------------------
 # Commands
 # --------------------------------------------------------------------------
 
 def run_cdn_check(target: str) -> dict:
-    """Pipeline tối giản: phát hiện Cloudflare/CDN và registrar, không gọi API key nào."""
+    """Pipeline tối giản: CDN/registrar plus passive multi-profile cloaking check."""
     domain = normalize_domain(target)
     who = get_whois_info(domain)
     cf = is_cloudflare(who.get("name_servers")) if isinstance(who, dict) else False
@@ -3054,12 +3151,14 @@ def run_cdn_check(target: str) -> dict:
         cdn_detected = []
     # Tra TLD registry từ bảng tĩnh (không cần mạng, không fallback IANA)
     registry_contact = _static_registry_lookup(domain)
+    cloaking = run_cloaking_check(target, mode="full")
     return {
         "domain": domain,
         "cloudflare": cf,
         "cdn_detected": cdn_detected,
         "registrar": registrar,
         "registry_contact": registry_contact,
+        "cloaking": cloaking,
     }
 
 
@@ -3318,6 +3417,11 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
     else:
         _urlscan_future = None
 
+    # Passive cloaking probes run in parallel with WHOIS/VT/GSB. The detector
+    # itself executes independent desktop/mobile/referrer profiles concurrently.
+    _cloaking_executor = _cf.ThreadPoolExecutor(max_workers=1)
+    _cloaking_future = _cloaking_executor.submit(run_cloaking_check, target_url, "full")
+
     try:
         cert = get_cert_info(domain)
     except Exception as e:
@@ -3361,6 +3465,20 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
     reputation = compute_reputation(vt, gsb)
 
     ca_note = match_ca_notes(cert.get("issuer"))
+
+    try:
+        cloaking = _cloaking_future.result(timeout=45)
+    except Exception as e:
+        cloaking = {
+            "version": 1, "engine": "http", "target_url": target_url,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "verdict": "INCONCLUSIVE", "score": 0, "signals": [],
+            "profiles": {}, "comparisons": [], "profiles_available": 0,
+            "profiles_failed": 0, "manual_review_required": True,
+            "evidence_path": "", "playwright": {}, "error": str(e),
+        }
+    finally:
+        _cloaking_executor.shutdown(wait=False)
 
     log_row = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -3459,6 +3577,11 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
         drafts_error = (drafts_error + "; " if drafts_error else "") + f"Registry/VNCERT draft: {e}"
 
     drafts = append_reported_url_to_drafts(drafts, target_url)
+    if cloaking.get("verdict") in {"LIKELY", "POSSIBLE"}:
+        updated_cloaking_drafts = append_cloaking_evidence_to_drafts(drafts, cloaking)
+        if len(updated_cloaking_drafts) != len(drafts):
+            note = "Cloaking evidence could not be appended to every draft"
+            drafts_error = (drafts_error + "; " if drafts_error else "") + note
 
     # Thu kết quả URLScan (thread đã chạy song song từ đầu — thường đã xong hoặc sắp xong)
     urlscan_data = {}
@@ -3499,6 +3622,7 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
         "registrar_abuse_email_source": registrar_abuse_email_source,
         "registrar_abuse_email_used": registrar_abuse_email_used,
         "urlscan": urlscan_data,
+        "cloaking": cloaking,
     }
 
 

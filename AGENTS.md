@@ -18,6 +18,8 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
 - `provider_replies.py`: đọc IMAP, phân loại phản hồi NCC, tạo reply theo
   thread và xử lý evidence.
 - `link_status.py`, `domain_utils.py`: tiện ích kiểm tra link/domain.
+- `cloaking_detector.py`, `cloaking_ui.py`: detector HTTP đa profile, xác minh
+  Playwright thụ động, manifest/ảnh bằng chứng và UI dùng chung.
 - `tests/`: bộ kiểm thử `unittest`.
 - `README.md`: hướng dẫn người dùng; `CLAUDE.md`: ghi chú triển khai;
   `03_Technical_Guide.md` và `plan_phishing_takedown.md`: playbook vận hành.
@@ -57,6 +59,12 @@ Không tự khởi động Streamlit nếu người dùng chưa yêu cầu. Buil
   check/job.
 - Mọi request mạng phải có timeout. `verify=False` chỉ dành cho một số probe
   domain nghi ngờ; không áp dụng cho API tin cậy.
+- Cloaking luôn chạy HTTP đa profile trước. Playwright chỉ là lớp xác minh thụ
+  động cho kết quả chưa chắc chắn; không click, type hoặc submit. Worker không
+  gửi `POSSIBLE`/`INCONCLUSIVE` nếu chưa có phê duyệt thủ công được lưu trong job.
+- Draft/email gửi nhà cung cấp phải dùng tiếng Anh; formatter external không
+  được lấy nguyên label/detail tiếng Việt từ UI. Chỉ dữ liệu chứng cứ nguyên gốc
+  như title hoặc matched keyword được phép giữ ngôn ngữ của website.
 - Khi làm Streamlit, phải đọc `.agents/skills/developing-with-streamlit/SKILL.md`.
   Không thêm `streamlit.components.v1` mới; ưu tiên native widgets/component v2.
 - Khi làm nghiệp vụ takedown, dùng skill
@@ -133,9 +141,28 @@ vào phần này.
   `phishing-takedown-tool`; đã kiểm tra diff và cấu trúc skill thủ công; tài
   liệu: chính file này và `.agents/skills/phishing-takedown-tool/SKILL.md`;
   lưu ý: validator tự động của skill chưa chạy vì môi trường thiếu `PyYAML`.
+- 2026-08-29 — Phát hiện cloaking đa profile: thêm detector HTTP dùng chung cho
+  Trang chủ/Check Domain/Quick Report/worker; worker tự nâng cấp case chưa rõ
+  bằng Playwright thụ động, tự gửi `LIKELY` kèm manifest/ảnh và giữ
+  `POSSIBLE`/`INCONCLUSIVE` để duyệt rồi retry; file chính:
+  `cloaking_detector.py`, `cloaking_ui.py`, `phishing_toolkit.py`,
+  `domain_worker.py`, `pages/1_Check_Domain.py`, `pages/6_Domain_Worker.py`,
+  `pages/7_Quick_Report.py`; đã kiểm tra: 76 test trước Playwright, 80/80 test
+  cuối (gồm fake Playwright/attachment/worker), Chromium local smoke, AppTest
+  4 page, compileall và pip check; tài liệu: `README.md`,
+  `huong-dan-phat-hien-cloaking.md`, file này
+  và skill dự án; lưu ý: cần `python -m playwright install chromium` trên máy mới.
+- 2026-08-29 — Chuẩn hóa ngôn ngữ evidence gửi nhà cung cấp: formatter cloaking
+  dùng profile label và signal description tiếng Anh riêng, không lấy chuỗi
+  tiếng Việt của UI; dữ liệu quan sát gốc vẫn được bảo toàn; file chính:
+  `cloaking_detector.py`, `tests/test_cloaking_detector.py`; đã kiểm tra: test
+  formatter chuyên biệt và 81/81 full suite; tài liệu: `README.md`, file này và
+  skill dự án.
 
 ## Baseline chất lượng hiện tại
 
-Bộ test hiện có lỗi tại nhóm `link_status`: một số mock chưa cung cấp
-`iter_content` iterable, và phân loại Cloudflare warning chưa khớp kỳ vọng test.
-Khi sửa khu vực này, cần chốt chính sách trạng thái rồi đồng bộ code và test.
+Nhóm `link_status` đã thống nhất Cloudflare warning/HTTP 403 là `BLOCKED`, không
+phải `LIVE` hay `DIE`; mock response không iterable được xử lý an toàn. Toàn bộ
+test phải xanh trước khi bàn giao thay đổi lõi. Detector cloaking có test thuần
+cho scoring/profile comparison và fake browser cho Playwright; không dùng URL
+nghi ngờ hay SMTP thật trong test.
