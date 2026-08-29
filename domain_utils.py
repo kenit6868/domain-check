@@ -1,6 +1,7 @@
 """Pure helpers shared by the Domain Worker UI and background process."""
 
 import re
+from urllib.parse import urlsplit
 
 
 def extract_domains_from_text(raw: str) -> list[str]:
@@ -26,6 +27,39 @@ def extract_domains_from_text(raw: str) -> list[str]:
             seen.add(key)
             targets.append(target)
     return targets
+
+
+def domain_cache_key(target: str) -> str:
+    """Return a domain + subpath key for Quick Report duplicate filtering."""
+    value = (target or "").strip()
+    parsed = urlsplit(value if "://" in value else f"//{value}")
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if not hostname:
+        return ""
+    path = parsed.path or "/"
+    query = f"?{parsed.query}" if parsed.query else ""
+    return f"https://{hostname}{path}{query}"
+
+
+def filter_unseen_domains(targets: list[str], seen: set[str]) -> tuple[list[str], list[str]]:
+    """Split targets into new/previously-seen domains and update ``seen``.
+
+    Only the same hostname + subpath (+ query) is considered a duplicate.
+    Different paths on the same domain remain separate report targets.
+    """
+    fresh, duplicate = [], []
+    current_batch = set()
+    for target in targets:
+        key = domain_cache_key(target)
+        if not key:
+            continue
+        if key in seen or key in current_batch:
+            duplicate.append(target)
+            continue
+        current_batch.add(key)
+        fresh.append(target)
+    seen.update(current_batch)
+    return fresh, duplicate
 
 
 def extract_branded_domains(raw: str) -> list[dict[str, str]]:
