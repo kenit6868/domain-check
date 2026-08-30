@@ -134,6 +134,84 @@ vào phần này.
   liệu: chính file này và `.agents/skills/phishing-takedown-tool/SKILL.md`;
   lưu ý: validator tự động của skill chưa chạy vì môi trường thiếu `PyYAML`.
 
+- 2026-08-29 — Thêm menu Cloaking Report: phân mức evidence và tạo draft
+  review-only, không tự truy cập URL hay gửi report; file chính:
+  `cloaking_report.py`, `pages/10_Cloaking_Report.py`, `streamlit_app.py`; đã
+  kiểm tra: 4 unit test mới và AppTest đạt, compileall đạt, toàn suite 58/63
+  đạt với 5 lỗi baseline `link_status`; tài liệu: `README.md`, `CLAUDE.md`,
+  `plan_phishing_takedown.md`; lưu ý: chỉ thấy game/từ khóa lệch chưa đủ kết
+  luận cloaking.
+
+- 2026-08-29 — Siết quality gate Cloaking Report: chỉ tạo draft khi đủ ảnh PC,
+  mobile, Google, thông số F12 + curl, HTML/chứng từ, đối chứng mạnh và ghi chú
+  tái hiện; file chính: `cloaking_report.py`, `pages/10_Cloaking_Report.py`,
+  `tests/test_cloaking_report.py`; đã kiểm tra: 6/6 unit test và AppTest đạt,
+  compileall đạt, toàn suite 60/65 đạt với 5 lỗi baseline `link_status`; tài
+  liệu: `README.md`, `CLAUDE.md`, `plan_phishing_takedown.md`; lưu ý: menu không
+  lưu evidence hoặc tự submit report.
+
+- 2026-08-29 — Tự động evidence kỹ thuật cho Cloaking Report: thêm probe HTTP
+  read-only PC/mobile × direct/Google referrer, SSRF guard, redirect/timeout/body
+  limit, tự điền tóm tắt và tải HTML trong session; file chính:
+  `cloaking_probe.py`, `pages/10_Cloaking_Report.py`,
+  `tests/test_cloaking_report.py`; đã kiểm tra: 7/7 unit test và AppTest đạt,
+  compileall đạt, toàn suite 61/66 đạt với 5 lỗi baseline `link_status`; tài
+  liệu: `README.md`, `CLAUDE.md`, `plan_phishing_takedown.md`; lưu ý: probe
+  không thay thế ảnh trình duyệt hoặc xác nhận thủ công nội dung vi phạm.
+
+- 2026-08-29 — Sửa autofill evidence Cloaking: ghi output probe vào session
+  trước rerun và khóa read-only các ô HTTP/curl/ghi chú, người dùng không còn
+  phải chép tay; file chính: `pages/10_Cloaking_Report.py`; đã kiểm tra: AppTest,
+  7/7 unit test và compileall đạt, toàn suite 61/66 đạt với 5 lỗi baseline
+  `link_status`; tài liệu: `README.md`, `CLAUDE.md`; lưu ý: ba ảnh trình duyệt
+  vẫn upload thủ công.
+
+- 2026-08-29 — Chuyển Cloaking probe sang curl thật: chạy curl bằng argv không
+  qua shell cho PC/mobile × direct/Google, validate từng redirect, thu command,
+  header, HTML, hash và fingerprint traffic_dr.js; file chính:
+  `cloaking_probe.py`, `pages/10_Cloaking_Report.py`; đã kiểm tra: 8/8 unit
+  test, AppTest và compileall đạt, toàn suite 62/67 đạt với 5 lỗi baseline
+  `link_status`; tài liệu: `README.md`, `CLAUDE.md`,
+  `plan_phishing_takedown.md`; lưu ý: fingerprint chỉ là evidence hỗ trợ.
+
+- 2026-08-29 — Cloaking Report auto-only: bỏ toàn bộ upload/checkbox/ô kỹ thuật
+  thủ công, thêm Chromium probe read-only và gói ZIP draft+screenshot+DOM+network
+  metadata+curl HTML; file chính: `cloaking_browser.py`,
+  `pages/10_Cloaking_Report.py`, `cloaking_probe.py`; đã kiểm tra: 9/9 unit test,
+  AppTest, compileall, Chromium about:blank và pip check đạt, toàn suite 63/68
+  đạt với 5 lỗi baseline `link_status`; tài liệu: `README.md`, `CLAUDE.md`,
+  `plan_phishing_takedown.md`; lưu ý: browser Google profile click kết quả thật
+  (curl vẫn dùng referrer), và công cụ không tự gửi report; Playwright + Chromium đã
+  cài cho môi trường Python hiện tại.
+
+- 2026-08-29 — Chặn draft Cloaking thiếu đối chứng: bỏ so sánh hash responsive,
+  chỉ cho report khi browser bắt được cả profile bình phong và profile vi phạm
+  trong một cặp device/referrer; file chính: `cloaking_browser.py`,
+  `pages/10_Cloaking_Report.py`, `tests/test_cloaking_report.py`; đã kiểm tra:
+  11/11 unit test, AppTest, compileall và pip check đạt, toàn suite 65/70 đạt
+  với 5 lỗi baseline `link_status`; tài liệu: `README.md`, `CLAUDE.md`,
+  `plan_phishing_takedown.md`; lưu ý: bốn profile cùng game sẽ khóa draft.
+
+- 2026-08-29 — Browser Google click thật cho Cloaking: thay profile referrer bằng
+  mở Google Search, tìm anchor đúng hostname và click; CAPTCHA/không có kết quả
+  làm profile fail thay vì fallback; file chính: `cloaking_browser.py`,
+  `pages/10_Cloaking_Report.py`, `tests/test_cloaking_report.py`; đã kiểm tra:
+  12/12 unit test, AppTest, compileall và pip check đạt, toàn suite 66/71 đạt
+  với 5 lỗi baseline `link_status`; tài liệu: `README.md`, `CLAUDE.md`,
+  `plan_phishing_takedown.md`; lưu ý: chỉ click kết quả Google, không click site đích.
+
+- 2026-08-30 — Cloaking Report evidence-to-send: input URL+keyword+hai ảnh, tự
+  chọn hai HTML đối chứng; curl giống nhau thì fallback Chromium desktop trực tiếp
+  và iPhone search Google/click đúng hostname để lấy DOM sau render; xác định
+  registrar/kênh abuse, tạo ZIP và gửi email có
+  attachment chỉ sau cú bấm rõ ràng; file chính: `cloaking_workflow.py`,
+  `cloaking_probe.py`, `cloaking_render_probe.py`, `pages/10_Cloaking_Report.py`,
+  `phishing_toolkit.py`, `tests/test_cloaking_report.py`; đã kiểm tra: 15/15 unit
+  test, AppTest, compileall, Chromium render và pip check đạt, toàn suite 69/74
+  đạt với 5 lỗi baseline `link_status`;
+  tài liệu: `README.md`, `CLAUDE.md`, `plan_phishing_takedown.md`, `AGENTS.md`;
+  lưu ý: provider bắt buộc web form không được gửi SMTP hoặc tự submit.
+
 ## Baseline chất lượng hiện tại
 
 Bộ test hiện có lỗi tại nhóm `link_status`: một số mock chưa cung cấp

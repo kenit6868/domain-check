@@ -382,6 +382,46 @@ CDN > CA → theo dõi → ghi log → chủ động quét). Thứ tự ưu tiê
 
 ## Giao diện web Streamlit (`streamlit_app.py`, `pages/`)
 
+Menu **Cloaking Report** dùng `pages/10_Cloaking_Report.py`, `cloaking_probe.py`,
+`cloaking_workflow.py` và `cloaking_report.py`. Input bắt buộc gồm URL, keyword,
+ảnh PC bình phong và ảnh mobile/Google có nội dung vi phạm. Curl tự thu bốn profile;
+workflow chọn một cặp HTML có khác biệt tái hiện được, ưu tiên desktop-direct và
+mobile-Google. `resolve_provider()` tra WHOIS/RDAP/bảng registrar, lọc email privacy
+và tôn trọng registrar chỉ nhận web form.
+Khi curl không tạo được cặp đối chứng, page gọi `collect_rendered_evidence()` trong
+`cloaking_render_probe.py`. Fallback dùng Chromium hiển thị tạm thời với hai context mới:
+desktop-direct và iPhone 13 mở Google Search theo keyword rồi click anchor chứa đúng
+hostname; bật JavaScript, chờ 5 giây, không click/điền form trên site đích, chặn
+download/service worker và kiểm tra URL/IP của subrequest. CAPTCHA/không có kết quả/
+điều hướng sai phải trả lỗi, không fallback sang referrer giả.
+So sánh dựa trên visible-text token overlap và final URL, không dựa riêng vào DOM
+hash để tránh coi responsive markup hoặc token Cloudflare động là cloaking.
+Nút tự động gọi `cloaking_probe.collect_cloaking_evidence()` sau checkbox cấp
+quyền rõ ràng. Probe chặn IP private/reserved, kiểm tra lại từng redirect, tối đa
+5 redirect, timeout connect/read 5/15 giây và đọc tối đa 1 MB mỗi response. Bốn
+profile curl là desktop/mobile × direct/Google referrer; lỗi một profile không làm
+hỏng các profile còn lại. HTML chỉ giữ trong session để tải, không ghi runtime.
+So sánh đánh dấu khác biệt theo thiết bị khi cặp PC/mobile khác status, URL đích,
+hash hoặc kích thước có ý nghĩa; đánh dấu khác biệt referrer theo cách tương tự;
+và đối chiếu trực tiếp các giá trị `x-matched-path`. Draft chỉ được mở khóa khi
+có ít nhất một trong ba loại khác biệt này.
+Probe dùng `curl.exe`/`curl` thật qua `subprocess.run(args)` không dùng shell,
+không dùng `-L`; redirect được đọc từ header rồi validate URL/IP trước request kế
+tiếp. Output gồm command, status chain, final URL, header chọn lọc, byte, SHA-256,
+HTML và cờ fingerprint `best-traffic.pages.dev/traffic_dr.js`. Fingerprint chỉ là
+bằng chứng hỗ trợ, không đủ kết luận các site cùng chủ thể.
+Profile Google chỉ thêm header referrer bằng tham số `curl -e
+https://www.google.com/`; công cụ không mở trang kết quả Google và không chạy
+JavaScript. Dấu vân tay script chỉ là evidence hỗ trợ, không tự mở khóa draft.
+Page phải `st.stop()` trước khi sinh draft/ZIP nếu không có khác biệt kỹ thuật.
+Nếu có abuse email và SMTP account, cú bấm **Gửi report** gọi
+`send_report_email_single_with_attachments()` để gửi hai ảnh, hai HTML và curl
+evidence; đây là hành động gửi thật và chỉ được gọi trực tiếp từ event nút bấm.
+Nếu provider yêu cầu web form, UI chỉ mở form và không tự submit.
+Mọi lần bấm gửi đều được ghi vào `sent_log.csv`; lỗi ghi log được cô lập khỏi kết
+quả SMTP. WHOIS email chỉ được dùng fallback khi địa chỉ có dấu hiệu abuse/security/
+compliance, tránh gửi nhầm tới contact privacy hoặc registrant.
+
 Ứng dụng Streamlit multipage chạy local cho cùng team 2 người, được thêm vào như 1 lựa chọn thay thế
 CLI (không phải thay thế hoàn toàn — cả 2 luôn đồng bộ vì dùng chung các hàm của
 `phishing_toolkit.py`). Chạy bằng `streamlit run streamlit_app.py` (hoặc

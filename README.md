@@ -7,6 +7,7 @@ giả mạo thương hiệu công ty để lừa đảo.
 
 ```bash
 pip install -r requirements.txt
+python -m playwright install chromium
 cp config.example.ini config.ini
 ```
 
@@ -37,6 +38,21 @@ Lệnh `check` sẽ tự động:
 - Sinh sẵn email báo cáo trong thư mục `reports/`
 
 ## Chạy giao diện web
+
+Sidebar có menu **Cloaking Report** theo flow tự động: nhập URL, keyword Google,
+tải ảnh PC bình phong và ảnh mobile/Google có nội dung vi phạm, rồi bấm **Tạo đầy
+đủ hồ sơ**. Menu chạy `curl` thật theo bốn profile PC/mobile × direct/Google
+referrer, tự chọn cặp HTML đối chứng mạnh nhất (ưu tiên desktop-direct ↔
+mobile-Google), xác định registrar và kênh abuse, tạo report cùng gói ZIP evidence.
+Nếu bốn response curl giống nhau, menu tự fallback sang Chromium: render JavaScript
+trong hai context cô lập: desktop-direct và iPhone mở Google, tìm keyword rồi click
+kết quả đúng hostname. Sau đó lưu DOM sau render và chỉ chấp nhận khi phần nội dung
+nhìn thấy khác nhau rõ rệt. CAPTCHA/không có kết quả/điều hướng lỗi sẽ khóa report.
+Khi registrar có abuse email, nút **Gửi report** gửi email thật cùng hai ảnh, hai
+HTML và thông số curl; khi registrar bắt buộc web form, menu mở đúng form thay vì
+gửi vào email không được hỗ trợ. Không có khác biệt ở cả raw HTML lẫn DOM sau
+render thì khóa report. Khác hash do responsive hoặc token Cloudflare động không
+được xem là cloaking.
 
 Thay vì gõ lệnh CLI, có thể dùng giao diện web local bằng Streamlit — thuận tiện hơn
 cho 2 người trong team, không cần nhớ cú pháp lệnh:

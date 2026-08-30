@@ -103,3 +103,31 @@ python3 phishing_toolkit.py related <tên-thương-hiệu>
 - Không truy cập trang phishing bằng thiết bị/tài khoản thật — dùng máy ảo hoặc trình duyệt cô lập để tránh bị nhiễm mã độc hoặc lộ thông tin.
 - Không tự ý "tấn công ngược" hay can thiệp vào hạ tầng domain đó — chỉ báo cáo qua kênh chính thức.
 - Đảm bảo bằng chứng thu thập chính xác trước khi report, tránh report nhầm domain hợp pháp.
+## Xử lý trường hợp nghi cloaking / sneaky redirect
+
+Dùng menu **Cloaking Report** với URL, keyword Google, ảnh PC bình phong và ảnh
+mobile/Google có nội dung vi phạm. Công cụ chạy bốn profile PC/mobile ×
+direct/Google referrer, thu status, URL đích, header, kích thước, hash và HTML,
+sau đó chọn cặp HTML mạnh nhất tương ứng evidence. Nếu không có khác biệt đủ mạnh
+thì khóa report. Nếu đạt, công cụ xác định registrar/kênh abuse, tạo nội dung email
+và gói evidence gồm hai ảnh, hai HTML cùng curl summary.
+
+Nếu curl chỉ trả cùng trang bình phong, công cụ tự thử tầng rendered fallback bằng
+Chromium desktop trực tiếp và iPhone giả lập mở Google, search keyword rồi click kết
+quả đúng hostname. Tầng này lưu DOM sau khi JavaScript chạy; ngoài click kết quả
+Google, không click site đích, đăng nhập hoặc thao tác giao dịch. Chỉ mở khóa
+report khi visible content/final URL tạo thành cặp đối chứng rõ ràng. Nếu fallback
+vẫn cùng trang bình phong, giữ trạng thái chưa đủ evidence và không gửi.
+
+Không đăng nhập, đăng ký, nạp tiền, tải file hay bấm nút có thể tạo giao dịch.
+Menu không tự gửi: người vận hành phải duyệt evidence và chủ động bấm **Gửi report**.
+
+Nếu được phép truy cập URL nghi ngờ, dùng nút **Tạo đầy đủ hồ sơ**.
+Công cụ chạy curl read-only theo bốn profile PC/mobile × direct/Google referrer;
+mọi request đều giới hạn redirect, timeout và dung lượng rồi cho tải HTML.
+Khác biệt được xét theo thiết bị, referrer và `x-matched-path` đúng theo flow curl.
+Email chỉ được gửi sau cú bấm **Gửi report** rõ ràng. Registrar bắt buộc web form
+thì mở đúng form để người vận hành nộp, không tự động hóa CAPTCHA hoặc submit form.
+Header như `x-matched-path` và tham chiếu `best-traffic.pages.dev/traffic_dr.js`
+được ghi vào evidence nếu xuất hiện, nhưng không được dùng riêng lẻ để khẳng định
+cloaking hoặc cùng chủ thể vận hành.

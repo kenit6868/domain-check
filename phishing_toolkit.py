@@ -43,6 +43,7 @@ import sys
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from email.message import EmailMessage
 from email.mime.text import MIMEText
 from urllib.parse import urlparse
 
@@ -2699,7 +2700,7 @@ def _imap_save_sent(account: dict, raw_msg: bytes) -> str | None:
         return str(e)
 
 
-def _send_via_account(account: dict, proxy_str: str | None, to: str, subject: str, body: str) -> dict:
+def _send_via_account(account: dict, proxy_str: str | None, to: str, subject: str, body: str, attachments: list[dict] | None = None) -> dict:
     """Gửi email qua 1 SMTP account cụ thể, tùy chọn qua proxy.
 
     Tự detect mode:
@@ -2714,7 +2715,18 @@ def _send_via_account(account: dict, proxy_str: str | None, to: str, subject: st
     use_ssl = bool(account.get("ssl", False)) or port == 465
     proxy_label = proxy_str or "—"
     try:
-        msg = MIMEText(body, "plain", "utf-8")
+        if attachments:
+            msg = EmailMessage()
+            msg.set_content(body, charset="utf-8")
+            for attachment in attachments:
+                mime_type = str(attachment.get("mime_type") or "application/octet-stream")
+                maintype, subtype = mime_type.split("/", 1) if "/" in mime_type else ("application", "octet-stream")
+                msg.add_attachment(
+                    attachment.get("data", b""), maintype=maintype, subtype=subtype,
+                    filename=str(attachment.get("filename") or "evidence.bin"),
+                )
+        else:
+            msg = MIMEText(body, "plain", "utf-8")
         msg["Subject"] = subject
         msg["From"] = username
         msg["To"] = to
@@ -2816,6 +2828,14 @@ def send_report_email_single(to: str, subject: str, body: str, account: dict, pr
     Trả về dict {"account", "proxy", "success", "error"} — không raise.
     """
     return _send_via_account(account, proxy_str, to, subject, body)
+
+
+def send_report_email_single_with_attachments(
+    to: str, subject: str, body: str, attachments: list[dict],
+    account: dict, proxy_str: str | None = None,
+) -> dict:
+    """Send one explicitly confirmed report with in-memory evidence attachments."""
+    return _send_via_account(account, proxy_str, to, subject, body, attachments=attachments)
 
 # file khi ghi sent_log.csv, không liên quan gì tới parse_draft_email() bên dưới.
 _DRAFT_FILENAME_SUFFIXES = [
