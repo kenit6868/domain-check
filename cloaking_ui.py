@@ -14,6 +14,11 @@ VERDICT_LABELS = {
     "INCONCLUSIVE": "Chưa đủ dữ liệu — cần xác minh",
     "NO_SIGNAL": "Chưa phát hiện dấu hiệu cloaking",
 }
+CONTENT_LABELS = {
+    "GAMBLING_EXPOSED": "Phát hiện nội dung cờ bạc công khai trên nhiều profile",
+    "PROFILE_DEPENDENT": "Nội dung nhạy cảm chỉ xuất hiện trên một số profile",
+    "NO_SIGNAL": "Chưa phát hiện nội dung nhạy cảm",
+}
 
 
 def verdict_label(result: dict) -> str:
@@ -34,18 +39,34 @@ def render_cloaking_result(result: dict, *, compact: bool = False) -> None:
         "NO_SIGNAL": st.success,
     }.get(verdict, st.info)
     renderer(message)
+    content = result.get("content") or {}
+    content_verdict = content.get("verdict")
+    if content_verdict == "GAMBLING_EXPOSED":
+        st.error(f"**Nội dung:** {CONTENT_LABELS[content_verdict]}")
+    elif content_verdict == "PROFILE_DEPENDENT":
+        st.warning(f"**Nội dung:** {CONTENT_LABELS[content_verdict]}")
     if result.get("error"):
         st.caption(f"Detector: {result['error']}")
+    site_state = result.get("site_state") or {}
+    if site_state.get("all_profiles_terminal"):
+        st.info(
+            "Các profile trình duyệt đều đang hiển thị trang cảnh báo/chặn hoặc lỗi "
+            "không thể truy cập. Trạng thái này được bỏ khỏi phép tính cloaking."
+        )
     if compact:
         signals = result.get("signals") or []
         if signals:
             st.caption("; ".join(str(item.get("detail", "")) for item in signals[:3]))
+        coverage = result.get("coverage") or {}
+        if coverage.get("multi_vantage_recommended"):
+            st.caption("Server khai báo thay đổi theo quốc gia/IP; nên kiểm tra thêm vantage mạng.")
         return
 
     rows = []
     for profile in (result.get("profiles") or {}).values():
         rows.append({
             "Hồ sơ": profile.get("label") or profile.get("name"),
+            "Vantage": profile.get("vantage") or "local",
             "HTTP": profile.get("status_code") if not profile.get("error") else "—",
             "Tiêu đề": profile.get("title") or "—",
             "Dung lượng": profile.get("body_bytes", 0),
@@ -68,6 +89,27 @@ def render_cloaking_result(result: dict, *, compact: bool = False) -> None:
         st.markdown("**Tín hiệu quan sát được:**")
         for signal in signals:
             st.write(f"- {signal.get('detail', '')}")
+    path_probes = result.get("path_probes") or []
+    if path_probes:
+        st.markdown("**Khám phá đường dẫn (không cộng điểm cloaking):**")
+        st.dataframe(
+            pd.DataFrame([{
+                "Đường dẫn": item.get("variant_url"),
+                "Kết quả": item.get("status"),
+                "Từ khóa bổ sung": ", ".join(item.get("additional_terms") or []) or "—",
+            } for item in path_probes]),
+            hide_index=True,
+            width="stretch",
+            column_config={"Đường dẫn": st.column_config.LinkColumn()},
+        )
+    coverage = result.get("coverage") or {}
+    if coverage.get("multi_vantage_recommended"):
+        attempted = ", ".join(coverage.get("vantages_attempted") or []) or "chưa cấu hình"
+        available = ", ".join(coverage.get("vantages_available") or []) or "không có"
+        st.warning(
+            "Response khai báo phụ thuộc quốc gia/IP. Kết quả từ một mạng chưa đủ phủ; "
+            f"vantage đã thử: {attempted}; vantage có dữ liệu: {available}."
+        )
     evidence_path = result.get("evidence_path")
     if evidence_path and os.path.isfile(evidence_path):
         with open(evidence_path, "rb") as file:
@@ -90,7 +132,20 @@ def render_cloaking_result(result: dict, *, compact: bool = False) -> None:
     screenshots = playwright.get("screenshots") or []
     if screenshots:
         st.markdown("**Ảnh xác minh bằng trình duyệt:**")
-        for screenshot in screenshots:
+        with st.container(horizontal=True, gap="small"):
+            for screenshot in screenshots:
+                path = screenshot.get("path", "")
+                if path and os.path.isfile(path):
+                    st.image(
+                        path,
+                        caption=screenshot.get("label") or os.path.basename(path),
+                        width=160,
+                    )
+    operator = result.get("operator_evidence") or {}
+    operator_screenshots = operator.get("screenshots") or []
+    if operator_screenshots:
+        st.markdown("**Ảnh do người vận hành cung cấp:**")
+        for screenshot in operator_screenshots:
             path = screenshot.get("path", "")
             if path and os.path.isfile(path):
-                st.image(path, caption=screenshot.get("label") or os.path.basename(path), width="stretch")
+                st.image(path, caption=os.path.basename(path), width="stretch")

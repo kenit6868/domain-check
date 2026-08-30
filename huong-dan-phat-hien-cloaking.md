@@ -114,8 +114,11 @@ Tệp này có dung lượng khoảng 808 KB và được nén thành một dòn
 ## Dùng chức năng tự động trong Domain Check Tool
 
 Khi bấm check ở **Trang chủ**, **Check Domain** hoặc **Quick Report**, công cụ tự
-so sánh cùng URL bằng desktop/mobile, truy cập trực tiếp/Google referrer và
-`/vi-vn/` (nếu đang kiểm tra đường dẫn gốc). Kết quả gồm:
+so sánh cùng URL bằng desktop, Android, iPhone và Googlebot Smartphone, kết hợp
+truy cập trực tiếp/Google referrer. `/vi-vn/` chỉ dùng để khám phá nội dung trên
+đường dẫn khác: trang này trả 404 trong khi trang gốc hoạt động **không được tính
+là cloaking**. Giao diện hiển thị riêng kết luận cloaking và kết luận nội dung.
+Kết quả cloaking gồm:
 
 - `NO_SIGNAL`: chưa thấy chênh lệch đáng kể; không có nghĩa là khẳng định website
   không cloaking.
@@ -125,19 +128,41 @@ so sánh cùng URL bằng desktop/mobile, truy cập trực tiếp/Google referr
 
 Ở **Check Domain** và **Quick Report**, nếu HTTP trả `POSSIBLE` hoặc
 `INCONCLUSIVE`, bấm **Xác minh cloaking bằng Playwright**. Trình duyệt headless
-chỉ mở trang bằng hai profile và chụp ảnh; nó không bấm nút, không nhập thông tin
-và không gửi form. Vì vậy các bước “chơi thử” trong phần thủ công phía trên vẫn
-phải do người kiểm tra thực hiện trong môi trường cô lập nếu thật sự cần.
+mở desktop trực tiếp, Android từ Google và iPhone từ Google; mỗi profile được đọc
+sau 1 giây, 5 giây và sau warm reload. Nó không bấm nút, không nhập thông tin và
+không gửi form. Vì vậy các bước “chơi thử” trong phần thủ công phía trên vẫn phải
+do người kiểm tra thực hiện trong môi trường cô lập nếu thật sự cần.
 
 Trong **Domain Worker**, Playwright được chạy tự động chỉ cho các case HTTP chưa
 đủ kết luận:
 
 1. Nếu bằng chứng cuối là `LIKELY`, worker cập nhật draft, đính kèm manifest JSON
    và ảnh Playwright rồi gửi tự động theo cấu hình job.
-2. Nếu kết quả vẫn là `POSSIBLE`/`INCONCLUSIVE`, worker dừng riêng domain đó và
+2. Nếu kết quả vẫn là `POSSIBLE`/`INCONCLUSIVE`, hoặc server khai báo biến theo
+   quốc gia/IP và thiết bị nhưng chưa có vantage ngoài mạng hiện tại, worker dừng riêng domain đó và
    gắn trạng thái **Cần duyệt cloaking**; các domain khác vẫn tiếp tục.
 3. Mở phần bằng chứng trên trang worker, kiểm tra tín hiệu và manifest. Nếu chấp
    nhận gửi, chọn URL trong **Domain cloaking đã duyệt để retry** rồi bấm retry.
+
+Nếu tất cả profile đều hiện cảnh báo phishing của Cloudflare hoặc trang lỗi trình
+duyệt như **Không thể truy cập trang web này**, công cụ ghi
+`BLOCKED_OR_UNAVAILABLE` và không coi title/ảnh lỗi đó là cloaking. Worker bỏ qua
+bước duyệt cloaking, không đính kèm ảnh lỗi và tiếp tục gửi draft bình thường.
+Lưu ý: trang lỗi chỉ chứng minh website đang bị chặn hoặc không truy cập được tại
+thời điểm kiểm tra; để kết luận domain đã bị thu hồi cần xem thêm WHOIS Hold hoặc
+kết quả Check Link Status.
+
+Nếu bạn thấy nội dung khác mà detector không lấy được, mở **Bổ sung bằng chứng
+cloaking thủ công** trong Check Domain hoặc form bằng chứng ở Domain Worker. Tải
+2–4 ảnh của cùng URL (nên có thanh địa chỉ), chọn thiết bị/mạng và xác nhận sự khác
+nhau. Tool chỉ nâng kết quả lên tối đa `POSSIBLE`; upload không tự phê duyệt và
+không gửi mail. Trong worker, xem lại ảnh, chọn URL ở mục duyệt rồi retry; lúc đó
+manifest và ảnh thủ công mới được đính kèm email.
+
+Trường hợp nội dung phụ thuộc IP/quốc gia, có thể khai báo `vantage_points` trong
+mục `[cloaking]` của `config.ini` theo mẫu trong `config.example.ini`. Proxy và
+credential không được ghi vào manifest. Mỗi vantage chạy HTTP desktop trực tiếp
+và mobile Google; đặt `browser=true` nếu muốn dùng vantage đó cho Playwright.
 
 Manifest và ảnh được lưu dưới `evidence/cloaking/`. Không sửa file bằng chứng sau
 khi gửi; khi cần đối chiếu, dùng hash, thời điểm, profile và URL cuối trong
@@ -146,3 +171,8 @@ manifest. Cần cài Chromium một lần bằng:
 ```powershell
 python -m playwright install chromium
 ```
+
+Ngoài luồng email/worker, khu vực **Browser Blocking** trên **Check Domain** và
+**Quick Report** có hai nút mở form cộng đồng **Chống Lừa Đảo** và **Cốc Cốc
+Safe**. Đây là liên kết hỗ trợ báo cáo thủ công: form mở ở tab mới, người vận hành
+phải kiểm tra URL và bằng chứng trước khi bấm gửi; tool không tự submit hai form.

@@ -17,7 +17,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from html.parser import HTMLParser
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 import requests
 
@@ -29,6 +29,15 @@ DESKTOP_UA = (
 MOBILE_UA = (
     "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36"
+)
+IPHONE_UA = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1"
+)
+GOOGLEBOT_SMARTPHONE_UA = (
+    "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 "
+    "(compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 )
 GOOGLE_REFERRER = "https://www.google.com/"
 KNOWN_CLOAKING_ASSETS = ("best-traffic.pages.dev/traffic_dr.js",)
@@ -42,9 +51,21 @@ FAKE_NOT_FOUND_TERMS = (
     "404 not found", "page not found", "the page you requested could not be found",
     "không tìm thấy trang", "trang không tồn tại",
 )
+TERMINAL_BROWSER_ERROR_TERMS = (
+    "không thể truy cập trang web này", "không thể truy cập trang này",
+    "this site can't be reached", "this site can’t be reached",
+    "server not found", "dns_probe_finished_nxdomain", "err_name_not_resolved",
+    "err_connection_refused", "err_connection_timed_out", "err_address_unreachable",
+    "name resolution error", "failed to resolve", "getaddrinfo failed",
+)
+CLOUDFLARE_WARNING_TERMS = (
+    "suspected phishing", "suspected malware", "deceptive site",
+    "reported for potential phishing", "reported for potential malware",
+)
 SAFE_HEADER_NAMES = {
     "content-type", "content-length", "server", "location", "cf-ray",
-    "x-powered-by", "x-cache", "x-vercel-id",
+    "x-powered-by", "x-cache", "x-vercel-id", "vary", "cf-ipcountry",
+    "x-country-code", "x-middleware-rewrite", "x-matched-path",
 }
 MAX_VISIBLE_TEXT = 50_000
 EMAIL_PROFILE_LABELS = {
@@ -52,6 +73,8 @@ EMAIL_PROFILE_LABELS = {
     "mobile_direct": "Mobile, direct visit",
     "desktop_google": "Desktop, Google referrer",
     "mobile_google": "Mobile, Google referrer",
+    "iphone_google": "iPhone, Google referrer",
+    "googlebot_smartphone": "Googlebot Smartphone",
     "desktop_direct_vi_vn": "Desktop, direct visit to /vi-vn/",
     "mobile_google_vi_vn": "Mobile, Google referrer visit to /vi-vn/",
 }
@@ -120,19 +143,54 @@ def _vi_vn_url(target_url: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, "/vi-vn/", "", ""))
 
 
-def _profile_specs(target_url: str, include_path_variant: bool) -> list[dict]:
+def _vantage_slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(name).casefold()).strip("_") or "remote"
+
+
+def _profile_specs(
+    target_url: str, include_path_variant: bool,
+    vantage_points: list[dict] | None = None,
+) -> list[dict]:
     profiles = [
-        {"name": "desktop_direct", "label": "Desktop trực tiếp", "url": target_url, "user_agent": DESKTOP_UA, "referrer": ""},
-        {"name": "mobile_direct", "label": "Mobile trực tiếp", "url": target_url, "user_agent": MOBILE_UA, "referrer": ""},
-        {"name": "desktop_google", "label": "Desktop từ Google", "url": target_url, "user_agent": DESKTOP_UA, "referrer": GOOGLE_REFERRER},
-        {"name": "mobile_google", "label": "Mobile từ Google", "url": target_url, "user_agent": MOBILE_UA, "referrer": GOOGLE_REFERRER},
+        {"name": "desktop_direct", "label": "Desktop trực tiếp", "url": target_url, "user_agent": DESKTOP_UA, "referrer": "", "client_hints": {"Sec-CH-UA-Mobile": "?0", "Sec-CH-UA-Platform": '"Windows"'}},
+        {"name": "mobile_direct", "label": "Android trực tiếp", "url": target_url, "user_agent": MOBILE_UA, "referrer": "", "client_hints": {"Sec-CH-UA-Mobile": "?1", "Sec-CH-UA-Platform": '"Android"'}},
+        {"name": "desktop_google", "label": "Desktop từ Google", "url": target_url, "user_agent": DESKTOP_UA, "referrer": GOOGLE_REFERRER, "client_hints": {"Sec-CH-UA-Mobile": "?0", "Sec-CH-UA-Platform": '"Windows"'}},
+        {"name": "mobile_google", "label": "Android từ Google", "url": target_url, "user_agent": MOBILE_UA, "referrer": GOOGLE_REFERRER, "client_hints": {"Sec-CH-UA-Mobile": "?1", "Sec-CH-UA-Platform": '"Android"'}},
+        {"name": "iphone_google", "label": "iPhone từ Google", "url": target_url, "user_agent": IPHONE_UA, "referrer": GOOGLE_REFERRER, "client_hints": {}},
+        {"name": "googlebot_smartphone", "label": "Googlebot smartphone", "url": target_url, "user_agent": GOOGLEBOT_SMARTPHONE_UA, "referrer": "", "client_hints": {"Sec-CH-UA-Mobile": "?1", "Sec-CH-UA-Platform": '"Android"'}},
     ]
     parsed = urlsplit(target_url)
     if include_path_variant and (parsed.path or "/") in {"", "/"}:
         variant = _vi_vn_url(target_url)
         profiles.extend([
-            {"name": "desktop_direct_vi_vn", "label": "Desktop /vi-vn/", "url": variant, "user_agent": DESKTOP_UA, "referrer": ""},
-            {"name": "mobile_google_vi_vn", "label": "Mobile Google /vi-vn/", "url": variant, "user_agent": MOBILE_UA, "referrer": GOOGLE_REFERRER},
+            {"name": "desktop_direct_vi_vn", "label": "Desktop /vi-vn/", "url": variant, "user_agent": DESKTOP_UA, "referrer": "", "client_hints": {"Sec-CH-UA-Mobile": "?0", "Sec-CH-UA-Platform": '"Windows"'}},
+            {"name": "mobile_google_vi_vn", "label": "Android Google /vi-vn/", "url": variant, "user_agent": MOBILE_UA, "referrer": GOOGLE_REFERRER, "client_hints": {"Sec-CH-UA-Mobile": "?1", "Sec-CH-UA-Platform": '"Android"'}},
+        ])
+    for vantage in vantage_points or []:
+        name = str(vantage.get("name") or "").strip()
+        proxy = str(vantage.get("proxy") or "").strip()
+        if not name or not proxy:
+            continue
+        slug = _vantage_slug(name)
+        common = {
+            "url": target_url, "proxy": proxy, "vantage": name,
+            "vantage_country": str(vantage.get("country") or "").strip().upper(),
+        }
+        profiles.extend([
+            {
+                **common, "name": f"vantage_{slug}_desktop_direct",
+                "label": f"Desktop trực tiếp qua {name}", "user_agent": DESKTOP_UA,
+                "referrer": "", "client_hints": {
+                    "Sec-CH-UA-Mobile": "?0", "Sec-CH-UA-Platform": '"Windows"',
+                },
+            },
+            {
+                **common, "name": f"vantage_{slug}_mobile_google",
+                "label": f"Android từ Google qua {name}", "user_agent": MOBILE_UA,
+                "referrer": GOOGLE_REFERRER, "client_hints": {
+                    "Sec-CH-UA-Mobile": "?1", "Sec-CH-UA-Platform": '"Android"',
+                },
+            },
         ])
     return profiles
 
@@ -193,7 +251,12 @@ def _fetch_profile(profile: dict, timeout: float, max_bytes: int) -> dict:
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.7,en;q=0.6",
         "Cache-Control": "no-cache",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Site": "cross-site" if profile.get("referrer") else "none",
     }
+    headers.update(profile.get("client_hints") or {})
     if profile.get("referrer"):
         headers["Referer"] = profile["referrer"]
     started = datetime.now(timezone.utc)
@@ -202,6 +265,8 @@ def _fetch_profile(profile: dict, timeout: float, max_bytes: int) -> dict:
         response = session.get(
             profile["url"], headers=headers, timeout=timeout, allow_redirects=True,
             verify=False, stream=True,
+            proxies={"http": profile["proxy"], "https": profile["proxy"]}
+            if profile.get("proxy") else None,
         )
         try:
             raw = _read_limited(response, max_bytes)
@@ -209,23 +274,30 @@ def _fetch_profile(profile: dict, timeout: float, max_bytes: int) -> dict:
             text = raw.decode(encoding, errors="replace")
             parsed = _parse_html(text, response.url)
             safe_headers = _safe_headers(response.headers)
-            header_blob = " ".join(f"{key}:{value}" for key, value in safe_headers.items()).casefold()
-            resource_blob = " ".join(parsed["scripts"] + parsed["iframes"] + [text[:100_000]]).casefold()
-            iocs = sorted({asset for asset in KNOWN_CLOAKING_ASSETS if asset.casefold() in resource_blob})
-            mirror_header = "mirror-document" in header_blob
             history = [
                 {"status": hop.status_code, "url": hop.url, "location": hop.headers.get("Location", "")}
                 for hop in response.history
             ]
+            header_blob = " ".join(
+                [*(f"{key}:{value}" for key, value in safe_headers.items()), response.url]
+                + [f"{hop['url']} {hop['location']}" for hop in history]
+            ).casefold()
+            resource_blob = " ".join(parsed["scripts"] + parsed["iframes"] + [text[:100_000]]).casefold()
+            iocs = sorted({asset for asset in KNOWN_CLOAKING_ASSETS if asset.casefold() in resource_blob})
+            mirror_routes = sorted(set(re.findall(r"/mirror-document/(?:desktop|mobile)", header_blob)))
+            mirror_header = bool(mirror_routes)
             return {
                 "name": profile["name"], "label": profile["label"],
                 "requested_url": profile["url"], "referrer": profile.get("referrer", ""),
+                "vantage": profile.get("vantage", "local"),
+                "vantage_country": profile.get("vantage_country", ""),
                 "status_code": response.status_code, "final_url": response.url,
                 "redirect_chain": history, "headers": safe_headers,
                 "body_bytes": len(raw), "body_sha256": hashlib.sha256(raw).hexdigest(),
                 "truncated": len(raw) >= max_bytes, "error": "",
                 "duration_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000),
-                "mirror_document_header": mirror_header, "known_iocs": iocs,
+                "mirror_document_header": mirror_header,
+                "mirror_document_routes": mirror_routes, "known_iocs": iocs,
                 **parsed,
             }
         finally:
@@ -234,13 +306,19 @@ def _fetch_profile(profile: dict, timeout: float, max_bytes: int) -> dict:
         return {
             "name": profile["name"], "label": profile["label"],
             "requested_url": profile["url"], "referrer": profile.get("referrer", ""),
+            "vantage": profile.get("vantage", "local"),
+            "vantage_country": profile.get("vantage_country", ""),
             "status_code": None, "final_url": "", "redirect_chain": [], "headers": {},
             "body_bytes": 0, "body_sha256": "", "truncated": False,
             "title": "", "visible_text": "", "text_preview": "", "keyword_hits": [],
             "fake_404": False, "forms": 0, "password_inputs": 0, "meta_refresh": "",
-            "scripts": [], "iframes": [], "mirror_document_header": False, "known_iocs": [],
+            "scripts": [], "iframes": [], "mirror_document_header": False,
+            "mirror_document_routes": [], "known_iocs": [],
             "duration_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000),
-            "error": str(exc),
+            "error": (
+                f"{type(exc).__name__}: proxy request failed"
+                if profile.get("proxy") else str(exc)
+            ),
         }
     finally:
         session.close()
@@ -258,7 +336,35 @@ def _add_signal(signals: list[dict], kind: str, weight: int, profiles: list[str]
     signals.append({"kind": kind, "weight": weight, "profiles": profiles, "detail": detail})
 
 
+def _terminal_profile_state(profile: dict) -> str:
+    """Identify provider/browser terminal pages that must not become cloaking evidence."""
+    headers = profile.get("headers") or {}
+    header_blob = " ".join(
+        f"{key}:{value}" for key, value in headers.items()
+    ).casefold()
+    content_blob = " ".join((
+        str(profile.get("title") or ""),
+        str(profile.get("text_preview") or ""),
+        str(profile.get("error") or ""),
+    )).casefold()
+    is_cloudflare = "cloudflare" in header_blob or "cf-ray" in header_blob
+    if is_cloudflare and any(term in content_blob for term in CLOUDFLARE_WARNING_TERMS):
+        return "CLOUDFLARE_PHISHING_BLOCK"
+    if any(term in content_blob for term in TERMINAL_BROWSER_ERROR_TERMS):
+        return "UNREACHABLE_ERROR_PAGE"
+    return ""
+
+
 def _compare_profiles(left: dict, right: dict, signals: list[dict]) -> dict:
+    terminal = [
+        profile["name"] for profile in (left, right)
+        if profile.get("terminal_state")
+    ]
+    if terminal:
+        return {
+            "profiles": [left["name"], right["name"]], "available": False,
+            "skipped_reason": "terminal_page", "terminal_profiles": terminal,
+        }
     if left.get("error") or right.get("error"):
         return {"profiles": [left["name"], right["name"]], "available": False}
     left_text = left.get("visible_text", "")
@@ -291,10 +397,72 @@ def _compare_profiles(left: dict, right: dict, signals: list[dict]) -> dict:
     }
 
 
+def _analyze_content(profiles: dict[str, dict]) -> dict:
+    """Classify exposed sensitive content separately from cloaking behavior."""
+    base_profiles = [
+        profile for name, profile in profiles.items()
+        if not name.endswith("_vi_vn")
+        and not profile.get("error")
+        and not profile.get("terminal_state")
+    ]
+    exposed = [profile for profile in base_profiles if profile.get("keyword_hits")]
+    matched_terms = sorted({
+        term for profile in exposed for term in profile.get("keyword_hits") or []
+    })
+    if len(exposed) >= 2:
+        verdict = "GAMBLING_EXPOSED"
+    elif len(exposed) == 1:
+        verdict = "PROFILE_DEPENDENT"
+    else:
+        verdict = "NO_SIGNAL"
+    return {
+        "verdict": verdict,
+        "profiles_exposed": [profile.get("name") for profile in exposed],
+        "profiles_available": len(base_profiles),
+        "matched_terms": matched_terms,
+    }
+
+
+def _analyze_path_probe(base: dict, variant: dict) -> dict:
+    """Describe path discovery without treating two different URLs as cloaking."""
+    item = {
+        "base_profile": base.get("name"), "variant_profile": variant.get("name"),
+        "base_url": base.get("requested_url"), "variant_url": variant.get("requested_url"),
+        "status": "UNAVAILABLE", "contributes_to_cloaking": False,
+    }
+    if variant.get("error"):
+        item["error"] = variant.get("error")
+        return item
+    status_code = variant.get("status_code")
+    if status_code == 404 or variant.get("fake_404"):
+        item["status"] = "NOT_FOUND"
+        return item
+    base_terms = set(base.get("keyword_hits") or [])
+    variant_terms = set(variant.get("keyword_hits") or [])
+    if variant_terms - base_terms:
+        item["status"] = "SENSITIVE_CONTENT"
+        item["additional_terms"] = sorted(variant_terms - base_terms)
+    elif base.get("body_sha256") == variant.get("body_sha256"):
+        item["status"] = "SAME_CONTENT"
+    else:
+        item["status"] = "DIFFERENT_CONTENT"
+    return item
+
+
 def analyze_profiles(profiles: dict[str, dict], target_url: str) -> dict:
     """Classify already-fetched profiles. Kept pure for deterministic tests."""
     signals: list[dict] = []
-    for profile in profiles.values():
+    base_profiles = {
+        name: profile for name, profile in profiles.items()
+        if not name.endswith("_vi_vn")
+    }
+    for profile in base_profiles.values():
+        terminal_state = _terminal_profile_state(profile)
+        if terminal_state:
+            profile["terminal_state"] = terminal_state
+        else:
+            profile.pop("terminal_state", None)
+    for profile in base_profiles.values():
         if profile.get("mirror_document_header"):
             _add_signal(signals, "mirror_document_header", 60, [profile["name"]], "Response tự khai báo mirror-document theo thiết bị")
         for ioc in profile.get("known_iocs", []):
@@ -306,15 +474,41 @@ def analyze_profiles(profiles: dict[str, dict], target_url: str) -> dict:
         ("desktop_direct", "desktop_google"),
         ("mobile_direct", "mobile_google"),
         ("desktop_direct", "mobile_google"),
-        ("desktop_direct", "desktop_direct_vi_vn"),
-        ("mobile_google", "mobile_google_vi_vn"),
+        ("desktop_direct", "iphone_google"),
+        ("desktop_direct", "googlebot_smartphone"),
     ]
+    vantage_slugs = sorted({
+        name.removeprefix("vantage_").removesuffix("_desktop_direct").removesuffix("_mobile_google")
+        for name in profiles if name.startswith("vantage_")
+        and (name.endswith("_desktop_direct") or name.endswith("_mobile_google"))
+    })
+    for slug in vantage_slugs:
+        if f"vantage_{slug}_desktop_direct" in profiles:
+            pairs.append((f"vantage_{slug}_desktop_direct", f"vantage_{slug}_mobile_google"))
+        pairs.append(("mobile_google", f"vantage_{slug}_mobile_google"))
     for left_name, right_name in pairs:
         if left_name in profiles and right_name in profiles:
             comparisons.append(_compare_profiles(profiles[left_name], profiles[right_name], signals))
 
-    available = sum(not item.get("error") for item in profiles.values())
-    failures = len(profiles) - available
+    path_probes = []
+    for base_name, variant_name in (
+        ("desktop_direct", "desktop_direct_vi_vn"),
+        ("mobile_google", "mobile_google_vi_vn"),
+    ):
+        if base_name in profiles and variant_name in profiles:
+            path_probes.append(_analyze_path_probe(profiles[base_name], profiles[variant_name]))
+
+    terminal_profiles = {
+        name: profile.get("terminal_state")
+        for name, profile in base_profiles.items()
+        if profile.get("terminal_state")
+    }
+    all_profiles_terminal = bool(base_profiles) and len(terminal_profiles) == len(base_profiles)
+    available = sum(
+        not item.get("error") or bool(item.get("terminal_state"))
+        for item in base_profiles.values()
+    )
+    failures = len(base_profiles) - available
     score = min(100, sum(item["weight"] for item in signals))
     kinds = {item["kind"] for item in signals}
     exact_ioc = bool(kinds.intersection({"mirror_document_header", "known_cloaking_ioc"}))
@@ -322,19 +516,65 @@ def analyze_profiles(profiles: dict[str, dict], target_url: str) -> dict:
         "keyword_exposure", "fake_404_vs_sensitive", "redirect_difference",
         "form_difference", "content_difference", "title_difference", "size_difference",
     })
-    if exact_ioc or (score >= 50 and len(independent_kinds) >= 2):
+    if all_profiles_terminal:
+        signals = []
+        score = 0
+        verdict = "NO_SIGNAL"
+    elif exact_ioc or (score >= 50 and len(independent_kinds) >= 2):
         verdict = "LIKELY"
     elif score >= 20:
         verdict = "POSSIBLE"
-    elif available < 2 or failures >= max(2, len(profiles) // 2):
+    elif available < 2 or failures >= max(2, len(base_profiles) // 2):
         verdict = "INCONCLUSIVE"
     else:
         verdict = "NO_SIGNAL"
+    vary_tokens = sorted({
+        token.strip().casefold()
+        for profile in base_profiles.values()
+        for key, value in (profile.get("headers") or {}).items()
+        if str(key).casefold() == "vary"
+        for token in str(value).split(",")
+        if token.strip()
+    })
+    geo_vary = bool({"cf-ipcountry", "x-country-code"}.intersection(vary_tokens))
+    device_vary = bool(
+        {"user-agent", "sec-ch-ua-mobile", "sec-ch-ua-platform"}.intersection(vary_tokens)
+    )
+    vantage_profiles = [
+        profile for name, profile in base_profiles.items() if name.startswith("vantage_")
+    ]
+    vantages_attempted = sorted({
+        str(profile.get("vantage")) for profile in vantage_profiles if profile.get("vantage")
+    })
+    vantages_available = sorted({
+        str(profile.get("vantage")) for profile in vantage_profiles
+        if profile.get("vantage") and not profile.get("error")
+    })
     return {
         "version": 1, "engine": "http", "target_url": target_url,
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "verdict": verdict, "score": score, "signals": signals,
         "profiles": profiles, "comparisons": comparisons,
+        "content": _analyze_content(profiles), "path_probes": path_probes,
+        "site_state": {
+            "verdict": (
+                "BLOCKED_OR_UNAVAILABLE" if all_profiles_terminal
+                else "PARTIAL_TERMINAL" if terminal_profiles
+                else "ACTIVE_OR_UNKNOWN"
+            ),
+            "all_profiles_terminal": all_profiles_terminal,
+            "terminal_profiles": terminal_profiles,
+        },
+        "coverage": {
+            "vary_tokens": vary_tokens,
+            "geo_dependent_declared": geo_vary,
+            "device_dependent_declared": device_vary,
+            "multi_vantage_recommended": bool(
+                geo_vary and device_vary and not vantages_available
+            ),
+            "vantages_attempted": vantages_attempted,
+            "vantages_available": vantages_available,
+        },
         "profiles_available": available, "profiles_failed": failures,
         "manual_review_required": verdict in {"POSSIBLE", "INCONCLUSIVE"},
         "evidence_path": "", "playwright": {},
@@ -377,6 +617,7 @@ def probe_http_cloaking(
     include_path_variant: bool = True,
     max_workers: int = 4,
     evidence_root: str | None = None,
+    vantage_points: list[dict] | None = None,
 ) -> dict:
     """Run passive HTTP probes and return a JSON-serializable verdict."""
     target_url = _ensure_url(target)
@@ -390,7 +631,7 @@ def probe_http_cloaking(
             "manual_review_required": True, "evidence_path": "",
             "playwright": {}, "error": "URL không hợp lệ",
         }
-    specs = _profile_specs(target_url, include_path_variant)
+    specs = _profile_specs(target_url, include_path_variant, vantage_points)
     profiles: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=min(max_workers, len(specs))) as executor:
         futures = {executor.submit(_fetch_profile, spec, timeout, max_bytes): spec for spec in specs}
@@ -401,7 +642,14 @@ def probe_http_cloaking(
             except Exception as exc:
                 profiles[spec["name"]] = {
                     "name": spec["name"], "label": spec["label"], "requested_url": spec["url"],
-                    "referrer": spec.get("referrer", ""), "error": str(exc), "status_code": None,
+                    "referrer": spec.get("referrer", ""),
+                    "error": (
+                        f"{type(exc).__name__}: proxy request failed"
+                        if spec.get("proxy") else str(exc)
+                    ),
+                    "status_code": None,
+                    "vantage": spec.get("vantage", "local"),
+                    "vantage_country": spec.get("vantage_country", ""),
                     "final_url": "", "body_bytes": 0, "body_sha256": "", "title": "",
                     "visible_text": "", "text_preview": "", "keyword_hits": [],
                     "fake_404": False, "forms": 0, "password_inputs": 0,
@@ -409,7 +657,11 @@ def probe_http_cloaking(
                 }
     ordered = {spec["name"]: profiles[spec["name"]] for spec in specs}
     result = analyze_profiles(ordered, target_url)
-    if evidence_root and result["verdict"] != "NO_SIGNAL":
+    if evidence_root and (
+        result["verdict"] != "NO_SIGNAL"
+        or result.get("coverage", {}).get("vantages_attempted")
+        or result.get("coverage", {}).get("multi_vantage_recommended")
+    ):
         try:
             result["evidence_path"] = save_evidence_manifest(result, evidence_root)
         except OSError as exc:
@@ -421,88 +673,177 @@ def probe_http_cloaking(
     return result
 
 
-def _browser_profile_specs(target_url: str) -> list[dict]:
-    return [
+def _playwright_proxy_settings(proxy_url: str) -> dict | None:
+    parsed = urlsplit(str(proxy_url or "").strip())
+    if not parsed.scheme or not parsed.hostname or not parsed.port:
+        return None
+    settings = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
+    if parsed.username:
+        settings["username"] = unquote(parsed.username)
+    if parsed.password:
+        settings["password"] = unquote(parsed.password)
+    return settings
+
+
+def _browser_profile_specs(
+    target_url: str, vantage_points: list[dict] | None = None,
+) -> list[dict]:
+    profiles = [
         {
             "name": "desktop_direct", "label": "Playwright desktop trực tiếp",
             "url": target_url, "user_agent": DESKTOP_UA, "referrer": "",
             "viewport": {"width": 1440, "height": 1000}, "is_mobile": False,
+            "has_touch": False,
         },
         {
             "name": "mobile_google", "label": "Playwright mobile từ Google",
             "url": target_url, "user_agent": MOBILE_UA, "referrer": GOOGLE_REFERRER,
             "viewport": {"width": 412, "height": 915}, "is_mobile": True,
+            "has_touch": True,
+        },
+        {
+            "name": "iphone_google", "label": "Playwright iPhone từ Google",
+            "url": target_url, "user_agent": IPHONE_UA, "referrer": GOOGLE_REFERRER,
+            "viewport": {"width": 390, "height": 844}, "is_mobile": True,
+            "has_touch": True,
         },
     ]
+    for vantage in vantage_points or []:
+        if not vantage.get("browser"):
+            continue
+        proxy_settings = _playwright_proxy_settings(vantage.get("proxy", ""))
+        if not proxy_settings:
+            continue
+        name = str(vantage.get("name") or "remote").strip()
+        profiles.append({
+            "name": f"vantage_{_vantage_slug(name)}_mobile_google",
+            "label": f"Playwright Android từ Google qua {name}",
+            "url": target_url, "user_agent": MOBILE_UA, "referrer": GOOGLE_REFERRER,
+            "viewport": {"width": 412, "height": 915}, "is_mobile": True,
+            "has_touch": True, "proxy_settings": proxy_settings,
+            "vantage": name,
+            "vantage_country": str(vantage.get("country") or "").strip().upper(),
+        })
+    return profiles
+
+
+def _browser_snapshot(page, label: str) -> dict:
+    html = page.content()
+    try:
+        visible_text = page.locator("body").inner_text(timeout=3000)
+    except Exception:
+        visible_text = ""
+    parsed = _parse_html(html, page.url)
+    parsed["visible_text"] = re.sub(r"\s+", " ", visible_text).strip()[:MAX_VISIBLE_TEXT]
+    parsed["text_preview"] = parsed["visible_text"][:500]
+    normalized = parsed["visible_text"].casefold()
+    parsed["keyword_hits"] = sorted({term for term in SENSITIVE_TERMS if term.casefold() in normalized})
+    parsed["fake_404"] = any(term.casefold() in normalized for term in FAKE_NOT_FOUND_TERMS)
+    raw = html.encode("utf-8", errors="replace")
+    return {
+        "stage": label, "final_url": page.url, "body_bytes": len(raw),
+        "body_sha256": hashlib.sha256(raw).hexdigest(), **parsed,
+    }
 
 
 def _capture_browser_profile(browser, profile: dict, target_dir: str, timeout_ms: int) -> dict:
     started = datetime.now(timezone.utc)
-    context = browser.new_context(
+    context_kwargs = dict(
         user_agent=profile["user_agent"], viewport=profile["viewport"],
-        is_mobile=profile["is_mobile"], locale="vi-VN",
-        accept_downloads=False, service_workers="block",
+        is_mobile=profile["is_mobile"], has_touch=profile.get("has_touch", False),
+        locale="vi-VN", accept_downloads=False, service_workers="allow",
     )
-    page = context.new_page()
-    screenshot_path = os.path.join(target_dir, f"{profile['name']}.png")
+    if profile.get("proxy_settings"):
+        context_kwargs["proxy"] = profile["proxy_settings"]
+    context = None
+    screenshot_paths = []
     try:
+        context = browser.new_context(**context_kwargs)
+        page = context.new_page()
         response = page.goto(
             profile["url"], wait_until="domcontentloaded", timeout=timeout_ms,
             referer=profile.get("referrer") or None,
         )
-        page.wait_for_timeout(min(2500, max(0, timeout_ms // 4)))
-        html = page.content()
+        observations = []
+        for stage, delay_ms in (("cold_1s", 1000), ("cold_5s", 4000)):
+            page.wait_for_timeout(delay_ms)
+            observations.append(_browser_snapshot(page, stage))
+            screenshot_path = os.path.join(target_dir, f"{profile['name']}_{stage}.png")
+            page.screenshot(path=screenshot_path, full_page=True)
+            screenshot_paths.append(screenshot_path)
         try:
-            visible_text = page.locator("body").inner_text(timeout=3000)
+            warm_response = page.reload(wait_until="domcontentloaded", timeout=timeout_ms)
+            if warm_response is not None:
+                response = warm_response
+            page.wait_for_timeout(1000)
+            observations.append(_browser_snapshot(page, "warm_reload"))
+            screenshot_path = os.path.join(target_dir, f"{profile['name']}_warm_reload.png")
+            page.screenshot(path=screenshot_path, full_page=True)
+            screenshot_paths.append(screenshot_path)
         except Exception:
-            visible_text = ""
-        parsed = _parse_html(html, page.url)
-        parsed["visible_text"] = re.sub(r"\s+", " ", visible_text).strip()[:MAX_VISIBLE_TEXT]
-        parsed["text_preview"] = parsed["visible_text"][:500]
-        normalized = parsed["visible_text"].casefold()
-        parsed["keyword_hits"] = sorted({term for term in SENSITIVE_TERMS if term.casefold() in normalized})
-        parsed["fake_404"] = any(term.casefold() in normalized for term in FAKE_NOT_FOUND_TERMS)
+            pass
+        parsed = max(
+            observations,
+            key=lambda item: (len(item.get("keyword_hits") or []), not item.get("fake_404"), item.get("body_bytes", 0)),
+        )
         try:
             resources = page.evaluate(
                 "() => performance.getEntriesByType('resource').map(entry => entry.name).slice(0, 500)"
             ) or []
         except Exception:
             resources = []
-        resource_blob = " ".join([html[:100_000], *map(str, resources)]).casefold()
+        resource_blob = " ".join([page.content()[:100_000], *map(str, resources)]).casefold()
         known_iocs = sorted({asset for asset in KNOWN_CLOAKING_ASSETS if asset.casefold() in resource_blob})
-        page.screenshot(path=screenshot_path, full_page=True)
-        raw = html.encode("utf-8", errors="replace")
+        safe_observations = []
+        for observation in observations:
+            safe_observation = dict(observation)
+            safe_observation.pop("visible_text", None)
+            safe_observations.append(safe_observation)
         return {
             "name": profile["name"], "label": profile["label"],
             "requested_url": profile["url"], "referrer": profile.get("referrer", ""),
-            "status_code": response.status if response else None, "final_url": page.url,
-            "redirect_chain": [], "headers": {}, "body_bytes": len(raw),
-            "body_sha256": hashlib.sha256(raw).hexdigest(), "truncated": False,
+            "vantage": profile.get("vantage", "local"),
+            "vantage_country": profile.get("vantage_country", ""),
+            "status_code": response.status if response else None, "final_url": parsed["final_url"],
+            "redirect_chain": [], "headers": {}, "body_bytes": parsed["body_bytes"],
+            "body_sha256": parsed["body_sha256"], "truncated": False,
             "error": "", "duration_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000),
-            "mirror_document_header": False, "known_iocs": known_iocs,
+            "mirror_document_header": False, "mirror_document_routes": [],
+            "known_iocs": known_iocs, "observations": safe_observations,
             "resources": [str(item)[:2000] for item in resources],
-            "screenshot_path": screenshot_path, **parsed,
+            "screenshot_path": screenshot_paths[-1] if screenshot_paths else "",
+            "screenshot_paths": screenshot_paths, **{
+                key: value for key, value in parsed.items()
+                if key not in {"stage", "final_url", "body_bytes", "body_sha256"}
+            },
         }
     except Exception as exc:
         return {
             "name": profile["name"], "label": profile["label"],
             "requested_url": profile["url"], "referrer": profile.get("referrer", ""),
+            "vantage": profile.get("vantage", "local"),
+            "vantage_country": profile.get("vantage_country", ""),
             "status_code": None, "final_url": "", "redirect_chain": [], "headers": {},
             "body_bytes": 0, "body_sha256": "", "truncated": False,
             "title": "", "visible_text": "", "text_preview": "", "keyword_hits": [],
             "fake_404": False, "forms": 0, "password_inputs": 0, "meta_refresh": "",
-            "scripts": [], "iframes": [], "mirror_document_header": False, "known_iocs": [],
-            "resources": [], "screenshot_path": "",
+            "scripts": [], "iframes": [], "mirror_document_header": False,
+            "mirror_document_routes": [], "known_iocs": [], "observations": [],
+            "resources": [], "screenshot_path": "", "screenshot_paths": screenshot_paths,
             "duration_ms": int((datetime.now(timezone.utc) - started).total_seconds() * 1000),
-            "error": str(exc),
+            "error": (
+                f"{type(exc).__name__}: browser proxy request failed"
+                if profile.get("proxy_settings") else str(exc)
+            ),
         }
     finally:
-        context.close()
+        if context is not None:
+            context.close()
 
 
 def probe_playwright_cloaking(
     target: str, *, timeout_ms: int = 15_000, evidence_root: str | None = None,
-    _playwright_factory=None,
+    vantage_points: list[dict] | None = None, _playwright_factory=None,
 ) -> dict:
     """Passively render two browser profiles; never click, type, or submit forms."""
     target_url = _ensure_url(target)
@@ -525,7 +866,11 @@ def probe_playwright_cloaking(
             "observed_at": datetime.now(timezone.utc).isoformat(), "verdict": "INCONCLUSIVE",
             "score": 0, "signals": [], "profiles": {}, "comparisons": [],
             "profiles_available": 0, "profiles_failed": 2, "manual_review_required": True,
-            "screenshots": [], "evidence_path": "", "available": False, "error": str(exc),
+            "screenshots": [], "evidence_path": "", "available": False,
+            "error": (
+                f"{type(exc).__name__}: browser proxy/profile failed"
+                if vantage_points else str(exc)
+            ),
         }
 
     parsed = urlsplit(target_url)
@@ -539,7 +884,7 @@ def probe_playwright_cloaking(
         with _playwright_factory() as playwright:
             browser = playwright.chromium.launch(headless=True)
             try:
-                for spec in _browser_profile_specs(target_url):
+                for spec in _browser_profile_specs(target_url, vantage_points):
                     profiles[spec["name"]] = _capture_browser_profile(browser, spec, target_dir, timeout_ms)
             finally:
                 browser.close()
@@ -549,13 +894,22 @@ def probe_playwright_cloaking(
             "observed_at": datetime.now(timezone.utc).isoformat(), "verdict": "INCONCLUSIVE",
             "score": 0, "signals": [], "profiles": profiles, "comparisons": [],
             "profiles_available": 0, "profiles_failed": 2, "manual_review_required": True,
-            "screenshots": [], "evidence_path": "", "available": False, "error": str(exc),
+            "screenshots": [], "evidence_path": "", "available": False,
+            "error": (
+                f"{type(exc).__name__}: browser proxy/profile failed"
+                if vantage_points else str(exc)
+            ),
         }
     result = analyze_profiles(profiles, target_url)
     result.update({"engine": "playwright", "available": True})
     result["screenshots"] = [
-        {"label": profile.get("label"), "path": profile.get("screenshot_path")}
-        for profile in profiles.values() if profile.get("screenshot_path")
+        {
+            "label": f"{profile.get('label')} — {os.path.splitext(os.path.basename(path))[0].rsplit('_', 1)[-1]}",
+            "path": path,
+        }
+        for profile in profiles.values()
+        for path in profile.get("screenshot_paths") or []
+        if path
     ]
     if evidence_root:
         try:
@@ -572,7 +926,18 @@ def merge_playwright_result(http_result: dict, browser_result: dict, evidence_ro
     merged = deepcopy(http_result or {})
     merged["playwright"] = deepcopy(browser_result or {})
     browser_verdict = (browser_result or {}).get("verdict")
-    if browser_verdict == "LIKELY":
+    browser_terminal = bool(
+        ((browser_result or {}).get("site_state") or {}).get("all_profiles_terminal")
+    )
+    if browser_terminal:
+        merged["verdict"] = "NO_SIGNAL"
+        merged["score"] = 0
+        merged["signals"] = []
+        merged["manual_review_required"] = False
+        merged["site_state"] = deepcopy(browser_result.get("site_state") or {})
+        merged.setdefault("coverage", {})["multi_vantage_recommended"] = False
+        merged["coverage"]["suppressed_by_terminal_state"] = True
+    elif browser_verdict == "LIKELY":
         merged["verdict"] = "LIKELY"
         merged["score"] = max(int(merged.get("score", 0)), int(browser_result.get("score", 0)))
         merged["manual_review_required"] = False
@@ -593,8 +958,91 @@ def merge_playwright_result(http_result: dict, browser_result: dict, evidence_ro
     return merged
 
 
+def _image_extension(filename: str, data: bytes) -> str:
+    lower = str(filename or "").casefold()
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return ".webp"
+    if lower.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        raise ValueError("The uploaded file extension looks like an image but its signature is invalid")
+    raise ValueError("Only PNG, JPEG, and WebP evidence images are supported")
+
+
+def add_operator_evidence(
+    result: dict,
+    *,
+    images: list[tuple[str, bytes]],
+    evidence_root: str,
+    acquisition_url: str = "",
+    device: str = "",
+    network: str = "",
+    confirmed_difference: bool = False,
+) -> dict:
+    """Persist operator screenshots and mark the case for review, never auto-confirm it."""
+    if len(images) > 4:
+        raise ValueError("At most four operator screenshots are allowed")
+    target_url = _ensure_url(result.get("target_url", ""))
+    if not target_url:
+        raise ValueError("A valid checked URL is required before adding operator evidence")
+    parsed = urlsplit(target_url)
+    safe_domain = re.sub(r"[^a-zA-Z0-9._-]+", "_", parsed.hostname or "unknown")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    target_dir = os.path.join(evidence_root, safe_domain, f"{timestamp}_operator")
+    os.makedirs(target_dir, exist_ok=True)
+    saved = []
+    for index, (filename, data) in enumerate(images, start=1):
+        payload = bytes(data or b"")
+        if not payload or len(payload) > 10 * 1024 * 1024:
+            raise ValueError("Each evidence image must be between 1 byte and 10 MB")
+        extension = _image_extension(filename, payload)
+        path = os.path.join(target_dir, f"operator_{index}{extension}")
+        with open(path, "wb") as evidence_file:
+            evidence_file.write(payload)
+        saved.append({"path": path, "original_name": os.path.basename(filename)[:200]})
+    operator_evidence = {
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+        "acquisition_url": _ensure_url(acquisition_url) if acquisition_url else "",
+        "device": str(device or "").strip()[:100],
+        "network": str(network or "").strip()[:100],
+        "confirmed_difference": bool(confirmed_difference),
+        "screenshots": saved,
+    }
+    merged = merge_operator_evidence(result, operator_evidence)
+    merged["engine"] = "http_operator"
+    merged["evidence_path"] = save_evidence_manifest(merged, evidence_root)
+    merged["operator_evidence"]["manifest_path"] = merged["evidence_path"]
+    return merged
+
+
+def merge_operator_evidence(result: dict, operator_evidence: dict) -> dict:
+    """Merge already-persisted operator evidence, for worker resume/retry."""
+    merged = deepcopy(result)
+    merged["operator_evidence"] = deepcopy(operator_evidence or {})
+    manifest_path = str(merged["operator_evidence"].get("manifest_path") or "")
+    if manifest_path:
+        merged["evidence_path"] = manifest_path
+    saved = merged["operator_evidence"].get("screenshots") or []
+    confirmed_difference = bool(merged["operator_evidence"].get("confirmed_difference"))
+    if confirmed_difference and len(saved) >= 2:
+        if merged.get("verdict") == "NO_SIGNAL":
+            merged["verdict"] = "POSSIBLE"
+            merged["score"] = max(20, int(merged.get("score", 0)))
+        merged["manual_review_required"] = True
+        _add_signal(
+            merged.setdefault("signals", []), "operator_reported_difference", 0, [],
+            "Người vận hành cung cấp cặp ảnh cho thấy nội dung khác nhau",
+        )
+    return merged
+
+
 def _email_profile_label(profile: dict) -> str:
     name = str(profile.get("name") or "")
+    if name.startswith("vantage_"):
+        kind = "Mobile, Google referrer" if name.endswith("mobile_google") else "Desktop, direct visit"
+        return f"{kind}, remote vantage {profile.get('vantage') or 'unknown'}"
     return EMAIL_PROFILE_LABELS.get(name, name.replace("_", " ").title() or "Unknown profile")
 
 
@@ -643,6 +1091,8 @@ def _email_signal_detail(signal: dict, result: dict) -> str:
             iocs.extend((result.get("profiles") or {}).get(name, {}).get("known_iocs") or [])
         ioc_text = ", ".join(dict.fromkeys(iocs)) or "a known cloaking asset"
         return f"A known cloaking indicator was detected: {ioc_text}{suffix}."
+    if kind == "operator_reported_difference":
+        return "An operator supplied paired screenshots showing different content for the same URL."
     return f"An additional profile-specific response difference was detected{suffix}."
 
 
@@ -683,6 +1133,21 @@ def format_evidence_block(result: dict) -> str:
         for screenshot in playwright.get("screenshots") or []:
             if screenshot.get("path"):
                 lines.append(f"- Screenshot attachment: {os.path.basename(screenshot['path'])}")
+    operator = result.get("operator_evidence") or {}
+    if operator:
+        lines.extend([
+            "", "Operator-supplied verification:",
+            f"- Paired difference confirmed by operator: {bool(operator.get('confirmed_difference'))}",
+        ])
+        if operator.get("acquisition_url"):
+            lines.append(f"- Acquisition URL: {operator['acquisition_url']}")
+        if operator.get("device"):
+            lines.append(f"- Device: {operator['device']}")
+        if operator.get("network"):
+            lines.append(f"- Network/vantage: {operator['network']}")
+        for screenshot in operator.get("screenshots") or []:
+            if screenshot.get("path"):
+                lines.append(f"- Operator screenshot attachment: {os.path.basename(screenshot['path'])}")
     if result.get("evidence_path"):
         lines.extend(["", f"Local evidence manifest: {os.path.basename(result['evidence_path'])}"])
     lines.extend([

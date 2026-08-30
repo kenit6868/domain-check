@@ -438,7 +438,7 @@ def _precheck_report_recipients(domain: str) -> list[dict]:
 
 def _run_prechecked_domain(
     prepared, cfg, selected_accounts, include_vncert, events_path, stop_path,
-    sent_deliveries, approved_cloaking=False,
+    sent_deliveries, approved_cloaking=False, operator_cloaking_evidence=None,
 ):
     """Run the full investigation once, then send only after revalidating draft recipients."""
     target = prepared["target_url"]
@@ -448,11 +448,22 @@ def _run_prechecked_domain(
     result = pt.run_check(target, False, cfg)
     domain = result["domain"]
     cloaking = result.get("cloaking") or {"verdict": "NO_SIGNAL", "score": 0, "signals": []}
+    if operator_cloaking_evidence:
+        cloaking = pt.merge_operator_cloaking_evidence(cloaking, operator_cloaking_evidence)
+        result["cloaking"] = cloaking
     cloaking_verdict = cloaking.get("verdict", "INCONCLUSIVE")
-    if cloaking_verdict in {"POSSIBLE", "INCONCLUSIVE"} and not approved_cloaking:
-        cloaking = pt.run_cloaking_browser_check(target, cloaking)
+    coverage_gap = bool(
+        (cloaking.get("coverage") or {}).get("multi_vantage_recommended")
+    )
+    if (
+        cloaking_verdict in {"POSSIBLE", "INCONCLUSIVE"} or coverage_gap
+    ) and not approved_cloaking:
+        cloaking = pt.run_cloaking_browser_check(target, cloaking, cfg)
         result["cloaking"] = cloaking
         cloaking_verdict = cloaking.get("verdict", "INCONCLUSIVE")
+        coverage_gap = bool(
+            (cloaking.get("coverage") or {}).get("multi_vantage_recommended")
+        )
         if cloaking_verdict in {"LIKELY", "POSSIBLE"}:
             refreshed = pt.append_cloaking_evidence_to_drafts(result.get("drafts") or [], cloaking)
             if len(refreshed) != len(result.get("drafts") or []):
@@ -460,11 +471,22 @@ def _run_prechecked_domain(
                     str(result.get("drafts_error") or "")
                     + "; Cloaking evidence could not be appended to every draft"
                 ).strip("; ")
+    elif operator_cloaking_evidence and cloaking_verdict in {"LIKELY", "POSSIBLE"}:
+        refreshed = pt.append_cloaking_evidence_to_drafts(result.get("drafts") or [], cloaking)
+        if len(refreshed) != len(result.get("drafts") or []):
+            result["drafts_error"] = (
+                str(result.get("drafts_error") or "")
+                + "; Cloaking evidence could not be appended to every draft"
+            ).strip("; ")
     evidence_failed = (
         cloaking_verdict == "LIKELY"
         and "cloaking evidence" in str(result.get("drafts_error") or "").lower()
     )
-    needs_review = cloaking_verdict in {"POSSIBLE", "INCONCLUSIVE"} or evidence_failed
+    needs_review = (
+        cloaking_verdict in {"POSSIBLE", "INCONCLUSIVE"}
+        or evidence_failed
+        or coverage_gap
+    )
     if needs_review and not approved_cloaking:
         _append_event(events_path, {
             "type": "cloaking_manual_review", "domain": domain, "target_url": target,
@@ -482,6 +504,8 @@ def _run_prechecked_domain(
             "cloaking_score": cloaking.get("score", 0),
             "cloaking_signals": cloaking.get("signals") or [],
             "cloaking_evidence_path": cloaking.get("evidence_path", ""),
+            "cloaking_review_reason": "coverage_gap" if coverage_gap else "detector_signal",
+            "cloaking_result": cloaking,
         }, set(), False)
     evidence_path = str(cloaking.get("evidence_path") or "").strip()
     evidence_attachments = (
@@ -489,10 +513,16 @@ def _run_prechecked_domain(
         if cloaking_verdict in {"LIKELY", "POSSIBLE"} and os.path.isfile(evidence_path)
         else []
     )
-    evidence_attachments.extend(
-        screenshot.get("path") for screenshot in cloaking.get("screenshots") or []
-        if screenshot.get("path") and os.path.isfile(screenshot["path"])
-    )
+    if cloaking_verdict in {"LIKELY", "POSSIBLE"}:
+        evidence_attachments.extend(
+            screenshot.get("path") for screenshot in cloaking.get("screenshots") or []
+            if screenshot.get("path") and os.path.isfile(screenshot["path"])
+        )
+        evidence_attachments.extend(
+            screenshot.get("path")
+            for screenshot in (cloaking.get("operator_evidence") or {}).get("screenshots") or []
+            if screenshot.get("path") and os.path.isfile(screenshot["path"])
+        )
     mail, successful_accounts, stopped_during_send = _send_domain_drafts(
         domain, result.get("drafts") or [], send_cfg, include_vncert,
         events_path, stop_path, sent_deliveries=sent_deliveries,
@@ -507,6 +537,7 @@ def _run_prechecked_domain(
         "cloaking_signals": cloaking.get("signals") or [],
         "cloaking_evidence_path": cloaking.get("evidence_path", ""),
         "cloaking_approved": bool(approved_cloaking),
+        "cloaking_result": cloaking,
         **mail,
     }
     if mail.get("drafts_sendable", 0) == 0:
@@ -536,6 +567,7 @@ def run_job(job_path: str):
     force_precheck = bool(job.get("force_precheck", False))
     allowed_accounts = job.get("allowed_accounts")  # list of usernames, or None = all
     approved_cloaking_targets = set(job.get("approved_cloaking_targets") or [])
+    operator_cloaking_evidence = job.get("operator_cloaking_evidence") or {}
     cfg = pt.load_config()
 
     # Filter smtp_accounts to only those selected in the UI (if specified)
@@ -702,6 +734,7 @@ def run_job(job_path: str):
                         domain_result, successful_accounts, stopped_during_send = _run_prechecked_domain(
                             prepared, cfg, configured_accounts, include_vncert, events_path, stop_path,
                             sent_deliveries, approved_cloaking=target in approved_cloaking_targets,
+                            operator_cloaking_evidence=operator_cloaking_evidence.get(target),
                         )
                         domain = domain_result["domain"]
                     except Exception as exc:

@@ -776,6 +776,23 @@ def load_config():
     else:
         smtp_proxies = []
 
+    vantage_raw = cfg.get("cloaking", "vantage_points", fallback="").strip()
+    try:
+        parsed_vantages = json.loads(vantage_raw) if vantage_raw else []
+    except json.JSONDecodeError:
+        parsed_vantages = []
+    cloaking_vantage_points = [
+        {
+            "name": str(item.get("name") or "").strip(),
+            "country": str(item.get("country") or "").strip().upper(),
+            "proxy": str(item.get("proxy") or "").strip(),
+            "browser": bool(item.get("browser", False)),
+        }
+        for item in parsed_vantages
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+        and str(item.get("proxy") or "").strip()
+    ]
+
     return {
         "vt_api_key": cfg.get("api", "vt_api_key", fallback="") or os.environ.get("VT_API_KEY", ""),
         "gsb_api_key": cfg.get("api", "gsb_api_key", fallback="") or os.environ.get("GSB_API_KEY", ""),
@@ -786,6 +803,7 @@ def load_config():
         # Multi-account + proxy (mới)
         "smtp_accounts": smtp_accounts,
         "smtp_proxies": smtp_proxies,
+        "cloaking_vantage_points": cloaking_vantage_points,
         # Keys cũ giữ lại để backward compat với bất kỳ nơi nào còn dùng trực tiếp
         "smtp_host": cfg.get("smtp", "host", fallback=""),
         "smtp_port": cfg.getint("smtp", "port", fallback=587),
@@ -3068,7 +3086,7 @@ def append_reported_url_to_drafts(drafts: list, target_url: str) -> list:
     return updated
 
 
-def run_cloaking_check(target: str, mode: str = "full") -> dict:
+def run_cloaking_check(target: str, mode: str = "full", cfg: dict | None = None) -> dict:
     """Run the shared passive cloaking detector used by CLI, UI and worker.
 
     ``fast`` skips the extra ``/vi-vn/`` profiles. All network failures are
@@ -3079,6 +3097,7 @@ def run_cloaking_check(target: str, mode: str = "full") -> dict:
             target,
             include_path_variant=mode != "fast",
             evidence_root=CLOAKING_EVIDENCE_DIR,
+            vantage_points=(cfg or {}).get("cloaking_vantage_points") or [],
         )
     except Exception as exc:
         return {
@@ -3091,11 +3110,14 @@ def run_cloaking_check(target: str, mode: str = "full") -> dict:
         }
 
 
-def run_cloaking_browser_check(target: str, http_result: dict) -> dict:
+def run_cloaking_browser_check(
+    target: str, http_result: dict, cfg: dict | None = None,
+) -> dict:
     """Run passive Playwright verification and merge it with the HTTP result."""
     try:
         browser_result = cloaking_detector.probe_playwright_cloaking(
             target, evidence_root=CLOAKING_EVIDENCE_DIR,
+            vantage_points=(cfg or {}).get("cloaking_vantage_points") or [],
         )
     except Exception as exc:
         browser_result = {
@@ -3110,6 +3132,29 @@ def run_cloaking_browser_check(target: str, http_result: dict) -> dict:
     return cloaking_detector.merge_playwright_result(
         http_result, browser_result, evidence_root=CLOAKING_EVIDENCE_DIR,
     )
+
+
+def add_operator_cloaking_evidence(
+    cloaking_result: dict,
+    *,
+    images: list[tuple[str, bytes]],
+    acquisition_url: str = "",
+    device: str = "",
+    network: str = "",
+    confirmed_difference: bool = False,
+) -> dict:
+    """Save manually captured cloaking evidence and return the refreshed result."""
+    return cloaking_detector.add_operator_evidence(
+        cloaking_result, images=images, evidence_root=CLOAKING_EVIDENCE_DIR,
+        acquisition_url=acquisition_url, device=device, network=network,
+        confirmed_difference=confirmed_difference,
+    )
+
+
+def merge_operator_cloaking_evidence(
+    cloaking_result: dict, operator_evidence: dict,
+) -> dict:
+    return cloaking_detector.merge_operator_evidence(cloaking_result, operator_evidence)
 
 
 def append_cloaking_evidence_to_drafts(drafts: list, cloaking_result: dict) -> list:
@@ -3139,7 +3184,7 @@ def append_cloaking_evidence_to_drafts(drafts: list, cloaking_result: dict) -> l
 # Commands
 # --------------------------------------------------------------------------
 
-def run_cdn_check(target: str) -> dict:
+def run_cdn_check(target: str, cfg: dict | None = None) -> dict:
     """Pipeline tối giản: CDN/registrar plus passive multi-profile cloaking check."""
     domain = normalize_domain(target)
     who = get_whois_info(domain)
@@ -3151,7 +3196,7 @@ def run_cdn_check(target: str) -> dict:
         cdn_detected = []
     # Tra TLD registry từ bảng tĩnh (không cần mạng, không fallback IANA)
     registry_contact = _static_registry_lookup(domain)
-    cloaking = run_cloaking_check(target, mode="full")
+    cloaking = run_cloaking_check(target, mode="full", cfg=cfg)
     return {
         "domain": domain,
         "cloudflare": cf,
@@ -3420,7 +3465,7 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
     # Passive cloaking probes run in parallel with WHOIS/VT/GSB. The detector
     # itself executes independent desktop/mobile/referrer profiles concurrently.
     _cloaking_executor = _cf.ThreadPoolExecutor(max_workers=1)
-    _cloaking_future = _cloaking_executor.submit(run_cloaking_check, target_url, "full")
+    _cloaking_future = _cloaking_executor.submit(run_cloaking_check, target_url, "full", cfg)
 
     try:
         cert = get_cert_info(domain)

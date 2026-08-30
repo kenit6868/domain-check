@@ -8,6 +8,7 @@
 #### 1. Chặn trình duyệt người dùng (Safe Browsing & SmartScreen)
 *   **Google Safe Browsing Form**: [Báo cáo Google](https://safebrowsing.google.com/safebrowsing/report_phish/)
 *   **Microsoft SmartScreen Form**: [Báo cáo Microsoft](https://www.microsoft.com/wdsi/support/report-unsafe-site-guest)
+*   **Kênh cộng đồng Việt Nam**: Mở form [Chống Lừa Đảo](https://chongluadao.vn/report/reportphishing) và [Cốc Cốc Safe](https://safe.coccoc.com/) bằng các nút trong **Browser Blocking** của **Check Domain** hoặc **Quick Report**. Đây là bước thủ công; kiểm tra lại URL/bằng chứng trên form trước khi gửi.
 *   **Nội dung mẫu gửi báo cáo (tiếng Anh)**:
     ```
     The domain [DOMAIN_GIẢ_MẠO] is actively cloning our official website login panel to harvest customer passwords and OTP tokens. Please add this phishing URL to your browser security filters to safeguard users.
@@ -182,6 +183,15 @@ Nếu Registry của nước đó phớt lờ, gửi email trực tiếp tới t
 ---
 
 ### VI. KỊCH BẢN PLAYWRIGHT TỰ ĐỘNG HÓA THU THẬP BẰNG CHỨNG (GIAI ĐOẠN 2)
+
+Trong Domain Check Tool, các trang terminal do trình duyệt/nhà cung cấp tạo ra
+(ví dụ “Không thể truy cập trang web này”, lỗi DNS hoặc cảnh báo phishing của
+Cloudflare) không được dùng làm chênh lệch cloaking. Khi toàn bộ profile đều ở
+trạng thái này, kết quả là `BLOCKED_OR_UNAVAILABLE`; worker tiếp tục luồng gửi
+draft bình thường và không đính kèm ảnh lỗi. Đây không phải bằng chứng độc lập
+rằng registrar/registry đã thu hồi domain; cần đối chiếu WHOIS Hold và Check Link
+Status nếu cần kết luận takedown.
+
 Chạy script Python Playwright dưới đây để tự động hóa việc chụp ảnh toàn trang, trích xuất HTML nguồn, HAR log mạng và tính mã băm SHA256 để gửi báo cáo lạm dụng:
 
 ```python

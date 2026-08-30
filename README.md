@@ -36,8 +36,9 @@ Lệnh `check` sẽ tự động:
 - Kiểm tra VirusTotal + Google Safe Browsing (nếu có API key)
 - Ghi log vào `case_log.csv`
 - Sinh sẵn email báo cáo trong thư mục `reports/`
-- So sánh HTTP đa profile để phát hiện cloaking theo thiết bị, Google referrer
-  và đường dẫn `/vi-vn/`
+- So sánh sáu HTTP profile: desktop/Android/iPhone, trực tiếp/Google referrer và
+  Googlebot Smartphone; `/vi-vn/` chỉ là probe khám phá đường dẫn, không cộng điểm
+  cloaking khi trang gốc và trang 404 khác nhau
 
 ## Chạy giao diện web
 
@@ -61,6 +62,11 @@ Các trang (xem sidebar bên trái):
   minh thụ động bằng Playwright khi HTTP chưa đủ kết luận
 - **Domain Worker** — kiểm tra theo batch, tự xử lý bằng chứng cloaking và chặn
   gửi các trường hợp còn cần duyệt thủ công
+
+Trong khu vực **Browser Blocking** của **Check Domain** và **Quick Report** có
+thêm nút mở form báo cáo của **Chống Lừa Đảo** và **Cốc Cốc Safe**. Các nút chỉ
+mở trang chính thức ở tab mới để người vận hành tự điền/xác nhận; công cụ không
+tự gửi dữ liệu sang hai dịch vụ này.
 
 Web UI gọi thẳng cùng các hàm trong `phishing_toolkit.py` mà CLI dùng (không viết
 lại logic riêng), nên kết quả giữa CLI và web luôn khớp nhau.
@@ -125,26 +131,62 @@ nhắm tới nạn nhân tại Việt Nam. Dữ liệu trạng thái được l�
 
 ### Cơ chế cloaking trong worker
 
-Mỗi domain trước tiên được kiểm tra bằng nhiều HTTP profile. Kết quả có bốn mức:
+Mỗi domain trước tiên được kiểm tra bằng sáu HTTP profile. Detector tách riêng
+**kết luận cloaking** (nội dung có đổi theo profile hay không) và **kết luận nội
+dung** (nội dung cờ bạc có đang công khai hay chỉ xuất hiện ở một số profile).
+Do đó, một URL cờ bạc công khai có thể là `GAMBLING_EXPOSED` nhưng vẫn
+`NO_SIGNAL` về cloaking. Trang `/vi-vn/` trả 404 khác trang gốc cũng không còn bị
+coi là cloaking. Kết quả cloaking có bốn mức:
 
 - `LIKELY`: bằng chứng đủ mạnh; draft được bổ sung phần kỹ thuật, manifest JSON
   được đính kèm và worker tiếp tục gửi tự động.
 - `POSSIBLE` hoặc `INCONCLUSIVE`: worker tự chạy Playwright headless với desktop
-  trực tiếp và mobile từ Google. Playwright chỉ tải trang, đọc DOM/tài nguyên và
-  chụp ảnh; không click, nhập liệu hay gửi form.
+  trực tiếp, Android từ Google và iPhone từ Google. Mỗi profile được quan sát sau
+  1 giây, 5 giây và sau warm reload. Playwright chỉ tải trang, đọc DOM/tài nguyên
+  và chụp ảnh; không click, nhập liệu hay gửi form.
+- Nếu response khai báo biến theo cả quốc gia/IP và thiết bị nhưng chưa có vantage
+  ngoài mạng hiện tại, worker cũng chạy Playwright rồi chuyển domain sang manual
+  review nếu vẫn thiếu độ phủ; `NO_SIGNAL` trong trường hợp này không được tự gửi.
 - Nếu Playwright nâng kết quả lên `LIKELY`, worker đính kèm manifest cùng ảnh và
   tiếp tục gửi. Nếu vẫn chưa chắc chắn, domain chuyển sang **Cần duyệt cloaking**
   và không gửi email.
+- Nếu toàn bộ profile hiển thị cảnh báo phishing của Cloudflare hoặc trang lỗi
+  trình duyệt như **Không thể truy cập trang web này**, detector ghi nhận
+  `BLOCKED_OR_UNAVAILABLE` và bỏ các trang đó khỏi phép tính cloaking. Worker
+  không yêu cầu duyệt cloaking, không đính kèm ảnh lỗi và tiếp tục gửi draft bình
+  thường. Trạng thái này không tự khẳng định domain đã bị thu hồi; WHOIS Hold/link
+  status vẫn là nguồn xác nhận riêng.
 - Sau khi xem tín hiệu/manifest trên trang Domain Worker, chọn các domain đã duyệt
   trong ô **Domain cloaking đã duyệt để retry**, rồi bấm retry. Cache gửi vẫn ngăn
   gửi trùng những email đã thành công.
+- Nếu bạn đã tự quan sát cùng URL hiển thị khác nhau, mở **Bổ sung bằng chứng
+  cloaking thủ công** ở Check Domain hoặc form tương ứng trong Domain Worker, tải
+  2–4 ảnh PNG/JPEG/WebP và xác nhận cặp ảnh. Tool lưu ảnh/manifest, chỉ nâng tối đa
+  lên `POSSIBLE` và vẫn bắt buộc duyệt trước khi retry. Sau khi duyệt, manifest và
+  các ảnh này được đính kèm email.
 
 Trên **Check Domain** và **Quick Report**, HTTP detector chạy cùng thao tác check.
 Khi kết quả là `POSSIBLE`/`INCONCLUSIVE`, nút xác minh Playwright xuất hiện để
 người dùng chủ động chạy bước trình duyệt nặng hơn. Bằng chứng nằm trong
 `evidence/cloaking/`; nội dung trang đầy đủ không được đưa vào giao diện hoặc
-manifest, chỉ giữ preview, hash, metadata và ảnh chụp.
+manifest, chỉ giữ preview, hash, metadata và ảnh chụp. Gallery ảnh Playwright
+hiển thị dạng thumbnail nhỏ trên một hàng để phục vụ đối chiếu nhanh.
 
 Phần cloaking được chèn vào email nhà cung cấp luôn được soạn bằng tiếng Anh.
 Nhãn/mô tả tiếng Việt chỉ dùng trong giao diện nội bộ; page title và matched
 keyword có thể giữ nguyên ngôn ngữ của website vì đó là dữ liệu bằng chứng.
+
+### Cấu hình vantage mạng cho cloaking
+
+Khi website chỉ lộ nội dung ở một quốc gia/IP khác, cấu hình proxy điều tra trong
+`config.ini` theo schema của `config.example.ini`. Không dùng proxy SMTP ở mục
+`[smtp]` cho detector. Ví dụ placeholder:
+
+```ini
+[cloaking]
+vantage_points = [{"name":"VN mobile","country":"VN","proxy":"http://user:password@proxy.example:8080","browser":true}]
+```
+
+Mỗi vantage thêm một desktop trực tiếp và một mobile Google vào lớp HTTP;
+`browser=true` thêm mobile Google vào Playwright. Tên/quốc gia được ghi vào
+manifest, còn URL proxy và credential không được ghi vào evidence hoặc UI.

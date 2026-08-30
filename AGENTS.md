@@ -62,6 +62,14 @@ Không tự khởi động Streamlit nếu người dùng chưa yêu cầu. Buil
 - Cloaking luôn chạy HTTP đa profile trước. Playwright chỉ là lớp xác minh thụ
   động cho kết quả chưa chắc chắn; không click, type hoặc submit. Worker không
   gửi `POSSIBLE`/`INCONCLUSIVE` nếu chưa có phê duyệt thủ công được lưu trong job.
+- Path probe như `/vi-vn/` chỉ dùng khám phá, không cộng điểm cloaking. Verdict
+  nội dung nhạy cảm tách khỏi verdict cloaking. Proxy/vantage không được lộ
+  credential trong evidence; ảnh thủ công chỉ nâng tối đa `POSSIBLE` và luôn cần
+  approve + retry trước khi worker gửi.
+- Cảnh báo phishing Cloudflare và trang lỗi trình duyệt/DNS là terminal page,
+  không phải bằng chứng cloaking. Khi toàn bộ profile terminal, dùng
+  `BLOCKED_OR_UNAVAILABLE`, bỏ manual review cloaking và tiếp tục gửi draft;
+  không khẳng định domain đã bị thu hồi nếu chưa có WHOIS Hold/link status.
 - Draft/email gửi nhà cung cấp phải dùng tiếng Anh; formatter external không
   được lấy nguyên label/detail tiếng Việt từ UI. Chỉ dữ liệu chứng cứ nguyên gốc
   như title hoặc matched keyword được phép giữ ngôn ngữ của website.
@@ -158,11 +166,39 @@ vào phần này.
   `cloaking_detector.py`, `tests/test_cloaking_detector.py`; đã kiểm tra: test
   formatter chuyên biệt và 81/81 full suite; tài liệu: `README.md`, file này và
   skill dự án.
+- 2026-08-29 — Hoàn thiện detector cloaking theo path/profile/vantage: `/vi-vn/`
+  404 không còn tạo false positive; tách verdict nội dung khỏi cloaking; HTTP có
+  sáu profile + Client Hints/Googlebot, Playwright có ba profile và ba mốc quan
+  sát; hỗ trợ vantage proxy không lộ credential, coverage gap fail closed sang
+  manual review, upload 2–4 ảnh thủ công ở Check Domain/worker và đính kèm sau
+  approve + retry; file chính: `cloaking_detector.py`, `cloaking_ui.py`,
+  `phishing_toolkit.py`, `domain_worker.py`, `pages/1_Check_Domain.py`,
+  `pages/6_Domain_Worker.py`, `pages/7_Quick_Report.py`, `config.example.ini`;
+  đã kiểm tra: 95/95 unittest, focused gates, py_compile và AppTest 4 page; tài
+  liệu: `README.md`, `huong-dan-phat-hien-cloaking.md`, file này và skill dự án;
+  lưu ý: vantage thật cần proxy điều tra do người vận hành cấu hình.
+- 2026-08-30 — Loại terminal page khỏi cloaking và thu gọn ảnh: nhận diện cảnh
+  báo phishing Cloudflare cùng trang lỗi trình duyệt/DNS, gắn
+  `BLOCKED_OR_UNAVAILABLE`, xóa nghi ngờ cloaking cũ khi mọi Playwright profile
+  đều terminal, cho worker gửi bình thường mà không đính ảnh lỗi; gallery ảnh
+  Playwright dùng thumbnail 160 px trên hàng ngang; file chính:
+  `cloaking_detector.py`, `cloaking_ui.py`, `domain_worker.py`, test detector và
+  worker; đã kiểm tra: 100/100 unittest, focused gate và AppTest 4 page; tài liệu:
+  `README.md`, `huong-dan-phat-hien-cloaking.md`, `03_Technical_Guide.md`, file
+  này và skill dự án.
+- 2026-08-30 — Bổ sung form báo cáo cộng đồng: thêm nút mở Chống Lừa Đảo và Cốc
+  Cốc Safe trong Browser Blocking của Check Domain/Quick Report; chỉ mở tab mới,
+  không tự submit; file chính: `community_report_ui.py`,
+  `pages/1_Check_Domain.py`, `pages/7_Quick_Report.py`, test UI dùng chung; đã
+  kiểm tra: focused unittest/py_compile và full suite/AppTest; tài liệu:
+  `README.md`, `huong-dan-phat-hien-cloaking.md`, `03_Technical_Guide.md`, file
+  này; lưu ý: không đổi invariant của skill dự án.
 
 ## Baseline chất lượng hiện tại
 
 Nhóm `link_status` đã thống nhất Cloudflare warning/HTTP 403 là `BLOCKED`, không
 phải `LIVE` hay `DIE`; mock response không iterable được xử lý an toàn. Toàn bộ
-test phải xanh trước khi bàn giao thay đổi lõi. Detector cloaking có test thuần
-cho scoring/profile comparison và fake browser cho Playwright; không dùng URL
-nghi ngờ hay SMTP thật trong test.
+test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 101 test.
+Detector cloaking có test thuần cho scoring/profile/path/vantage, fake browser
+cho Playwright và mock attachment worker; không dùng URL nghi ngờ hay SMTP thật
+trong test.

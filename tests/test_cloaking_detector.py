@@ -88,7 +88,7 @@ class CloakingDetectorTests(unittest.TestCase):
         self.assertIn(result["verdict"], {"POSSIBLE", "LIKELY"})
         self.assertIn("keyword_exposure", {item["kind"] for item in result["signals"]})
 
-    def test_vi_vn_path_difference_is_compared(self):
+    def test_vi_vn_path_difference_is_discovery_not_cloaking(self):
         profiles = self.base_profiles()
         profiles["desktop_direct_vi_vn"] = profile(
             "desktop_direct_vi_vn", text="casino tài xỉu nạp tiền", size=80_000,
@@ -97,8 +97,42 @@ class CloakingDetectorTests(unittest.TestCase):
         )
         result = cd.analyze_profiles(profiles, "https://example.test/")
         compared = [item["profiles"] for item in result["comparisons"]]
-        self.assertIn(["desktop_direct", "desktop_direct_vi_vn"], compared)
-        self.assertIn("keyword_exposure", {item["kind"] for item in result["signals"]})
+        self.assertNotIn(["desktop_direct", "desktop_direct_vi_vn"], compared)
+        self.assertEqual(result["verdict"], "NO_SIGNAL")
+        self.assertEqual(result["path_probes"][0]["status"], "SENSITIVE_CONTENT")
+        self.assertFalse(result["path_probes"][0]["contributes_to_cloaking"])
+
+    def test_missing_vi_vn_path_does_not_make_exposed_gambling_cloaking(self):
+        profiles = {
+            name: profile(
+                name, text="casino betting nạp tiền rút tiền", size=81_640,
+                title="Casino", keywords=["casino", "betting", "nạp tiền", "rút tiền"],
+            )
+            for name in ("desktop_direct", "mobile_direct", "desktop_google", "mobile_google")
+        }
+        profiles["desktop_direct_vi_vn"] = profile(
+            "desktop_direct_vi_vn", text="404 not found casino", size=43_875,
+            title="Page Not Found", keywords=["casino"], fake_404=True,
+            final_url="https://example.test/vi-vn/",
+        )
+        profiles["desktop_direct_vi_vn"]["status_code"] = 404
+        profiles["mobile_google_vi_vn"] = dict(
+            profiles["desktop_direct_vi_vn"], name="mobile_google_vi_vn",
+            label="mobile google vi vn",
+        )
+        result = cd.analyze_profiles(profiles, "https://example.test/")
+        self.assertEqual(result["verdict"], "NO_SIGNAL")
+        self.assertEqual(result["score"], 0)
+        self.assertEqual(result["content"]["verdict"], "GAMBLING_EXPOSED")
+        self.assertTrue(all(item["status"] == "NOT_FOUND" for item in result["path_probes"]))
+
+    def test_failed_path_variant_does_not_make_base_profiles_inconclusive(self):
+        profiles = self.base_profiles()
+        profiles["desktop_direct_vi_vn"] = profile("desktop_direct_vi_vn", error="timeout")
+        profiles["mobile_google_vi_vn"] = profile("mobile_google_vi_vn", error="timeout")
+        result = cd.analyze_profiles(profiles, "https://example.test/")
+        self.assertEqual(result["verdict"], "NO_SIGNAL")
+        self.assertEqual(result["profiles_failed"], 0)
 
     def test_known_asset_is_a_strong_likely_signal(self):
         profiles = self.base_profiles()
@@ -115,6 +149,134 @@ class CloakingDetectorTests(unittest.TestCase):
         result = cd.analyze_profiles(profiles, "https://example.test/")
         self.assertEqual(result["verdict"], "LIKELY")
 
+    def test_http_profiles_include_client_hints_iphone_and_googlebot(self):
+        specs = {item["name"]: item for item in cd._profile_specs("https://example.test/", False)}
+        self.assertEqual(specs["mobile_google"]["client_hints"]["Sec-CH-UA-Mobile"], "?1")
+        self.assertIn("iphone_google", specs)
+        self.assertIn("Googlebot", specs["googlebot_smartphone"]["user_agent"])
+
+    @patch.object(cd.requests, "Session")
+    def test_mirror_route_in_rewrite_header_is_detected(self, session_class):
+        class FakeResponse:
+            status_code = 200
+            url = "https://example.test/"
+            encoding = "utf-8"
+            history = []
+            headers = {"x-middleware-rewrite": "/mirror-document/mobile"}
+
+            def iter_content(self, chunk_size):
+                return iter([b"<html><body>ok</body></html>"])
+
+            def close(self):
+                return None
+
+        session = session_class.return_value
+        session.get.return_value = FakeResponse()
+        fetched = cd._fetch_profile(
+            cd._profile_specs("https://example.test/", False)[1], 5, 100_000,
+        )
+        self.assertTrue(fetched["mirror_document_header"])
+        self.assertEqual(fetched["mirror_document_routes"], ["/mirror-document/mobile"])
+
+    def test_geo_vary_header_recommends_multi_vantage_without_false_cloaking(self):
+        profiles = self.base_profiles()
+        for item in profiles.values():
+            item["headers"] = {
+                "Vary": "Accept-Encoding, CF-IPCountry, User-Agent, Sec-CH-UA-Mobile",
+            }
+        result = cd.analyze_profiles(profiles, "https://example.test/")
+        self.assertEqual(result["verdict"], "NO_SIGNAL")
+        self.assertTrue(result["coverage"]["geo_dependent_declared"])
+        self.assertTrue(result["coverage"]["multi_vantage_recommended"])
+
+    @patch.object(cd, "_fetch_profile")
+    def test_remote_vantage_can_reveal_profile_dependent_content(self, fetch):
+        def fake_fetch(spec, _timeout, _max_bytes):
+            if spec["name"].endswith("mobile_google") and spec["name"].startswith("vantage_"):
+                item = profile(
+                    spec["name"], text="casino betting nạp tiền", size=70_000,
+                    title="Casino", keywords=["casino", "betting", "nạp tiền"],
+                )
+            else:
+                item = profile(spec["name"], text="Đổi Làn game", size=10_000, title="Đổi Làn")
+            item.update({
+                "label": spec["label"], "vantage": spec.get("vantage", "local"),
+                "vantage_country": spec.get("vantage_country", ""),
+            })
+            return item
+
+        fetch.side_effect = fake_fetch
+        result = cd.probe_http_cloaking(
+            "https://example.test/vn/", include_path_variant=False,
+            vantage_points=[{
+                "name": "vn-mobile", "country": "VN",
+                "proxy": "socks5://secret-user:secret-pass@proxy.example:1080",
+            }],
+        )
+        self.assertEqual(result["verdict"], "LIKELY")
+        self.assertEqual(result["coverage"]["vantages_attempted"], ["vn-mobile"])
+        self.assertNotIn("secret-pass", json.dumps(result))
+
+    def test_playwright_proxy_settings_separate_credentials(self):
+        settings = cd._playwright_proxy_settings(
+            "socks5://user%40example.com:p%40ss@proxy.example:1080",
+        )
+        self.assertEqual(settings["server"], "socks5://proxy.example:1080")
+        self.assertEqual(settings["username"], "user@example.com")
+        self.assertEqual(settings["password"], "p@ss")
+
+    def test_playwright_proxy_error_does_not_expose_credentials(self):
+        class BrokenBrowser:
+            def new_context(self, **_kwargs):
+                raise RuntimeError("proxy password secret-pass rejected")
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = cd._capture_browser_profile(
+                BrokenBrowser(),
+                {
+                    "name": "remote", "label": "Remote",
+                    "url": "https://example.test/", "user_agent": cd.MOBILE_UA,
+                    "referrer": "", "viewport": {"width": 412, "height": 915},
+                    "is_mobile": True,
+                    "proxy_settings": {
+                        "server": "http://proxy.example:8080",
+                        "username": "user", "password": "secret-pass",
+                    },
+                },
+                directory,
+                1000,
+            )
+        self.assertIn("browser proxy request failed", result["error"])
+        self.assertNotIn("secret-pass", result["error"])
+
+    def test_operator_pair_marks_possible_and_saves_evidence(self):
+        result = cd.analyze_profiles(self.base_profiles(), "https://example.test/")
+        png = b"\x89PNG\r\n\x1a\noperator-evidence"
+        with tempfile.TemporaryDirectory() as directory:
+            updated = cd.add_operator_evidence(
+                result, images=[("desktop.png", png), ("mobile.png", png)],
+                evidence_root=directory,
+                acquisition_url="https://example.test/?source=google",
+                device="Android phone", network="Vietnam mobile network",
+                confirmed_difference=True,
+            )
+            self.assertEqual(updated["verdict"], "POSSIBLE")
+            self.assertTrue(updated["manual_review_required"])
+            self.assertTrue(os.path.isfile(updated["evidence_path"]))
+            self.assertEqual(len(updated["operator_evidence"]["screenshots"]), 2)
+            block = cd.format_evidence_block(updated)
+            self.assertIn("Operator-supplied verification", block)
+            self.assertIn("paired screenshots showing different content", block)
+
+    def test_operator_evidence_rejects_fake_image(self):
+        result = cd.analyze_profiles(self.base_profiles(), "https://example.test/")
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ValueError):
+                cd.add_operator_evidence(
+                    result, images=[("fake.png", b"not-an-image")],
+                    evidence_root=directory,
+                )
+
     def test_failures_without_evidence_are_inconclusive(self):
         profiles = self.base_profiles()
         profiles["desktop_direct"] = profile("desktop_direct", error="timeout")
@@ -123,6 +285,63 @@ class CloakingDetectorTests(unittest.TestCase):
         result = cd.analyze_profiles(profiles, "https://example.test/")
         self.assertEqual(result["verdict"], "INCONCLUSIVE")
         self.assertTrue(result["manual_review_required"])
+
+    def test_browser_error_pages_are_not_cloaking(self):
+        profiles = {
+            name: profile(
+                name,
+                title="Không thể truy cập trang web này",
+                text="Không thể truy cập trang web này DNS_PROBE_FINISHED_NXDOMAIN",
+                size=4200,
+            )
+            for name in self.base_profiles()
+        }
+        result = cd.analyze_profiles(profiles, "https://example.test/")
+        self.assertEqual(result["verdict"], "NO_SIGNAL")
+        self.assertEqual(result["score"], 0)
+        self.assertFalse(result["manual_review_required"])
+        self.assertTrue(result["site_state"]["all_profiles_terminal"])
+        self.assertEqual(result["site_state"]["verdict"], "BLOCKED_OR_UNAVAILABLE")
+
+    def test_cloudflare_phishing_warning_is_not_cloaking(self):
+        profiles = self.base_profiles()
+        for item in profiles.values():
+            item.update({
+                "title": "Suspected phishing site | Cloudflare",
+                "visible_text": "This website has been reported for potential phishing.",
+                "text_preview": "This website has been reported for potential phishing.",
+                "headers": {"Server": "cloudflare", "CF-Ray": "test"},
+            })
+        result = cd.analyze_profiles(profiles, "https://example.test/")
+        self.assertEqual(result["verdict"], "NO_SIGNAL")
+        self.assertTrue(result["site_state"]["all_profiles_terminal"])
+        self.assertEqual(
+            set(result["site_state"]["terminal_profiles"].values()),
+            {"CLOUDFLARE_PHISHING_BLOCK"},
+        )
+
+    def test_terminal_playwright_result_clears_stale_http_suspicion(self):
+        http_result = {
+            "verdict": "POSSIBLE", "score": 35,
+            "signals": [{"kind": "content_difference", "weight": 25}],
+            "manual_review_required": True,
+            "coverage": {"multi_vantage_recommended": True},
+        }
+        browser_result = {
+            "verdict": "NO_SIGNAL", "score": 0, "signals": [],
+            "site_state": {
+                "verdict": "BLOCKED_OR_UNAVAILABLE",
+                "all_profiles_terminal": True,
+                "terminal_profiles": {"desktop_direct": "UNREACHABLE_ERROR_PAGE"},
+            },
+            "screenshots": [{"path": "error.png"}],
+        }
+        merged = cd.merge_playwright_result(http_result, browser_result)
+        self.assertEqual(merged["verdict"], "NO_SIGNAL")
+        self.assertEqual(merged["score"], 0)
+        self.assertEqual(merged["signals"], [])
+        self.assertFalse(merged["manual_review_required"])
+        self.assertFalse(merged["coverage"]["multi_vantage_recommended"])
 
     def test_small_dynamic_difference_does_not_flag(self):
         profiles = self.base_profiles()
@@ -174,7 +393,10 @@ class CloakingDetectorTests(unittest.TestCase):
             self.assertTrue(os.path.isfile(result["evidence_path"]))
         self.assertEqual(
             list(result["profiles"]),
-            ["desktop_direct", "mobile_direct", "desktop_google", "mobile_google"],
+            [
+                "desktop_direct", "mobile_direct", "desktop_google", "mobile_google",
+                "iphone_google", "googlebot_smartphone",
+            ],
         )
 
     def test_evidence_block_is_factual_and_omits_no_signal(self):
@@ -232,6 +454,9 @@ class CloakingDetectorTests(unittest.TestCase):
 
             def wait_for_timeout(self, _milliseconds):
                 return None
+
+            def reload(self, **_kwargs):
+                return FakeResponse()
 
             def content(self):
                 if self.mobile:
@@ -296,11 +521,12 @@ class CloakingDetectorTests(unittest.TestCase):
                 _playwright_factory=lambda: FakePlaywright(browser),
             )
             self.assertEqual(result["verdict"], "LIKELY")
-            self.assertEqual(len(result["screenshots"]), 2)
+            self.assertEqual(len(result["screenshots"]), 9)
             self.assertTrue(all(os.path.isfile(item["path"]) for item in result["screenshots"]))
             self.assertTrue(os.path.isfile(result["evidence_path"]))
         self.assertIsNone(browser.contexts[0].page.goto_args[1]["referer"])
         self.assertEqual(browser.contexts[1].page.goto_args[1]["referer"], cd.GOOGLE_REFERRER)
+        self.assertEqual(browser.contexts[2].page.goto_args[1]["referer"], cd.GOOGLE_REFERRER)
 
     def test_playwright_likely_upgrades_http_possible(self):
         http_result = cd.analyze_profiles(self.base_profiles(), "https://example.test/")

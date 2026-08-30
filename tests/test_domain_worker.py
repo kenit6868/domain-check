@@ -430,6 +430,79 @@ class DomainWorkerTests(unittest.TestCase):
             with open(events_path, encoding="utf-8") as event_file:
                 self.assertIn("cloaking_manual_review", event_file.read())
 
+    def test_terminal_browser_page_skips_cloaking_review_and_sends_normally(self):
+        initial = {
+            "domain": "target.example", "drafts": ["report.txt"],
+            "reputation": {"verdict": "suspicious"},
+            "cloaking": {
+                "verdict": "POSSIBLE", "score": 30,
+                "signals": [{"kind": "content_difference"}],
+            },
+        }
+        terminal = {
+            "verdict": "NO_SIGNAL", "score": 0, "signals": [],
+            "manual_review_required": False,
+            "coverage": {"multi_vantage_recommended": False},
+            "site_state": {
+                "verdict": "BLOCKED_OR_UNAVAILABLE",
+                "all_profiles_terminal": True,
+            },
+            "screenshots": [{"path": "browser-error.png"}],
+        }
+        mail = {
+            "drafts_total": 1, "drafts_sendable": 1, "sent_ok": 1,
+            "sent_failed": 0, "already_sent": 0, "sent_to": [],
+        }
+        with tempfile.TemporaryDirectory() as job_dir:
+            with (
+                patch.object(domain_worker.pt, "run_check", return_value=initial),
+                patch.object(
+                    domain_worker.pt, "run_cloaking_browser_check", return_value=terminal,
+                ) as browser_check,
+                patch.object(
+                    domain_worker, "_send_domain_drafts",
+                    return_value=(mail, set(), False),
+                ) as send,
+            ):
+                domain_result, _accounts, _stopped = domain_worker._run_prechecked_domain(
+                    {"target_url": "https://target.example/"}, {}, [], False,
+                    os.path.join(job_dir, "events.jsonl"), None, set(),
+                )
+        browser_check.assert_called_once()
+        self.assertTrue(domain_result["success"])
+        self.assertEqual(domain_result["cloaking_verdict"], "NO_SIGNAL")
+        self.assertEqual(send.call_args.kwargs["attachments"], [])
+
+    def test_geo_device_coverage_gap_requires_manual_review(self):
+        result = {
+            "domain": "target.example", "drafts": ["unused.txt"],
+            "reputation": {"verdict": "suspicious"},
+            "cloaking": {
+                "verdict": "NO_SIGNAL", "score": 0, "signals": [],
+                "coverage": {"multi_vantage_recommended": True},
+            },
+        }
+        browser_result = dict(result["cloaking"])
+        browser_result["playwright"] = {"available": True, "verdict": "NO_SIGNAL"}
+        with tempfile.TemporaryDirectory() as job_dir:
+            with (
+                patch.object(domain_worker.pt, "run_check", return_value=result),
+                patch.object(
+                    domain_worker.pt, "run_cloaking_browser_check",
+                    return_value=browser_result,
+                ) as browser_check,
+                patch.object(domain_worker, "_send_domain_drafts") as send,
+            ):
+                domain_result, _accounts, stopped = domain_worker._run_prechecked_domain(
+                    {"target_url": "https://target.example/"}, {}, [], False,
+                    os.path.join(job_dir, "events.jsonl"), None, set(),
+                )
+        self.assertFalse(stopped)
+        browser_check.assert_called_once()
+        send.assert_not_called()
+        self.assertEqual(domain_result["skipped"], "manual_review_required")
+        self.assertEqual(domain_result["cloaking_review_reason"], "coverage_gap")
+
     def test_likely_cloaking_sends_with_evidence_attachment(self):
         with tempfile.TemporaryDirectory() as job_dir:
             evidence_path = os.path.join(job_dir, "cloaking-evidence.json")
@@ -527,6 +600,53 @@ class DomainWorkerTests(unittest.TestCase):
         self.assertTrue(domain_result["success"])
         self.assertTrue(domain_result["cloaking_approved"])
         send.assert_called_once()
+
+    def test_approved_operator_evidence_is_attached_on_retry(self):
+        result = {
+            "domain": "target.example", "drafts": ["report.txt"],
+            "reputation": {"verdict": "suspicious"},
+            "cloaking": {
+                "target_url": "https://target.example/",
+                "verdict": "NO_SIGNAL", "score": 0, "signals": [],
+            },
+        }
+        mail = {
+            "drafts_total": 1, "drafts_sendable": 1, "sent_ok": 1,
+            "sent_failed": 0, "already_sent": 0, "sent_to": [],
+        }
+        with tempfile.TemporaryDirectory() as job_dir:
+            manifest = os.path.join(job_dir, "operator.json")
+            desktop = os.path.join(job_dir, "desktop.png")
+            mobile = os.path.join(job_dir, "mobile.png")
+            for path in (manifest, desktop, mobile):
+                with open(path, "wb") as evidence_file:
+                    evidence_file.write(b"evidence")
+            operator = {
+                "confirmed_difference": True,
+                "manifest_path": manifest,
+                "screenshots": [{"path": desktop}, {"path": mobile}],
+            }
+            with (
+                patch.object(domain_worker.pt, "run_check", return_value=result),
+                patch.object(
+                    domain_worker.pt, "append_cloaking_evidence_to_drafts",
+                    return_value=["report.txt"],
+                ),
+                patch.object(
+                    domain_worker, "_send_domain_drafts",
+                    return_value=(mail, set(), False),
+                ) as send,
+            ):
+                domain_result, _accounts, _stopped = domain_worker._run_prechecked_domain(
+                    {"target_url": "https://target.example/"}, {}, [], False,
+                    os.path.join(job_dir, "events.jsonl"), None, set(),
+                    approved_cloaking=True, operator_cloaking_evidence=operator,
+                )
+        self.assertEqual(domain_result["cloaking_verdict"], "POSSIBLE")
+        self.assertEqual(
+            send.call_args.kwargs["attachments"],
+            [manifest, desktop, mobile],
+        )
 
 
 if __name__ == "__main__":

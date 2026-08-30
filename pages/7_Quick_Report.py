@@ -20,6 +20,7 @@ import streamlit.components.v1 as components
 
 import phishing_toolkit as pt
 from cloaking_ui import render_cloaking_result
+from community_report_ui import render_community_report_buttons
 
 _MAX_CHECK_WORKERS = 1
 _FILTER_CACHE_PATH = pt._runtime_path("quick_report_filter_cache.json")
@@ -222,7 +223,7 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                 help="Chỉ tải và chụp trang bằng 2 profile; không click hay gửi form.",
             ):
                 with st.spinner("Đang xác minh thụ động..."):
-                    result["cloaking"] = pt.run_cloaking_browser_check(original_url, cloaking)
+                    result["cloaking"] = pt.run_cloaking_browser_check(original_url, cloaking, cfg)
                 st.rerun()
 
         st.divider()
@@ -271,6 +272,7 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
             else:
                 st.error(f"❌ Netcraft {status_text}")
 
+        render_community_report_buttons()
         st.caption("Nội dung dán vào ô Additional details:")
         st.code(gsb_text, language=None)
 
@@ -323,12 +325,16 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                                    type="primary")
 
 
-def _run_one_cdn_check(target: str, urlscan_api_key: str = "") -> dict:
+def _run_one_cdn_check(
+    target: str, urlscan_api_key: str = "", cloaking_vantage_points: list | None = None,
+) -> dict:
     """Check one target and always return a renderable result."""
     raw = target.strip()
     domain = pt.normalize_domain(raw)
     try:
-        result = pt.run_cdn_check(raw)
+        result = pt.run_cdn_check(
+            raw, {"cloaking_vantage_points": cloaking_vantage_points or []},
+        )
     except Exception as exc:
         result = {
             "domain": domain,
@@ -456,7 +462,10 @@ if go:
         })
         urlscan_api_key = cfg.get("urlscan_api_key") or ""
         cache["pending"] = {
-            i: executor.submit(_run_one_cdn_check, target, urlscan_api_key)
+            i: executor.submit(
+                _run_one_cdn_check, target, urlscan_api_key,
+                cfg.get("cloaking_vantage_points") or [],
+            )
             for i, target in enumerate(domains)
         }
         st.info(

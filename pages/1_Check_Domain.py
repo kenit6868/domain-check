@@ -14,6 +14,7 @@ import streamlit as st
 
 import phishing_toolkit as pt
 from cloaking_ui import render_cloaking_result
+from community_report_ui import render_community_report_buttons
 from email_send_ui import render_send_email_ui, render_send_all_ui
 
 st.set_page_config(page_title="Check Domain", page_icon="🔍", layout="wide")
@@ -161,7 +162,7 @@ if "check_domain_result" in st.session_state:
             if st.button("Xác minh thụ động bằng Playwright", icon=":material/screenshot_monitor:"):
                 with st.spinner("Đang xác minh bằng trình duyệt thụ động..."):
                     updated_cloaking = pt.run_cloaking_browser_check(
-                        cloaking.get("target_url") or domain, cloaking,
+                        cloaking.get("target_url") or domain, cloaking, cfg,
                     )
                     result["cloaking"] = updated_cloaking
                     if updated_cloaking.get("verdict") in {"LIKELY", "POSSIBLE"}:
@@ -170,6 +171,61 @@ if "check_domain_result" in st.session_state:
                         )
                     st.session_state["check_domain_result"] = result
                 st.rerun()
+        with st.expander("Bổ sung bằng chứng cloaking thủ công", expanded=False):
+            st.caption(
+                "Dùng khi cùng một URL hiển thị nội dung khác nhau trên hai thiết bị hoặc mạng. "
+                "Bằng chứng này luôn cần người vận hành duyệt và không tự nâng lên LIKELY."
+            )
+            with st.form("operator_cloaking_evidence_form", clear_on_submit=False):
+                acquisition_url = st.text_input(
+                    "URL đã chụp",
+                    value=cloaking.get("target_url") or str(domain),
+                    help="Nhập đúng cùng một URL xuất hiện trong các ảnh.",
+                )
+                evidence_device = st.selectbox(
+                    "Thiết bị quan sát",
+                    ["desktop and mobile", "desktop", "Android", "iPhone", "other"],
+                )
+                evidence_network = st.selectbox(
+                    "Mạng / nguồn truy cập",
+                    ["direct and Google", "direct", "Google referrer", "mobile data", "other"],
+                )
+                evidence_files = st.file_uploader(
+                    "Ảnh đối chiếu (2–4 ảnh)",
+                    type=["png", "jpg", "jpeg", "webp"],
+                    accept_multiple_files=True,
+                    help="Mỗi ảnh tối đa 10 MB. Nên để thanh địa chỉ hiển thị rõ URL.",
+                )
+                confirmed_difference = st.checkbox(
+                    "Tôi xác nhận các ảnh là của cùng URL nhưng hiển thị nội dung khác nhau.",
+                )
+                save_operator_evidence = st.form_submit_button(
+                    "Lưu bằng chứng để duyệt", icon=":material/add_photo_alternate:",
+                )
+            if save_operator_evidence:
+                if not confirmed_difference:
+                    st.warning("Bạn cần xác nhận đây là cặp ảnh khác nội dung của cùng một URL.")
+                elif not 2 <= len(evidence_files or []) <= 4:
+                    st.warning("Hãy tải lên từ 2 đến 4 ảnh đối chiếu.")
+                else:
+                    try:
+                        updated_cloaking = pt.add_operator_cloaking_evidence(
+                            cloaking,
+                            images=[(item.name, item.getvalue()) for item in evidence_files],
+                            acquisition_url=acquisition_url.strip(),
+                            device=evidence_device,
+                            network=evidence_network,
+                            confirmed_difference=True,
+                        )
+                        result["cloaking"] = updated_cloaking
+                        pt.append_cloaking_evidence_to_drafts(
+                            result.get("drafts") or [], updated_cloaking,
+                        )
+                        st.session_state["check_domain_result"] = result
+                        st.success("Đã lưu bằng chứng. Kết quả đang ở trạng thái cần duyệt thủ công.")
+                        st.rerun()
+                    except (OSError, ValueError) as exc:
+                        st.error(f"Không thể lưu bằng chứng: {exc}")
 
     # ── B2: MX Record check ───────────────────────────────────────────────────
     mx_recs = mx_records.get("records", [])
@@ -391,9 +447,10 @@ if "check_domain_result" in st.session_state:
         gsb_text = pt.generate_safebrowsing_report_text(domain, cfg)
         domain_url = result.get("target_url") or f"https://{domain}"
         bl1, bl2, bl3 = st.columns(3)
-        bl1.link_button("🔗 Google Safe Browsing", f"https://safebrowsing.google.com/safebrowsing/report_phish/?url={domain_url}", use_container_width=True)
-        bl2.link_button("🔗 Microsoft SmartScreen", "https://www.microsoft.com/wdsi/support/report-unsafe-site-guest/", use_container_width=True)
-        bl3.link_button("🔗 Netcraft", f"https://report.netcraft.com/report?url={domain_url}", use_container_width=True)
+        bl1.link_button("🔗 Google Safe Browsing", f"https://safebrowsing.google.com/safebrowsing/report_phish/?url={domain_url}", width="stretch")
+        bl2.link_button("🔗 Microsoft SmartScreen", "https://www.microsoft.com/wdsi/support/report-unsafe-site-guest/", width="stretch")
+        bl3.link_button("🔗 Netcraft", f"https://report.netcraft.com/report?url={domain_url}", width="stretch")
+        render_community_report_buttons()
         st.caption("Nội dung mô tả mẫu (paste vào ô Additional details của GSB):")
         st.code(gsb_text, language=None)
         # OpenPhish — nhận report qua email submit@openphish.com

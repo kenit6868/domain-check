@@ -26,6 +26,22 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
 - Detector cloaking phải thụ động: HTTP dùng session tách biệt theo profile;
   Playwright không click, type hoặc submit. Chỉ chạy Playwright sau lớp HTTP,
   ưu tiên cho `POSSIBLE`/`INCONCLUSIVE`.
+- Khác biệt giữa URL gốc và một path probe như `/vi-vn/` chỉ là khám phá đường
+  dẫn, không được cộng điểm cloaking. Phân loại nội dung nhạy cảm phải tách khỏi
+  verdict cloaking.
+- Credential proxy/vantage chỉ tồn tại trong cấu hình runtime; không ghi vào UI,
+  error, manifest hoặc draft. Nếu server khai báo biến theo quốc gia và thiết bị
+  nhưng chưa có vantage ngoài mạng hiện tại, worker phải fail closed sang manual
+  review thay vì coi `NO_SIGNAL` là đủ an toàn.
+- Bằng chứng ảnh do người vận hành tải lên phải kiểm tra signature, giới hạn số
+  lượng/kích thước, chỉ nâng tối đa lên `POSSIBLE` và không tự phê duyệt. Worker
+  chỉ đính kèm/gửi sau bước approve + retry rõ ràng.
+- Trang terminal do provider/trình duyệt tạo ra (cảnh báo phishing Cloudflare,
+  DNS/browser error như “Không thể truy cập trang web này”) không được dùng làm
+  chênh lệch cloaking. Khi mọi profile đều terminal, trả
+  `BLOCKED_OR_UNAVAILABLE`, bỏ manual review cloaking và cho worker tiếp tục gửi
+  draft bình thường; không diễn giải trạng thái này thành bằng chứng chắc chắn
+  domain đã bị thu hồi nếu chưa có WHOIS Hold/link status xác nhận.
 - Worker chỉ tự gửi case cloaking khi verdict cuối là `LIKELY` và bằng chứng đã
   được ghi/đính kèm. `POSSIBLE`/`INCONCLUSIVE` phải dừng riêng domain để duyệt;
   chỉ retry gửi sau khi URL nằm trong `approved_cloaking_targets`.

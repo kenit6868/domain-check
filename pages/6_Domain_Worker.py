@@ -18,6 +18,7 @@ import streamlit.components.v1 as components
 
 import phishing_toolkit as pt
 import domain_worker
+from cloaking_ui import render_cloaking_result
 from domain_worker import stop_job_process
 from domain_utils import extract_domains_from_text
 
@@ -564,8 +565,7 @@ if precheck:
             "precheck_only": True,
             "preflight_version": 2,
         }
-        with open(job_path, "w", encoding="utf-8") as f:
-            json.dump(job, f, ensure_ascii=False, indent=2)
+        domain_worker._atomic_json(job_path, job)
         launch_job_process(job_path)
         st.session_state["worker_job_dir"] = job_dir
         st.success(
@@ -748,8 +748,7 @@ else:
                             prepared_job.get("approved_cloaking_targets") or []
                         ) | set(approved_review_targets)),
                     })
-                    with open(prepared_job_path, "w", encoding="utf-8") as f:
-                        json.dump(prepared_job, f, ensure_ascii=False, indent=2)
+                    domain_worker._atomic_json(prepared_job_path, prepared_job)
                     launch_job_process(prepared_job_path)
                     action_text = "retry" if worker_state == "completed" else "xử lý"
                     st.success(
@@ -875,7 +874,7 @@ else:
                 f"⚠️ Bằng chứng cloaking cần duyệt ({len(manual_review_results)})",
                 expanded=True,
             ):
-                for item in manual_review_results:
+                for evidence_index, item in enumerate(manual_review_results):
                     st.markdown(
                         f"**{item.get('domain', item.get('target_url', ''))}** — "
                         f"`{item.get('cloaking_verdict', 'INCONCLUSIVE')}` / "
@@ -886,6 +885,92 @@ else:
                     evidence_path = item.get("cloaking_evidence_path")
                     if evidence_path:
                         st.caption(f"Manifest bằng chứng: `{evidence_path}`")
+                    cloaking_result = item.get("cloaking_result") or {}
+                    if cloaking_result:
+                        render_cloaking_result(cloaking_result)
+                    with st.form(
+                        f"worker_operator_evidence_{evidence_index}",
+                        clear_on_submit=False,
+                    ):
+                        st.caption(
+                            "Nếu detector không thấy nội dung do khác mạng/thiết bị, bổ sung 2–4 ảnh "
+                            "của cùng URL. Upload không tự phê duyệt hoặc gửi email."
+                        )
+                        operator_url = st.text_input(
+                            "URL đã chụp",
+                            value=item.get("target_url", ""),
+                            key=f"worker_operator_url_{evidence_index}",
+                        )
+                        operator_device = st.selectbox(
+                            "Thiết bị",
+                            ["desktop and mobile", "desktop", "Android", "iPhone", "other"],
+                            key=f"worker_operator_device_{evidence_index}",
+                        )
+                        operator_network = st.selectbox(
+                            "Mạng / nguồn truy cập",
+                            ["direct and Google", "direct", "Google referrer", "mobile data", "other"],
+                            key=f"worker_operator_network_{evidence_index}",
+                        )
+                        operator_files = st.file_uploader(
+                            "Ảnh đối chiếu (2–4 ảnh)",
+                            type=["png", "jpg", "jpeg", "webp"],
+                            accept_multiple_files=True,
+                            key=f"worker_operator_files_{evidence_index}",
+                        )
+                        operator_confirmed = st.checkbox(
+                            "Tôi xác nhận các ảnh là của cùng URL nhưng hiển thị nội dung khác nhau.",
+                            key=f"worker_operator_confirmed_{evidence_index}",
+                        )
+                        save_operator = st.form_submit_button(
+                            "Lưu bằng chứng", icon=":material/add_photo_alternate:",
+                            disabled=status.get("state") in {"prechecking", "running", "waiting"},
+                        )
+                    if save_operator:
+                        if not operator_confirmed:
+                            st.warning("Bạn cần xác nhận cặp ảnh là của cùng một URL.")
+                        elif not 2 <= len(operator_files or []) <= 4:
+                            st.warning("Hãy tải lên từ 2 đến 4 ảnh đối chiếu.")
+                        else:
+                            try:
+                                updated = pt.add_operator_cloaking_evidence(
+                                    cloaking_result,
+                                    images=[(upload.name, upload.getvalue()) for upload in operator_files],
+                                    acquisition_url=operator_url.strip(),
+                                    device=operator_device,
+                                    network=operator_network,
+                                    confirmed_difference=True,
+                                )
+                                item.update({
+                                    "cloaking_result": updated,
+                                    "cloaking_verdict": updated.get("verdict", "POSSIBLE"),
+                                    "cloaking_score": updated.get("score", 0),
+                                    "cloaking_signals": updated.get("signals") or [],
+                                    "cloaking_evidence_path": updated.get("evidence_path", ""),
+                                    "cloaking_review_reason": "operator_evidence",
+                                })
+                                domain_worker._atomic_json(
+                                    os.path.join(job_dir, "status.json"), status,
+                                )
+                                job_path = os.path.join(job_dir, "job.json")
+                                try:
+                                    with open(job_path, encoding="utf-8") as job_file:
+                                        persisted_job = json.load(job_file)
+                                except (OSError, ValueError):
+                                    persisted_job = {}
+                                evidence_by_target = dict(
+                                    persisted_job.get("operator_cloaking_evidence") or {}
+                                )
+                                evidence_by_target[item.get("target_url", "")] = (
+                                    updated.get("operator_evidence") or {}
+                                )
+                                persisted_job["operator_cloaking_evidence"] = evidence_by_target
+                                domain_worker._atomic_json(job_path, persisted_job)
+                                st.success(
+                                    "Đã lưu bằng chứng. Hãy xem lại rồi chọn domain ở mục duyệt để retry gửi."
+                                )
+                                st.rerun()
+                            except (OSError, ValueError) as exc:
+                                st.error(f"Không thể lưu bằng chứng: {exc}")
 
         error_rows = []
         for item in results_list:
