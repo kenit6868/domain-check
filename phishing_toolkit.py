@@ -3280,15 +3280,28 @@ def add_operator_cloaking_evidence(
     )
 
 
+def validate_operator_cloaking_images(
+    images: list[tuple[str, bytes]], *, require_pair: bool = False,
+) -> list[dict]:
+    """Validate manual cloaking screenshots without persisting them."""
+    return cloaking_detector.validate_operator_images(
+        images, require_pair=require_pair,
+    )
+
+
 def merge_operator_cloaking_evidence(
     cloaking_result: dict, operator_evidence: dict,
 ) -> dict:
     return cloaking_detector.merge_operator_evidence(cloaking_result, operator_evidence)
 
 
-def append_cloaking_evidence_to_drafts(drafts: list, cloaking_result: dict) -> list:
+def append_cloaking_evidence_to_drafts(
+    drafts: list, cloaking_result: dict, *, operator_confirmed: bool = False,
+) -> list:
     """Insert or refresh factual LIKELY/POSSIBLE cloaking evidence in drafts."""
-    evidence_block = cloaking_detector.format_evidence_block(cloaking_result)
+    evidence_block = cloaking_detector.format_evidence_block(
+        cloaking_result, operator_confirmed=operator_confirmed,
+    )
     if not evidence_block:
         return []
     updated = []

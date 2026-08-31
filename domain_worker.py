@@ -120,7 +120,7 @@ def find_active_job_dir() -> str | None:
 
 
 def find_active_cloaking_job_dir() -> str | None:
-    """Return an active Cloaking Review send job, including legacy job locations."""
+    """Find legacy review-send jobs for migration/diagnostics only."""
     candidates = []
     for root in dict.fromkeys([CLOAKING_WORKER_DIR, WORKER_DIR]):
         active = _find_active_job_dir(root, review_job=True)
@@ -133,7 +133,7 @@ def create_cloaking_review_job(
     queue_ids: list[str], *, decision: str, allowed_accounts: list[str],
     batch_size: int = 5, interval_seconds: int = 0,
 ) -> str:
-    """Create a persisted worker job for exactly the selected review records."""
+    """Create a legacy review job; the current UI must use direct preview/send."""
     if decision not in {"confirmed_cloaking", "not_cloaking"}:
         raise ValueError("Unsupported cloaking review decision")
     if not queue_ids:
@@ -979,6 +979,12 @@ def run_job(job_path: str):
                                 "target_url": target, "error": str(exc),
                             })
 
+                recipients = [
+                    {**recipient, "email": str(recipient.get("email") or "").strip()}
+                    for recipient in recipients
+                    if isinstance(recipient, dict)
+                    and str(recipient.get("email") or "").strip()
+                ]
                 prepared = {
                     "target_url": target, "domain": target_domain,
                     "recipients": recipients,
@@ -986,7 +992,39 @@ def run_job(job_path: str):
                     "cloaking_verdict": cloaking.get("verdict", "INCONCLUSIVE"),
                     "cloaking_score": cloaking.get("score", 0),
                 }
-                if detect_cloaking_early and _cloaking_requires_review(cloaking):
+                requires_cloaking_review = (
+                    detect_cloaking_early and _cloaking_requires_review(cloaking)
+                )
+                if recipient_error:
+                    status["excluded_no_email"].append({
+                        "target_url": target, "domain": target_domain,
+                        "status": "precheck_error", "error": recipient_error,
+                    })
+                    _append_event(events_path, {
+                        "type": "precheck_error", "target_url": target,
+                        "error": recipient_error,
+                    })
+                elif not recipients and configured_accounts:
+                    excluded = {
+                        "target_url": target, "domain": target_domain,
+                        "status": "no_sendable_email",
+                        "cloaking_verdict": cloaking.get("verdict", "INCONCLUSIVE"),
+                        "cloaking_score": cloaking.get("score", 0),
+                        "cloaking_review_skipped": bool(requires_cloaking_review),
+                    }
+                    status["excluded_no_email"].append(excluded)
+                    _log_no_email(target_domain, target)
+                    _append_event(events_path, {
+                        "type": (
+                            "cloaking_precheck_not_queued_no_email"
+                            if requires_cloaking_review
+                            else "precheck_no_sendable_email"
+                        ),
+                        "target_url": target, "domain": target_domain,
+                        "verdict": cloaking.get("verdict", "INCONCLUSIVE"),
+                        "score": cloaking.get("score", 0),
+                    })
+                elif requires_cloaking_review:
                     domain_result = _manual_review_domain_result(
                         target, target_domain, cloaking,
                         duration_seconds=time.time() - started,
@@ -1019,24 +1057,8 @@ def run_job(job_path: str):
                         "score": cloaking.get("score", 0),
                         "queue_id": queue_item.get("queue_id", ""),
                     })
-                elif recipient_error:
-                    status["excluded_no_email"].append({
-                        "target_url": target, "domain": target_domain,
-                        "status": "precheck_error", "error": recipient_error,
-                    })
-                    _append_event(events_path, {
-                        "type": "precheck_error", "target_url": target,
-                        "error": recipient_error,
-                    })
                 elif recipients:
                     ready.append(prepared)
-                elif configured_accounts:
-                    excluded = {
-                        "target_url": target, "domain": target_domain,
-                        "status": "no_sendable_email",
-                    }
-                    status["excluded_no_email"].append(excluded)
-                    _log_no_email(target_domain, target)
                 status["precheck_processed"] += 1
                 status["processed"] = status["precheck_processed"]
                 status["ready_total"] = len(ready)

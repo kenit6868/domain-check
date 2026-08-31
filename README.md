@@ -77,9 +77,11 @@ Các trang (xem sidebar bên trái):
 - **Quick Report** — kiểm tra nhanh nhiều URL, hiển thị cloaking và cho phép xác
   minh thụ động bằng Playwright khi HTTP chưa đủ kết luận
 - **Domain Worker** — nút precheck kiểm tra email và cloaking đồng thời; case
-  cloaking được tách ngay, còn domain thường mới đi vào job gửi batch
-- **Cloaking Review** — hàng đợi và tiến trình gửi riêng để xem evidence, chọn
-  đúng domain và gửi ngay mà không phải chờ Domain Worker thường hoàn tất
+  cloaking chỉ được tách ngay khi có email nhận, còn domain thường mới đi vào
+  job gửi batch
+- **Cloaking Review** — hàng đợi bền vững để xem evidence của từng domain, xem
+  trước đúng draft/email nhận rồi gửi SMTP trực tiếp; không hiển thị case không
+  có email nhận và không tạo worker job gửi
 
 Trong khu vực **Browser Blocking** của **Check Domain** và **Quick Report** có
 thêm nút mở form báo cáo của **Chống Lừa Đảo** và **Cốc Cốc Safe**. Các nút chỉ
@@ -101,7 +103,8 @@ phishing_toolkit.py       - Tool chính (check / related / brandscan)
 cloaking_detector.py      - Detector HTTP đa profile + xác minh Playwright thụ động
 cloaking_ui.py            - Khối hiển thị kết quả cloaking dùng chung cho Streamlit
 cloaking_review_queue.py  - Hàng đợi review cloaking bền vững giữa các worker job
-domain_worker.py          - Precheck email/cloaking, worker gửi thường và job gửi review
+cloaking_review_sender.py - Chuẩn bị preview và gửi trực tiếp case Cloaking Review
+domain_worker.py          - Precheck email/cloaking và worker batch cho domain thường
 domain_check.py           - Bản đơn giản chỉ check SSL + WHOIS (không cần API key)
 streamlit_app.py           - Trang chủ giao diện web (streamlit run streamlit_app.py)
 pages/                      - Các trang còn lại của giao diện web (multipage app)
@@ -148,15 +151,18 @@ Luồng sử dụng hiện tại:
    Cache trong ngày chỉ áp dụng cho email; cloaking luôn được kiểm tra mới theo
    đúng full URL/path. Pha này không gửi email.
 2. Ngay khi một URL có verdict `LIKELY`, `POSSIBLE`, `INCONCLUSIVE` hoặc thiếu
-   vantage, case được ghi vào **Cloaking Review** và hiện trong bảng “Cloaking
-   tách riêng”; không cần đợi hết danh sách precheck. Case đó không nằm trong
+   vantage **và có ít nhất một email nhận**, case được ghi vào **Cloaking
+   Review** và hiện trong bảng “Cloaking tách riêng”; không cần đợi hết danh
+   sách precheck. Case nghi ngờ cloaking nhưng không tìm được email được ghi vào
+   nhóm bỏ qua trong ngày, không tạo queue review. Case đã tách không nằm trong
    danh sách gửi tự động của Domain Worker.
 3. Khi precheck hoàn tất, chỉ danh sách domain thường có email mới có thể chạy
    **Domain Worker**. Worker vẫn kiểm tra lại trong pipeline đầy đủ để cách ly
    một case nếu website thay đổi sau precheck.
-4. Có thể mở **Cloaking Review**, duyệt và tạo job gửi cloaking ngay trong lúc
-   precheck hoặc Domain Worker thường đang chạy. Hai luồng có khóa tiến trình và
-   thư mục job riêng; chỉ một job gửi Cloaking Review được chạy tại một thời điểm.
+4. Có thể mở **Cloaking Review** ngay trong lúc precheck hoặc Domain Worker thường
+   đang chạy. Chọn một case, chọn chế độ/tài khoản, bấm **Tạo / cập nhật draft để
+   xem**, đọc đúng nội dung sẽ gửi rồi xác nhận gửi trực tiếp. Trang không tạo hay
+   chờ worker job gửi mail.
 
 Worker chạy bằng process riêng nên vẫn tiếp tục nếu đóng hoặc refresh tab trình
 duyệt. Trang này hiển thị tiến độ, kết quả gửi của từng domain và có nút dừng hẳn
@@ -164,9 +170,10 @@ process worker. Mỗi email thành công được ghi ngay vào `sent_log.csv`; 
 sách mới tự bỏ qua delivery đã gửi thành công trong ngày hiện tại.
 Draft VNCERT mặc định không tự gửi; chỉ bật nếu toàn bộ danh sách thực sự
 nhắm tới nạn nhân tại Việt Nam. Job Domain Worker thường nằm trong
-`data/worker_jobs/`; job gửi từ Cloaking Review nằm trong
-`data/cloaking_send_jobs/`; queue case bền vững nằm trong
-`data/cloaking_review/`. Các thư mục runtime này không được commit.
+`data/worker_jobs/`; queue case và delivery ledger của Cloaking Review nằm trong
+`data/cloaking_review/`. Cloaking Review mới gửi đồng bộ ngay trên page và không
+tạo thư mục job. `data/cloaking_send_jobs/` chỉ còn được đọc để migrate/sync lịch
+sử job review cũ. Các thư mục runtime này không được commit.
 
 ### Cơ chế cloaking trong worker
 
@@ -196,32 +203,46 @@ coi là cloaking. Kết quả cloaking có bốn mức:
   thường. Trạng thái này không tự khẳng định domain đã bị thu hồi; WHOIS Hold/link
   status vẫn là nguồn xác nhận riêng.
 - Ngay trong bước **Check toàn bộ, lọc email & cloaking**, lookup email và
-  detector chạy đồng thời. Mỗi case cần duyệt được ghi vào queue theo từng URL
-  ngay khi kiểm tra xong, trước khi toàn bộ precheck hoàn tất; preflight được
-  lưu tăng dần để UI hiển thị số lượng và bảng case đã tách. Domain Worker chỉ
-  nhận danh sách không cloaking. Refresh, đóng tab hoặc chạy job mới không làm
-  mất danh sách chờ duyệt.
-- Tại **Cloaking Review**, xem tín hiệu/manifest/ảnh, tích đúng URL, xác nhận
-  rồi chọn một trong ba hành động: **Xác nhận cloaking và gửi kèm bằng
-  chứng**, **Không phải cloaking — gửi report thường**, hoặc **Bỏ qua domain đã
-  chọn**. Job gửi chỉ chứa đúng các record đã tích; cache gửi vẫn ngăn
-  email trùng. Với cloaking đã xác nhận, tool chọn tối đa hai ảnh của cặp
-  profile khác biệt mạnh nhất và đính kèm cùng manifest. Với report thường,
-  khối evidence cloaking và attachment cloaking được loại bỏ trước khi gửi.
-- Job gửi từ **Cloaking Review** độc lập với job Domain Worker thường. Vì vậy
-  nút gửi review không bị khóa khi precheck/worker thường đang chạy; ngược lại,
-  một job review đang gửi chỉ khóa lượt gửi review kế tiếp, không khóa Domain
-  Worker.
+  detector chạy đồng thời. Mỗi case cần duyệt chỉ được ghi vào queue theo từng
+  URL khi lookup tìm thấy ít nhất một email nhận. Case không email vẫn lưu kết
+  quả precheck/no-email để tránh lookup lại trong ngày nhưng không hiện ở
+  Cloaking Review. Queue/preflight được ghi tăng dần trước khi toàn bộ precheck
+  hoàn tất; Domain Worker chỉ nhận danh sách không cloaking có email. Refresh,
+  đóng tab hoặc chạy job mới không làm mất danh sách chờ duyệt hợp lệ.
+- Tại **Cloaking Review**, chọn một URL để xem tín hiệu/manifest/ảnh và chọn
+  **Xác nhận cloaking** hoặc **Không phải cloaking**. Nút **Tạo / cập nhật draft
+  để xem** chạy pipeline draft dùng chung ngay trên page nhưng chưa gửi email;
+  UI hiển thị chính xác tài khoản gửi, email nhận, subject và body cho từng
+  delivery. Chỉ sau khi người vận hành đọc và tích xác nhận thì nút gửi trực tiếp
+  mới được mở. Checkbox xác nhận chỉ rerun giao diện; case đang mở vẫn được giữ
+  bằng `queue_id`, không phải chọn lại domain.
+- Với cloaking đã xác nhận, draft tiếng Anh ghi rõ kết luận thủ công, dùng
+  evidence đã duyệt trong queue và đính kèm manifest + đúng hai ảnh đại diện.
+  Thiếu/rỗng/quá 10 MB một attachment hoặc thiếu cặp ảnh thì chặn gửi. Với
+  **Không phải cloaking**, tool loại toàn bộ khối evidence và attachment cloaking
+  trước cả preview; email sau đó là report phishing thông thường. Hash/size của
+  attachment được khóa theo preview; file bị đổi trước lúc bấm gửi sẽ bị chặn.
+- Cloaking Review không launch process và không tạo job gửi. Nội dung đã preview
+  được chuyển nguyên vẹn vào SMTP helper hiện có; kết quả từng delivery được ghi
+  ngay vào ledger để một lần gửi bị gián đoạn không gửi lại email đã thành công.
+  Vì vậy thao tác này độc lập với precheck/Domain Worker đang chạy.
 - Queue gộp theo **ngày địa phương + URL chuẩn hóa**, không theo worker job
   hay số tài khoản email. Cùng URL bị phát hiện nhiều lần trong ngày chỉ
   hiện một dòng với evidence mới nhất và lịch sử source job; sang ngày mới
-  sẽ tạo case mới. Bản ghi legacy bị gộp được chuyển vào
-  `data/cloaking_review/archive/` thay vì xóa. Chọn case bằng ô chọn dòng của
-  bảng native Streamlit; có thể chọn nhiều dòng.
+  bảng chỉ hiện case của ngày mới và URL phải được check lại để tạo case mới.
+  Dữ liệu ngày cũ vẫn giữ nội bộ cho audit/ledger, chỉ không còn hiện trên UI.
+  Bản ghi legacy bị gộp được chuyển vào
+  `data/cloaking_review/archive/` thay vì xóa. Chọn đúng một case bằng nút
+  **Xử lý** trong bảng native Streamlit để luôn xem draft trước khi gửi.
+- Giao diện chỉ có một bảng domain của hôm nay, không còn KPI và bộ lọc
+  **Chờ xử lý/Đã xử lý**. Mỗi dòng hiện trực tiếp trạng thái `Chưa gửi`,
+  `⚠️ Gửi một phần`, `❌ Gửi thất bại` hoặc `✅ Gửi thành công`. Dòng thành công
+  không còn nút xử lý; dòng lỗi có nút **Thử lại**, dòng gửi một phần có nút
+  **Gửi tiếp**.
 - Mỗi case vẫn theo dõi riêng từng cặp **tài khoản gửi + email nhận + draft**.
   Trạng thái chỉ chuyển sang `SENT` khi tất cả tài khoản SMTP thuộc phạm vi của
   case đã giao đủ draft. Nếu mới hoàn tất một phần, case ở `PARTIAL`, tiếp tục
-  nằm trong **Chờ xử lý** và lần gửi sau mặc định chỉ chọn các tài khoản còn
+  có nút **Gửi tiếp** và lần gửi sau mặc định chỉ chọn các tài khoản còn
   thiếu; delivery đã gửi hoặc đã có trong cache hôm nay không bị gửi lại.
 - Bảng và phần chi tiết hiển thị **Email nhận**, **Đã gửi từ**, **Còn chờ** và
   tiến độ như `1/2`. Nếu một tài khoản còn thiếu đã bị xóa khỏi `config.ini`, UI
@@ -230,11 +251,13 @@ coi là cloaking. Kết quả cloaking có bốn mức:
   mở lại thành `PARTIAL` thay vì làm mất nghĩa vụ gửi mới.
 - Nếu bạn đã tự quan sát cùng URL hiển thị khác nhau, mở **Bổ sung bằng chứng
   cloaking thủ công** ở Check Domain hoặc case tương ứng trong Cloaking Review, tải
-  2–4 ảnh PNG/JPEG/WebP và xác nhận cặp ảnh. Tool lưu ảnh/manifest, chỉ nâng tối đa
-  lên `POSSIBLE` và vẫn bắt buộc duyệt trước khi retry. Sau khi duyệt, manifest và
-  các ảnh này được đính kèm email. Trên Cloaking Review, upload thủ công được đóng
-  mặc định dưới công tắc **Dùng ảnh tải lên thủ công**; nếu Playwright đã tự chụp
-  ảnh thì không cần bật mục này.
+  2–4 ảnh PNG/JPEG/WebP và xác nhận cặp ảnh. Nếu Playwright chưa có đủ cặp ảnh
+  hoặc case còn `INCONCLUSIVE`, uploader tự mở; ảnh hợp lệ hiện thumbnail ngay
+  trên một hàng. Không còn nút **Lưu ảnh thủ công**: nút **Xác nhận ảnh & tạo
+  draft để xem** kiểm tra toàn bộ file, tự lưu evidence/manifest rồi tạo preview
+  trong cùng một thao tác. Case chuyển tối đa lên `POSSIBLE` và vẫn phải đọc
+  draft, tích xác nhận trước khi gửi. Khi evidence tự động đã đầy đủ, uploader
+  được thu gọn dưới công tắc **Thay hoặc bổ sung ảnh thủ công**.
 
 Trên **Check Domain** và **Quick Report**, HTTP detector chạy cùng thao tác check.
 Khi kết quả là `POSSIBLE`/`INCONCLUSIVE`, nút xác minh Playwright xuất hiện để

@@ -34,6 +34,43 @@ def _review_page_link(label: str) -> None:
         st.caption(f"👁️ {label} — chọn trang Cloaking Review trong menu bên trái.")
 
 
+def _review_item_has_sendable_recipient(item: dict) -> bool:
+    """Keep the page compatible with a queue module cached before this helper existed."""
+    detector = getattr(review_queue, "has_sendable_recipient", None)
+    if callable(detector):
+        return bool(detector(item))
+    prepared = item.get("prepared") if isinstance(item.get("prepared"), dict) else item
+    recipients = prepared.get("recipients") or []
+    return any(
+        str(recipient.get("email") or "").strip()
+        for recipient in recipients
+        if isinstance(recipient, dict)
+    )
+
+
+def _review_item_day(item: dict) -> str:
+    review_day = str(item.get("review_day") or "").strip()
+    if review_day:
+        return review_day
+    timestamp = item.get("created_at") or item.get("updated_at")
+    try:
+        observed_at = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+        if observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=timezone.utc)
+        return observed_at.astimezone().date().isoformat()
+    except (TypeError, ValueError):
+        return ""
+
+
+def _active_review_items_today() -> list[dict]:
+    today = datetime.now().astimezone().date().isoformat()
+    return [
+        item for item in review_queue.list_items(review_queue.ACTIVE_STATES)
+        if _review_item_day(item) == today
+        and _review_item_has_sendable_recipient(item)
+    ]
+
+
 def _dataframe_with_copy(df: pd.DataFrame):
     """Render a table with an in-cell copy button for Full link and Domain."""
     columns = list(df.columns)
@@ -294,14 +331,15 @@ for review_job_root in dict.fromkeys([
         review_queue.sync_from_worker_jobs(review_job_root)
     except OSError:
         pass
-pending_review_count = len(review_queue.list_items(review_queue.ACTIVE_STATES))
+pending_review_count = len(_active_review_items_today())
 if pending_review_count:
     st.warning(
-        f"Có **{pending_review_count}** domain cloaking đã được cách ly khỏi luồng gửi tự động."
+        f"Hôm nay có **{pending_review_count}** domain cloaking có email nhận "
+        "đã được cách ly khỏi luồng gửi tự động."
     )
     _review_page_link(f"Mở Cloaking Review ({pending_review_count})")
 else:
-    st.caption("Không có domain cloaking nào đang chờ duyệt.")
+    st.caption("Hôm nay không có domain cloaking có email nhận đang chờ duyệt.")
 cached_sends = {
     (domain, account)
     for domain, accounts in _sent_domain_accounts_today().items()
@@ -550,7 +588,7 @@ with st.form("worker_form"):
     )
     st.caption(
         "Bước 1: kiểm tra email và cloaking đồng thời. Case cloaking được đưa ngay sang "
-        "Cloaking Review; pha này chưa gửi email."
+        "Cloaking Review khi có ít nhất một email nhận; pha này chưa gửi email."
     )
     precheck = st.form_submit_button("🔎 Check toàn bộ, lọc email & cloaking", type="primary")
 
@@ -595,12 +633,27 @@ if precheck:
         st.session_state["worker_job_dir"] = job_dir
         st.success(
             f"Đã bắt đầu kiểm tra email + cloaking cho **{len(domains)}** domain. "
-            "Case cloaking sẽ xuất hiện ngay tại Cloaking Review; chưa có email nào được gửi."
+            "Case cloaking có email nhận sẽ xuất hiện ngay tại Cloaking Review; "
+            "case không có email sẽ được bỏ qua. Chưa có email nào được gửi."
         )
 
 st.divider()
 job_dir = st.session_state.get("worker_job_dir") or latest_job_dir()
 status = load_status(job_dir)
+cached_preflight = _load_preflight(job_dir)
+ready_domains = cached_preflight.get("ready") or []
+all_cloaking_review_domains = cached_preflight.get("cloaking_review") or []
+cloaking_review_domains = [
+    item for item in all_cloaking_review_domains
+    if _review_item_has_sendable_recipient(item)
+]
+legacy_cloaking_without_email = [
+    item for item in all_cloaking_review_domains
+    if not _review_item_has_sendable_recipient(item)
+]
+display_status = dict(status or {})
+if cached_preflight:
+    display_status["cloaking_review_total"] = len(cloaking_review_domains)
 
 if not job_dir:
     st.info("Chưa có worker job nào.")
@@ -619,7 +672,7 @@ else:
     elif status.get("state") == "ready":
         st.status(
             f"Check hoàn tất — {status.get('ready_total', 0)} domain thường sẵn sàng gửi; "
-            f"{status.get('cloaking_review_total', 0)} case cloaking đã tách riêng.",
+            f"{display_status.get('cloaking_review_total', 0)} case cloaking có email đã tách riêng.",
             state="complete",
             expanded=False,
         )
@@ -635,16 +688,31 @@ else:
         st.error(status["error"])
     if status.get("state") == "prechecking":
         st.subheader("Tiến độ precheck")
-        _render_job_metrics(status)
+        _render_job_metrics(display_status)
         st.caption(
             f"Đã precheck {status.get('precheck_processed', 0)}/{status.get('precheck_total', 0)} domain; "
             f"{status.get('precheck_cached', 0)} domain lấy email từ cache hôm nay; "
             f"tìm thấy {status.get('ready_total', 0)} domain thường có email để gửi; "
-            f"đã tách {status.get('cloaking_review_total', 0)} case sang Cloaking Review. "
+            f"đã tách {display_status.get('cloaking_review_total', 0)} case có email "
+            "sang Cloaking Review. "
             "Chưa gửi email trong pha này."
         )
 
     excluded_no_email = status.get("excluded_no_email") or []
+    cloaking_without_email = [
+        item for item in excluded_no_email
+        if item.get("cloaking_review_skipped")
+    ]
+    hidden_cloaking_targets = {
+        str(item.get("target_url") or "")
+        for item in [*cloaking_without_email, *legacy_cloaking_without_email]
+        if item.get("target_url")
+    }
+    if hidden_cloaking_targets:
+        st.info(
+            f"Đã phát hiện **{len(hidden_cloaking_targets)}** case nghi ngờ cloaking "
+            "nhưng không có email nhận, nên không chuyển sang Cloaking Review."
+        )
     precheck_errors = [item for item in excluded_no_email if item.get("status") == "precheck_error"]
     if precheck_errors:
         excluded_table = pd.DataFrame({
@@ -656,9 +724,6 @@ else:
         with st.expander(f"⚠️ Lỗi precheck — {len(precheck_errors)}", expanded=False):
             _dataframe_with_copy(excluded_table)
 
-    cached_preflight = _load_preflight(job_dir)
-    ready_domains = cached_preflight.get("ready") or []
-    cloaking_review_domains = cached_preflight.get("cloaking_review") or []
     worker_state = status.get("state")
     active_worker = worker_state in ("prechecking", "running", "waiting")
     if cloaking_review_domains:
@@ -697,7 +762,8 @@ else:
         })
         st.warning(
             f"Đã tách **{len(cloaking_review_domains)}** case khỏi Domain Worker. "
-            "Bạn có thể mở Cloaking Review và gửi độc lập ngay cả khi precheck/worker thường vẫn đang chạy."
+            "Bạn có thể mở Cloaking Review, xem draft và gửi trực tiếp ngay cả khi "
+            "precheck/worker thường vẫn đang chạy."
         )
         _review_page_link(f"Mở Cloaking Review ({len(cloaking_review_domains)})")
         with st.expander(
@@ -707,11 +773,11 @@ else:
             _dataframe_with_copy(cloaking_table)
     if status.get("state") == "ready" and not ready_domains:
         st.subheader("Kết quả precheck")
-        _render_job_metrics(status)
+        _render_job_metrics(display_status)
     if ready_domains:
             if status.get("state") == "ready":
                 st.subheader("Kết quả precheck")
-                _render_job_metrics(status)
+                _render_job_metrics(display_status)
             if status.get("state") == "ready":
                 ready_table = pd.DataFrame({
                     "STT": range(1, len(ready_domains) + 1),

@@ -108,6 +108,85 @@ class DomainWorkerUiTests(unittest.TestCase):
                 [button.label for button in app.button],
             )
 
+    def test_no_email_cloaking_is_not_counted_or_linked_for_review(self):
+        with (
+            tempfile.TemporaryDirectory() as runtime_dir,
+            tempfile.TemporaryDirectory() as review_dir,
+        ):
+            runtime = Path(runtime_dir)
+            worker_dir = runtime / "worker_jobs"
+            cloaking_worker_dir = runtime / "cloaking_send_jobs"
+            job_dir = worker_dir / "no-email-ui"
+            job_dir.mkdir(parents=True)
+            cloaking_worker_dir.mkdir()
+            target = "https://no-email-ui.example/path"
+            job = {
+                "job_id": "no-email-ui", "domains": [target],
+                "allowed_accounts": ["sender@example.org"],
+                "precheck_only": True, "preflight_version": 3,
+            }
+            excluded = {
+                "target_url": target, "domain": "no-email-ui.example",
+                "status": "no_sendable_email", "cloaking_verdict": "LIKELY",
+                "cloaking_score": 80, "cloaking_review_skipped": True,
+            }
+            prepared = {
+                "target_url": target, "domain": "no-email-ui.example",
+                "recipients": [], "cloaking_verdict": "LIKELY",
+                "cloaking_score": 80,
+            }
+            (job_dir / "job.json").write_text(json.dumps(job), encoding="utf-8")
+            (job_dir / "status.json").write_text(json.dumps({
+                "job_id": "no-email-ui", "state": "ready",
+                "precheck_total": 1, "precheck_processed": 1,
+                "ready_total": 0, "precheck_cached": 1,
+                "cloaking_review_total": 1,
+                "excluded_no_email": [excluded], "results": [],
+            }), encoding="utf-8")
+            (job_dir / "preflight.json").write_text(json.dumps({
+                "version": 3, "complete": True, "ready": [],
+                "cloaking_review": [prepared],
+                "excluded_no_email": [excluded], "excluded_already_sent": [],
+            }), encoding="utf-8")
+
+            with patch.object(review_queue, "REVIEW_DIR", review_dir):
+                review_queue.enqueue_worker_result(
+                    job=job, job_dir=str(job_dir), prepared=prepared,
+                    domain_result={
+                        "target_url": target, "domain": "no-email-ui.example",
+                        "skipped": "manual_review_required",
+                        "cloaking_verdict": "LIKELY", "cloaking_score": 80,
+                    },
+                )
+                with (
+                    patch.object(domain_worker, "WORKER_DIR", str(worker_dir)),
+                    patch.object(
+                        domain_worker, "CLOAKING_WORKER_DIR", str(cloaking_worker_dir),
+                    ),
+                    patch.object(
+                        domain_worker, "NO_EMAIL_LOG_PATH", str(runtime / "no_email.csv"),
+                    ),
+                    patch.object(pt, "SENT_LOG_PATH", str(runtime / "sent.csv")),
+                    patch.object(pt, "load_config", return_value={
+                        "smtp_accounts": [{"username": "sender@example.org"}],
+                    }),
+                ):
+                    app = AppTest.from_file(
+                        str(ROOT / "streamlit_app.py"), default_timeout=10,
+                    ).run()
+                    app = app.switch_page("pages/6_Domain_Worker.py").run()
+
+            self.assertEqual(list(app.exception), [])
+            metrics = {metric.label: str(metric.value) for metric in app.metric}
+            self.assertEqual(metrics["Cloaking tách riêng"], "0")
+            self.assertFalse(any(
+                "Bạn có thể mở Cloaking Review" in warning.value
+                for warning in app.warning
+            ))
+            self.assertTrue(any(
+                "không có email nhận" in info.value for info in app.info
+            ))
+
 
 if __name__ == "__main__":
     unittest.main()

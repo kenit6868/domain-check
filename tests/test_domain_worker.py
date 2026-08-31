@@ -245,6 +245,82 @@ class DomainWorkerTests(unittest.TestCase):
             )
             run_check.assert_not_called()
 
+    def test_cached_no_email_cloaking_is_not_added_to_review_queue(self):
+        with (
+            tempfile.TemporaryDirectory() as job_dir,
+            tempfile.TemporaryDirectory() as review_dir,
+        ):
+            target = "https://no-recipient-cloaked.example/path"
+            job_path = os.path.join(job_dir, "job.json")
+            no_email_log = os.path.join(job_dir, "no_email.csv")
+            with open(job_path, "w", encoding="utf-8") as job_file:
+                json.dump({
+                    "job_id": "cached-no-email-cloaking",
+                    "domains": [target], "batch_size": 5, "interval_seconds": 0,
+                    "include_vncert": False, "precheck_only": True,
+                    "preflight_version": 3,
+                    "allowed_accounts": ["sender@example.org"],
+                }, job_file)
+            with open(domain_worker.PRECHECK_CACHE_PATH, "w", encoding="utf-8") as cache_file:
+                json.dump({
+                    "version": 1,
+                    "entries": {
+                        "no-recipient-cloaked.example": {
+                            "checked_at": datetime.now(timezone.utc).isoformat(),
+                            "recipients": [],
+                        },
+                    },
+                }, cache_file)
+            http_result = {
+                "target_url": target, "verdict": "POSSIBLE", "score": 35,
+                "signals": [{"code": "profile_difference"}],
+                "coverage": {"multi_vantage_recommended": False},
+            }
+            browser_result = {
+                **http_result, "verdict": "LIKELY", "score": 85,
+                "evidence_path": os.path.join(job_dir, "evidence.json"),
+            }
+            with (
+                patch.object(review_queue, "REVIEW_DIR", review_dir),
+                patch.object(domain_worker, "NO_EMAIL_LOG_PATH", no_email_log),
+                patch.object(domain_worker.pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(
+                    domain_worker, "_successfully_sent_deliveries_today", return_value=set(),
+                ),
+                patch.object(domain_worker, "_precheck_report_recipients") as recipient_lookup,
+                patch.object(domain_worker.pt, "run_cloaking_check", return_value=http_result),
+                patch.object(
+                    domain_worker.pt, "run_cloaking_browser_check", return_value=browser_result,
+                ),
+                patch.object(domain_worker.pt, "run_check") as run_check,
+            ):
+                domain_worker.run_job(job_path)
+                queued = review_queue.list_items(review_queue.ACTIVE_STATES)
+
+            with open(os.path.join(job_dir, "status.json"), encoding="utf-8") as status_file:
+                status = json.load(status_file)
+            with open(os.path.join(job_dir, "preflight.json"), encoding="utf-8") as preflight_file:
+                preflight = json.load(preflight_file)
+            with open(os.path.join(job_dir, "events.jsonl"), encoding="utf-8") as events_file:
+                events = [json.loads(line) for line in events_file if line.strip()]
+
+            recipient_lookup.assert_not_called()
+            run_check.assert_not_called()
+            self.assertEqual(status["precheck_cached"], 1)
+            self.assertEqual(status["cloaking_review_total"], 0)
+            self.assertEqual(status["ready_total"], 0)
+            self.assertEqual(preflight["cloaking_review"], [])
+            self.assertEqual(preflight["ready"], [])
+            self.assertEqual(queued, [])
+            self.assertEqual(status["excluded_no_email"][0]["status"], "no_sendable_email")
+            self.assertTrue(status["excluded_no_email"][0]["cloaking_review_skipped"])
+            self.assertTrue(any(
+                event.get("type") == "cloaking_precheck_not_queued_no_email"
+                for event in events
+            ))
+
     def test_first_cloaking_case_is_reviewable_before_remaining_precheck_finishes(self):
         with tempfile.TemporaryDirectory() as job_dir, tempfile.TemporaryDirectory() as review_dir:
             first = "https://first-cloaked.example/"

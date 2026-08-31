@@ -331,7 +331,12 @@ def _size_ratio(a: int, b: int) -> float:
 
 def _add_signal(signals: list[dict], kind: str, weight: int, profiles: list[str], detail: str) -> None:
     key = (kind, tuple(profiles), detail)
-    if any((item["kind"], tuple(item["profiles"]), item["detail"]) == key for item in signals):
+    if any(
+        (
+            item.get("kind"), tuple(item.get("profiles") or []), item.get("detail", ""),
+        ) == key
+        for item in signals if isinstance(item, dict)
+    ):
         return
     signals.append({"kind": kind, "weight": weight, "profiles": profiles, "detail": detail})
 
@@ -1041,6 +1046,32 @@ def _image_extension(filename: str, data: bytes) -> str:
     raise ValueError("Only PNG, JPEG, and WebP evidence images are supported")
 
 
+def validate_operator_images(
+    images: list[tuple[str, bytes]], *, require_pair: bool = False,
+) -> list[dict]:
+    """Validate an operator upload before any evidence file is written."""
+    uploads = list(images or [])
+    if len(uploads) > 4:
+        raise ValueError("At most four operator screenshots are allowed")
+    if require_pair and not 2 <= len(uploads) <= 4:
+        raise ValueError("A confirmed evidence set must contain between two and four screenshots")
+
+    validated = []
+    for filename, data in uploads:
+        try:
+            payload = bytes(data or b"")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Evidence image data must be bytes") from exc
+        if not payload or len(payload) > 10 * 1024 * 1024:
+            raise ValueError("Each evidence image must be between 1 byte and 10 MB")
+        validated.append({
+            "payload": payload,
+            "extension": _image_extension(filename, payload),
+            "original_name": os.path.basename(str(filename or "evidence"))[:200],
+        })
+    return validated
+
+
 def add_operator_evidence(
     result: dict,
     *,
@@ -1052,8 +1083,9 @@ def add_operator_evidence(
     confirmed_difference: bool = False,
 ) -> dict:
     """Persist operator screenshots and mark the case for review, never auto-confirm it."""
-    if len(images) > 4:
-        raise ValueError("At most four operator screenshots are allowed")
+    validated_images = validate_operator_images(
+        images, require_pair=bool(confirmed_difference),
+    )
     target_url = _ensure_url(result.get("target_url", ""))
     if not target_url:
         raise ValueError("A valid checked URL is required before adding operator evidence")
@@ -1063,15 +1095,11 @@ def add_operator_evidence(
     target_dir = os.path.join(evidence_root, safe_domain, f"{timestamp}_operator")
     os.makedirs(target_dir, exist_ok=True)
     saved = []
-    for index, (filename, data) in enumerate(images, start=1):
-        payload = bytes(data or b"")
-        if not payload or len(payload) > 10 * 1024 * 1024:
-            raise ValueError("Each evidence image must be between 1 byte and 10 MB")
-        extension = _image_extension(filename, payload)
-        path = os.path.join(target_dir, f"operator_{index}{extension}")
+    for index, image in enumerate(validated_images, start=1):
+        path = os.path.join(target_dir, f"operator_{index}{image['extension']}")
         with open(path, "wb") as evidence_file:
-            evidence_file.write(payload)
-        saved.append({"path": path, "original_name": os.path.basename(filename)[:200]})
+            evidence_file.write(image["payload"])
+        saved.append({"path": path, "original_name": image["original_name"]})
     operator_evidence = {
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "acquisition_url": _ensure_url(acquisition_url) if acquisition_url else "",
@@ -1097,7 +1125,7 @@ def merge_operator_evidence(result: dict, operator_evidence: dict) -> dict:
     saved = merged["operator_evidence"].get("screenshots") or []
     confirmed_difference = bool(merged["operator_evidence"].get("confirmed_difference"))
     if confirmed_difference and len(saved) >= 2:
-        if merged.get("verdict") == "NO_SIGNAL":
+        if merged.get("verdict") in {None, "", "NO_SIGNAL", "INCONCLUSIVE"}:
             merged["verdict"] = "POSSIBLE"
             merged["score"] = max(20, int(merged.get("score", 0)))
         merged["manual_review_required"] = True
@@ -1166,17 +1194,28 @@ def _email_signal_detail(signal: dict, result: dict) -> str:
     return f"An additional profile-specific response difference was detected{suffix}."
 
 
-def format_evidence_block(result: dict) -> str:
+def format_evidence_block(result: dict, *, operator_confirmed: bool = False) -> str:
     """Render factual, provider-facing cloaking evidence for report drafts."""
     if not result or result.get("verdict") not in {"LIKELY", "POSSIBLE"}:
         return ""
     lines = [
         "--- Technical Evidence: Multi-profile Cloaking Check ---",
+    ]
+    if operator_confirmed:
+        lines.extend([
+            "Operator disposition: CONFIRMED CLOAKING after manual evidence review.",
+            "Cloaking behavior was observed at the reported URL: materially different "
+            "content was served across the tested device, user-agent, or referrer profiles. "
+            "The attached evidence manifest and representative screenshots document these "
+            "profile-dependent responses.",
+            "",
+        ])
+    lines.extend([
         f"Assessment: {result.get('verdict')} (score: {result.get('score', 0)}/100)",
         f"Observed at: {result.get('observed_at', '')}",
         f"Tested URL: {result.get('target_url', '')}",
         "",
-    ]
+    ])
     for profile in result.get("profiles", {}).values():
         label = _email_profile_label(profile)
         if profile.get("error"):

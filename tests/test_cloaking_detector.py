@@ -268,6 +268,26 @@ class CloakingDetectorTests(unittest.TestCase):
             self.assertIn("Operator-supplied verification", block)
             self.assertIn("paired screenshots showing different content", block)
 
+    def test_operator_pair_promotes_inconclusive_case_to_possible(self):
+        profiles = self.base_profiles()
+        for profile_result in profiles.values():
+            profile_result["error"] = "timeout"
+        result = cd.analyze_profiles(profiles, "https://example.test/")
+        self.assertEqual(result["verdict"], "INCONCLUSIVE")
+        png = b"\x89PNG\r\n\x1a\noperator-evidence"
+        with tempfile.TemporaryDirectory() as directory:
+            updated = cd.add_operator_evidence(
+                result,
+                images=[("desktop.png", png), ("mobile.png", png)],
+                evidence_root=directory,
+                acquisition_url="https://example.test/",
+                device="desktop and mobile",
+                network="direct and Google",
+                confirmed_difference=True,
+            )
+        self.assertEqual(updated["verdict"], "POSSIBLE")
+        self.assertGreaterEqual(updated["score"], 20)
+
     def test_operator_evidence_rejects_fake_image(self):
         result = cd.analyze_profiles(self.base_profiles(), "https://example.test/")
         with tempfile.TemporaryDirectory() as directory:
@@ -276,6 +296,20 @@ class CloakingDetectorTests(unittest.TestCase):
                     result, images=[("fake.png", b"not-an-image")],
                     evidence_root=directory,
                 )
+
+    def test_operator_pair_is_fully_validated_before_writing_files(self):
+        result = cd.analyze_profiles(self.base_profiles(), "https://example.test/")
+        png = b"\x89PNG\r\n\x1a\nvalid-evidence"
+        with tempfile.TemporaryDirectory() as directory:
+            evidence_root = os.path.join(directory, "evidence")
+            with self.assertRaises(ValueError):
+                cd.add_operator_evidence(
+                    result,
+                    images=[("desktop.png", png), ("mobile.png", b"not-an-image")],
+                    evidence_root=evidence_root,
+                    confirmed_difference=True,
+                )
+            self.assertFalse(os.path.exists(evidence_root))
 
     def test_failures_without_evidence_are_inconclusive(self):
         profiles = self.base_profiles()
@@ -409,6 +443,9 @@ class CloakingDetectorTests(unittest.TestCase):
         self.assertIn("Multi-profile Cloaking Check", block)
         self.assertIn("response declared a device-specific mirror-document route", block)
         self.assertNotIn("tự khai báo", block)
+        confirmed = cd.format_evidence_block(likely, operator_confirmed=True)
+        self.assertIn("Operator disposition: CONFIRMED CLOAKING", confirmed)
+        self.assertIn("Cloaking behavior was observed at the reported URL", confirmed)
 
     def test_provider_evidence_uses_english_not_localized_ui_details(self):
         profiles = self.base_profiles()

@@ -192,37 +192,49 @@ draft bình thường và không đính kèm ảnh lỗi. Đây không phải b�
 rằng registrar/registry đã thu hồi domain; cần đối chiếu WHOIS Hold và Check Link
 Status nếu cần kết luận takedown.
 
-Mọi kết quả cloaking `LIKELY`, `POSSIBLE`, `INCONCLUSIVE` hoặc thiếu vantage đều
-được Domain Worker cách ly khỏi luồng gửi tự động và ghi thành record JSON
-riêng trong `data/cloaking_review/`. Trang **Cloaking Review** là nơi duy nhất để
-người vận hành xem evidence, tích chọn từng URL và quyết định: gửi kèm
-evidence cloaking, gửi report thường sau khi loại evidence cloaking, hoặc bỏ qua.
+Kết quả cloaking `LIKELY`, `POSSIBLE`, `INCONCLUSIVE` hoặc thiếu vantage luôn bị
+Domain Worker cách ly khỏi luồng gửi tự động. Chỉ case có ít nhất một email nhận
+mới được ghi thành record JSON trong `data/cloaking_review/` để tránh tạo một
+review không thể gửi. Case không email được ghi vào `excluded_no_email` và log
+no-email trong ngày. Trang **Cloaking Review** là nơi duy nhất để người vận hành
+xem evidence, chọn từng URL và quyết định: gửi kèm evidence cloaking, gửi report
+thường sau khi loại evidence cloaking, hoặc bỏ qua.
 
 Nút **Check toàn bộ, lọc email & cloaking** tạo preflight schema v3. Với từng
 full URL, lookup recipient và HTTP detector chạy song song; cache theo ngày chỉ
 áp dụng cho recipient. Khi HTTP cần xác minh, Playwright chạy ngay trong precheck.
-Kết quả cần duyệt được enqueue và ghi tăng dần vào `preflight.json` trước khi
-chuyển sang URL kế tiếp, nên case đầu tiên có thể được duyệt/gửi trong lúc phần
-còn lại của danh sách vẫn đang precheck. Chỉ các mục trong `ready` mới được đưa
-vào job gửi thường; mục `cloaking_review` không bao giờ được gửi bởi job đó.
+Kết quả cần duyệt có recipient được enqueue và ghi tăng dần vào `preflight.json`
+trước khi chuyển sang URL kế tiếp, nên case đầu tiên có thể được duyệt/gửi trong
+lúc phần còn lại của danh sách vẫn đang precheck. Nếu recipient rỗng hoặc chỉ có
+giá trị email rỗng, case không được enqueue/migrate và UI hai page không tính hay
+hiển thị record legacy đó. Chỉ các mục trong `ready` mới được đưa vào job gửi
+thường; mục `cloaking_review` không bao giờ được gửi bởi job đó.
 
-Mỗi thao tác gửi tạo job riêng chỉ chứa các queue ID đã chọn; không dùng nút
-retry chung để phê duyệt cloaking. Trạng thái `PENDING_REVIEW`, `PARTIAL`,
-`QUEUED_*`, `SENT`, `FAILED`, `SKIPPED` cho phép khôi phục danh sách sau
-refresh/restart.
+Mỗi thao tác xử lý đúng một queue record. Người vận hành chọn disposition và tài
+khoản gửi, sau đó bấm **Tạo / cập nhật draft để xem**. Page gọi pipeline dùng
+chung để tạo draft ngay trong request nhưng chưa gửi; UI hiển thị đúng recipient,
+subject và body đã cá nhân hóa cho từng tài khoản. Nút SMTP chỉ được mở sau khi
+người vận hành xác nhận đã đọc nội dung đang hiển thị. Active queue ID được lưu
+riêng trong session state từ callback của nút hành động trong bảng; checkbox,
+uploader và các widget khác không suy lại selection theo row index nên không làm
+mất case đang mở.
 
-Job Domain Worker thường lưu tại `data/worker_jobs/`; job gửi đã duyệt lưu tại
-`data/cloaking_send_jobs/`. Hai namespace có active-job lock độc lập: một
-precheck/job thường đang chạy không khóa nút gửi Cloaking Review, và một job gửi
-review không khóa Domain Worker. Chỉ các job gửi review mới khóa lẫn nhau để
-tránh tạo hai lượt gửi review đồng thời. Job review cũ còn nằm trong
-`data/worker_jobs/` vẫn được nhận diện/migrate nhưng không được tính là job
-Domain Worker thường.
+`cloaking_review_sender.py` gửi trực tiếp, đồng bộ bằng SMTP helper hiện có; không
+tạo worker job, không launch process và không phụ thuộc trạng thái Domain Worker.
+Nội dung chuyển vào SMTP chính là nội dung vừa preview. Một lock ngắn theo queue
+ID ngăn hai phiên gửi cùng case đồng thời, còn kết quả từng delivery được
+checkpoint ngay sau SMTP để lần retry bỏ qua email đã thành công. Trạng thái
+`PENDING_REVIEW`, `PARTIAL`, `SENT`, `FAILED`, `SKIPPED` cho phép khôi phục sau
+refresh/restart. Các trạng thái `QUEUED_*` và `data/cloaking_send_jobs/` chỉ được
+đọc để migrate/sync job review legacy; luồng mới không tạo chúng.
 
 Queue ID được tính từ ngày địa phương và full URL đã chuẩn hóa, không
 từ worker job ID. Nhiều observation trong cùng ngày được merge vào một record;
 `source_job_ids`/`observations` giữ lịch sử và result mới nhất dùng để duyệt.
-Legacy record được archive có thể khôi phục sau khi migration.
+Trang review gọi `list_items_for_day()` nên chỉ render đúng ngày địa phương hiện
+tại. Sang ngày mới, record cũ không còn trên UI và URL phải qua check mới để có
+queue ID mới; JSON lịch sử không bị xóa để vẫn audit được delivery. Legacy record
+được archive có thể khôi phục sau khi migration.
 
 Queue schema v3 giữ `required_accounts`, `deliveries`, số draft cần giao cho mỗi
 tài khoản và lịch sử `send_attempts`. Một delivery được định danh theo tài khoản
@@ -233,6 +245,32 @@ nếu ít nhất một tài khoản hoàn tất nhưng còn tài khoản khác c
 đã hoàn tất, sender còn chờ và ledger chi tiết. Khi mở trang, migration đọc
 review job/result/event cũ để khôi phục cả lượt `already_sent_today` vốn trước
 đây chỉ có trong `events.jsonl`.
+
+Phần đầu Cloaking Review chỉ có một bảng của hôm nay, không có KPI hoặc bộ lọc
+state. `ButtonColumn` hiện **Xử lý**, **Gửi tiếp** hoặc **Thử lại** cho các state
+active. `SENT` hiện `✅ Gửi thành công` nhưng action cell rỗng nên không thể mở
+gửi lại; `FAILED` hiện `❌ Gửi thất bại`, giữ `last_error` và vẫn cho retry.
+
+Disposition **Xác nhận cloaking** dùng result/evidence đã duyệt trong queue làm
+nguồn sự thật, kể cả khi lần tạo draft hiện tại không tái hiện được tín hiệu.
+Draft tiếng Anh ghi rõ operator đã xác nhận cloaking và chỉ được gửi khi có
+manifest cùng hai ảnh hợp lệ, không rỗng và không quá 10 MB mỗi file. Disposition
+**Không phải cloaking** loại khối evidence lẫn mọi attachment cloaking trước khi
+preview và gửi report phishing thông thường. Preview lưu size + SHA256 của từng
+attachment; nếu file thay đổi trước SMTP, người vận hành phải kiểm tra và tạo lại
+preview.
+
+Nếu Playwright không tạo được cặp ảnh hoàn chỉnh, Cloaking Review tự hiển thị
+uploader 2–4 ảnh và khóa bước tạo draft xác nhận cloaking. File được kiểm tra đủ
+số lượng, signature và kích thước trước khi ghi bất kỳ artifact nào; ảnh hợp lệ
+hiện thumbnail ngay. Không có thao tác lưu evidence riêng: nút **Xác nhận ảnh &
+tạo draft để xem** commit ảnh/manifest rồi chuẩn bị preview trong cùng một lần
+rerun. Active case được giữ bằng `queue_id`, độc lập với selection event tạm thời
+của dataframe. Hai ảnh thuộc cùng URL và được operator xác nhận khác nội dung sẽ
+nâng cả `NO_SIGNAL` lẫn `INCONCLUSIVE` lên tối đa `POSSIBLE`; thao tác này không
+tự gửi mail. Kết quả legacy đã có `operator_evidence` cũng được chuẩn hóa khi đọc
+để không yêu cầu tải lại ảnh. Khi đủ manifest + cặp ảnh, uploader được thu gọn và
+preview hoạt động theo luồng gửi trực tiếp bình thường.
 
 Worker Playwright bao gồm Desktop trực tiếp, Android/iPhone từ Google và
 Googlebot Smartphone. Với case HTTP đã `LIKELY`, browser vẫn được chạy để tái

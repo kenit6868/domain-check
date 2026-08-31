@@ -139,43 +139,57 @@ lookup email và detector cloaking đồng thời cho từng full URL. Cache tro
 chỉ dùng cho email; cloaking luôn được kiểm tra lại. Playwright được chạy tự động
 cho các case cần review/evidence, kể cả HTTP đã là `LIKELY` để chụp bằng chứng:
 
-1. Nếu bằng chứng cuối là `LIKELY`, `POSSIBLE` hoặc `INCONCLUSIVE`, worker tách
-   domain đó vào hàng đợi bền vững của trang **Cloaking Review** ngay khi URL này
-   kiểm tra xong. Không cần chờ toàn bộ precheck hoặc job gửi thường hoàn tất và
-   chưa có email nào được gửi trong bước precheck.
+1. Nếu bằng chứng cuối là `LIKELY`, `POSSIBLE` hoặc `INCONCLUSIVE` và lookup tìm
+   thấy ít nhất một email nhận, worker tách domain đó vào hàng đợi bền vững của
+   trang **Cloaking Review** ngay khi URL này kiểm tra xong. Không cần chờ toàn bộ
+   precheck hoặc job gửi thường hoàn tất và chưa có email nào được gửi trong
+   bước precheck. Nếu không có email nhận, kết quả được ghi vào nhóm bỏ qua trong
+   ngày và không xuất hiện ở Cloaking Review.
 2. Server khai báo biến theo quốc gia/IP và thiết bị nhưng chưa có vantage ngoài
    mạng hiện tại cũng bị giữ lại; các domain không cloaking vẫn tiếp tục bình thường.
-3. Mở **Cloaking Review**, kiểm tra tín hiệu, manifest và ảnh rồi tích chọn đúng
-   các URL cần xử lý. Chọn **Xác nhận cloaking và gửi kèm bằng chứng**
-   nếu case là cloaking; worker chỉ retry URL vừa chọn, chụp lại trạng thái hiện tại
-   và chọn tối đa hai ảnh của cặp profile khác biệt mạnh nhất để đính kèm cùng
-   manifest. Nếu Desktop và Googlebot hiển thị hai title/giao diện khác nhau, hai
-   profile này có thể được chọn làm cặp evidence; ảnh quan sát khác vẫn lưu nội bộ.
-4. Nếu kiểm tra lại và kết luận không phải cloaking, chọn **Không phải
-   cloaking — gửi report thường**. Email vẫn được gửi về hành vi phishing/nội
-   dung xấu, nhưng không chèn hay đính kèm evidence cloaking. Nếu không muốn
-   gửi, chọn **Bỏ qua domain đã chọn**.
+3. Mở **Cloaking Review**, bấm **Xử lý** trên một URL rồi kiểm tra tín hiệu,
+   manifest và ảnh.
+   Chọn **Xác nhận cloaking** nếu evidence đúng hoặc **Không phải cloaking** nếu
+   detector nhầm; sau đó chọn tài khoản và bấm **Tạo / cập nhật draft để xem**.
+   Bước này chỉ tạo draft đồng bộ trên page, chưa gửi email và không tạo worker job.
+4. Đọc email nhận, subject và toàn bộ body tiếng Anh đang hiển thị. Nếu xác nhận
+   cloaking, body ghi rõ kết luận cloaking và email kèm manifest + hai ảnh đại
+   diện của cặp profile khác biệt. Nếu không phải cloaking, body là report
+   phishing thông thường, không có khối hoặc attachment cloaking. Tích xác nhận
+   đã đọc rồi bấm nút gửi trực tiếp; nếu không muốn gửi, chọn **Bỏ qua case đang
+   xem**.
 
 Danh sách gửi thường và danh sách cloaking là hai luồng độc lập. Case đã tách
 không còn nằm trong danh sách **Domain sẵn sàng gửi**. Bạn có thể mở Cloaking
 Review, chọn case và bấm gửi trong lúc Domain Worker vẫn đang precheck hoặc xử
-lý các domain thường. Chỉ khi một job gửi Cloaking Review khác đang chạy thì các
-nút tạo lượt gửi review mới tạm khóa; Domain Worker thường không bị khóa theo.
+lý các domain thường. Cloaking Review gửi trực tiếp bằng SMTP và không launch
+process/job. Một lock ngắn theo case chỉ ngăn hai tab gửi cùng một URL đồng thời;
+Domain Worker thường không bị khóa theo.
+
+Số lượng/link **Cloaking Review** trên Domain Worker chỉ tính case của ngày hiện
+tại có email nhận. Record JSON cũ hoặc legacy không có recipient vẫn được giữ
+nội bộ để audit nhưng bị ẩn, vì không thể tạo một delivery SMTP hợp lệ.
 
 Cùng một URL xuất hiện trong nhiều Domain Worker job của cùng ngày chỉ
 được tính là một case review. Case giữ evidence mới nhất và số lần phát
-hiện; số tài khoản email không làm nhân bản case. Sang ngày khác, URL
-đó có thể tạo case mới. Trong bảng **Chờ xử lý**, tích ô ở đầu dòng
-để chọn một hoặc nhiều case.
+hiện; số tài khoản email không làm nhân bản case. Cloaking Review chỉ hiển thị
+một bảng của đúng ngày hiện tại; sang ngày mới, các dòng hôm trước tự ẩn và URL
+phải được check lại để tạo case mới. Lịch sử vẫn được lưu nội bộ, không bị xóa.
+Bảng không còn các ô tổng số hoặc bộ lọc **Chờ xử lý/Đã xử lý**.
 
 Một case có thể cần gửi từ nhiều tài khoản email. Hãy xem các cột **Email nhận**,
 **Đã gửi từ**, **Còn chờ** và **Tiến độ gửi email** trước khi thao tác. Ví dụ
-`1/2` nghĩa là một tài khoản đã gửi nhưng tài khoản thứ hai chưa gửi; case vẫn ở
-**Chờ xử lý**. Khi tích case này, mục **Tài khoản gửi email** mặc định chỉ chọn
+`1/2` nghĩa là một tài khoản đã gửi nhưng tài khoản thứ hai chưa gửi; dòng đó có
+nút **Gửi tiếp**. Khi chọn case này, mục **Tài khoản gửi email** mặc định chỉ chọn
 tài khoản còn thiếu. Tool giữ lại lượt đã gửi (kể cả lượt được cache ghi nhận là
 đã gửi trong ngày), nên retry tài khoản còn lại không làm mất hoặc gửi lại lượt
 đã hoàn tất. Phần chi tiết cho biết từng tài khoản đã gửi tới email nào, draft
 nào, thành công, đã gửi trước đó hay đang lỗi.
+
+Trạng thái được cập nhật ngay trên cùng bảng sau thao tác SMTP: `✅ Gửi thành
+công` không còn nút chọn lại, `❌ Gửi thất bại` hiện lỗi gần nhất và nút **Thử
+lại**. Sau khi mở một case, upload ảnh, chọn chế độ hoặc tích **Tôi đã đọc draft**
+không làm mất domain đang xử lý.
 
 Nếu tất cả profile đều hiện cảnh báo phishing của Cloudflare hoặc trang lỗi trình
 duyệt như **Không thể truy cập trang web này**, công cụ ghi
@@ -189,10 +203,18 @@ Nếu bạn thấy nội dung khác mà detector không lấy được, mở **B
 cloaking thủ công** trong Check Domain hoặc case bằng chứng ở Cloaking Review. Tải
 2–4 ảnh của cùng URL (nên có thanh địa chỉ), chọn thiết bị/mạng và xác nhận sự khác
 nhau. Tool chỉ nâng kết quả lên tối đa `POSSIBLE`; upload không tự phê duyệt và
-không gửi mail. Trong Cloaking Review, xem lại ảnh, chọn URL rồi xác nhận gửi; lúc đó
-manifest và ảnh thủ công mới được đính kèm email. Mục upload trên Cloaking Review
-được đóng mặc định dưới công tắc **Dùng ảnh tải lên thủ công (chỉ là phương án dự
-phòng)**. Nếu giao diện báo Playwright đã tự chụp ảnh, không cần bật công tắc này.
+không gửi mail. Trong Cloaking Review, xem lại ảnh, chọn URL và tạo draft; chỉ khi
+xác nhận gửi thì manifest cùng hai ảnh đại diện mới được đính kèm email. Nếu
+thiếu hai ảnh, file rỗng hoặc một file vượt 10 MB, nút gửi bị chặn và yêu cầu bổ
+sung/tối ưu evidence. Nếu file evidence thay đổi sau lúc preview, hệ thống cũng
+chặn SMTP và yêu cầu tạo lại draft. Khi case còn `INCONCLUSIVE` hoặc Playwright
+chưa có đủ hai ảnh hợp lệ, uploader tự mở và hiện thumbnail ngay khi chọn file.
+Không cần bấm lưu riêng: sau khi tích xác nhận, nút **Xác nhận ảnh & tạo draft để
+xem** tự kiểm tra, lưu cặp ảnh và tạo draft trong một thao tác. Case đang xử lý
+được giữ nguyên qua rerun nên không phải click lại dòng trong bảng. Cặp ảnh đã xác
+nhận nâng case lên `POSSIBLE`, kể cả case cũ đã lưu ảnh trước bản sửa này. Nếu
+Playwright đã có evidence đầy đủ, uploader được thu gọn dưới công tắc **Thay hoặc
+bổ sung ảnh thủ công**.
 
 Trường hợp nội dung phụ thuộc IP/quốc gia, có thể khai báo `vantage_points` trong
 mục `[cloaking]` của `config.ini` theo mẫu trong `config.example.ini`. Proxy và

@@ -105,6 +105,27 @@ class CloakingReviewQueueTests(unittest.TestCase):
             self.assertNotEqual(first["queue_id"], second["queue_id"])
             self.assertEqual(len(queue.list_items()), 2)
 
+    def test_daily_list_hides_previous_days_without_deleting_history(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(queue, "REVIEW_DIR", directory):
+            prepared = {"target_url": "https://daily.example/", "domain": "daily.example"}
+            previous = queue.enqueue_worker_result(
+                job={"job_id": "previous", "created_at": "2026-08-31T05:00:00+00:00"},
+                job_dir=directory, prepared=prepared,
+                domain_result={**prepared, "skipped": "manual_review_required"},
+            )
+            current = queue.enqueue_worker_result(
+                job={"job_id": "current", "created_at": "2026-09-01T05:00:00+00:00"},
+                job_dir=directory, prepared=prepared,
+                domain_result={**prepared, "skipped": "manual_review_required"},
+            )
+
+            self.assertEqual(
+                [item["queue_id"] for item in queue.list_items_for_day("2026-09-01")],
+                [current["queue_id"]],
+            )
+            self.assertEqual(len(queue.list_items()), 2)
+            self.assertIsNotNone(queue.load_item(previous["queue_id"]))
+
     def test_consolidation_archives_legacy_job_keyed_duplicate(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(queue, "REVIEW_DIR", directory):
             target = "https://target.example/"
@@ -418,7 +439,10 @@ class CloakingReviewQueueTests(unittest.TestCase):
             with open(os.path.join(job_dir, "preflight.json"), "w", encoding="utf-8") as output:
                 json.dump({
                     "version": 2,
-                    "ready": [{"target_url": target, "domain": "target.example", "recipients": []}],
+                    "ready": [{
+                        "target_url": target, "domain": "target.example",
+                        "recipients": [{"channel": "registry", "email": "abuse@example.net"}],
+                    }],
                 }, output)
             with open(os.path.join(job_dir, "status.json"), "w", encoding="utf-8") as output:
                 json.dump({
@@ -433,6 +457,33 @@ class CloakingReviewQueueTests(unittest.TestCase):
                 items = queue.list_items({queue.PENDING_REVIEW})
                 self.assertEqual(len(items), 1)
                 self.assertEqual(items[0]["result"]["cloaking_score"], 70)
+
+    def test_sync_ignores_manual_review_result_without_recipient(self):
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as review_dir:
+            job_dir = os.path.join(root, "job-no-recipient")
+            os.makedirs(job_dir)
+            target = "https://no-recipient-legacy.example/"
+            with open(os.path.join(job_dir, "job.json"), "w", encoding="utf-8") as output:
+                json.dump({"job_id": "job-no-recipient"}, output)
+            with open(os.path.join(job_dir, "preflight.json"), "w", encoding="utf-8") as output:
+                json.dump({
+                    "version": 3, "complete": True, "ready": [],
+                    "cloaking_review": [{
+                        "target_url": target, "domain": "no-recipient-legacy.example",
+                        "recipients": [], "cloaking_verdict": "LIKELY",
+                    }],
+                }, output)
+            with open(os.path.join(job_dir, "status.json"), "w", encoding="utf-8") as output:
+                json.dump({
+                    "results": [{
+                        "target_url": target, "domain": "no-recipient-legacy.example",
+                        "skipped": "manual_review_required", "cloaking_score": 80,
+                    }],
+                }, output)
+
+            with patch.object(queue, "REVIEW_DIR", review_dir):
+                self.assertEqual(queue.sync_from_worker_jobs(root), 0)
+                self.assertEqual(queue.list_items(), [])
 
     def test_sync_migrates_legacy_review_job_delivery_events_per_account(self):
         with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as review_dir:

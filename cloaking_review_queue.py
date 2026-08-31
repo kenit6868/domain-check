@@ -54,6 +54,29 @@ def _account_names(values) -> list[str]:
     ))
 
 
+def has_sendable_recipient(value: dict | None) -> bool:
+    """Return whether a prepared/queue record contains a usable email target."""
+    if not isinstance(value, dict):
+        return False
+    prepared = value.get("prepared")
+    sources = []
+    if isinstance(prepared, dict):
+        sources.extend(prepared.get("recipients") or [])
+    sources.extend(value.get("recipients") or [])
+    sources.extend(value.get("deliveries") or [])
+    result = value.get("result")
+    if isinstance(result, dict):
+        sources.extend(result.get("sent_to") or [])
+    for recipient in sources:
+        if isinstance(recipient, dict):
+            address = recipient.get("email") or recipient.get("to")
+        else:
+            address = recipient
+        if str(address or "").strip():
+            return True
+    return False
+
+
 def _delivery_status(row: dict) -> str:
     status = str(row.get("status") or "").strip().lower()
     if status in DELIVERED_STATUSES | {"failed"}:
@@ -338,6 +361,25 @@ def list_items(states: set[str] | None = None) -> list[dict]:
         key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""),
         reverse=True,
     )
+
+
+def current_review_day() -> str:
+    """Return the local calendar day used by queue IDs and the review UI."""
+    return _local_day()
+
+
+def list_items_for_day(
+    review_day: str | None = None, states: set[str] | None = None,
+) -> list[dict]:
+    """List one local day's cases without deleting historical delivery records."""
+    selected_day = str(review_day or current_review_day())
+    return [
+        item for item in list_items(states=states)
+        if str(
+            item.get("review_day")
+            or _local_day(item.get("created_at") or item.get("updated_at"))
+        ) == selected_day
+    ]
 
 
 def enqueue_worker_result(
@@ -959,7 +1001,11 @@ def sync_from_worker_jobs(worker_dir: str) -> int:
             continue
         prepared_by_target = {
             item.get("target_url"): item
-            for item in preflight.get("ready") or [] if item.get("target_url")
+            for item in [
+                *(preflight.get("ready") or []),
+                *(preflight.get("cloaking_review") or []),
+            ]
+            if item.get("target_url")
         }
         latest_by_target = {
             item.get("target_url"): item
@@ -968,13 +1014,16 @@ def sync_from_worker_jobs(worker_dir: str) -> int:
         for target_url, result in latest_by_target.items():
             if result.get("skipped") != "manual_review_required":
                 continue
+            prepared = prepared_by_target.get(target_url) or {
+                "target_url": target_url,
+                "domain": result.get("domain") or pt.normalize_domain(target_url),
+                "recipients": [],
+            }
+            if not has_sendable_recipient(prepared):
+                continue
             enqueue_worker_result(
                 job=job, job_dir=job_dir,
-                prepared=prepared_by_target.get(target_url) or {
-                    "target_url": target_url,
-                    "domain": result.get("domain") or pt.normalize_domain(target_url),
-                    "recipients": [],
-                },
+                prepared=prepared,
                 domain_result=result,
             )
             synced += 1

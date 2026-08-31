@@ -160,10 +160,11 @@ def render_cloaking_result(result: dict, *, compact: bool = False) -> None:
     operator_screenshots = operator.get("screenshots") or []
     if operator_screenshots:
         st.markdown("**Ảnh do người vận hành cung cấp:**")
-        for screenshot in operator_screenshots:
-            path = screenshot.get("path", "")
-            if path and os.path.isfile(path):
-                st.image(path, caption=os.path.basename(path), width="stretch")
+        with st.container(horizontal=True, gap="small"):
+            for screenshot in operator_screenshots:
+                path = screenshot.get("path", "")
+                if path and os.path.isfile(path):
+                    st.image(path, caption=os.path.basename(path), width=160)
 
 
 def render_cloaking_details(result: dict) -> None:
