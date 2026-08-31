@@ -707,6 +707,15 @@ def _browser_profile_specs(
             "viewport": {"width": 390, "height": 844}, "is_mobile": True,
             "has_touch": True,
         },
+        {
+            "name": "googlebot_smartphone", "label": "Playwright Googlebot Smartphone",
+            "url": target_url, "user_agent": GOOGLEBOT_SMARTPHONE_UA, "referrer": "",
+            "viewport": {"width": 412, "height": 915}, "is_mobile": True,
+            "has_touch": False,
+            "client_hints": {
+                "Sec-CH-UA-Mobile": "?1", "Sec-CH-UA-Platform": '"Android"',
+            },
+        },
     ]
     for vantage in vantage_points or []:
         if not vantage.get("browser"):
@@ -753,6 +762,8 @@ def _capture_browser_profile(browser, profile: dict, target_dir: str, timeout_ms
         is_mobile=profile["is_mobile"], has_touch=profile.get("has_touch", False),
         locale="vi-VN", accept_downloads=False, service_workers="allow",
     )
+    if profile.get("client_hints"):
+        context_kwargs["extra_http_headers"] = profile["client_hints"]
     if profile.get("proxy_settings"):
         context_kwargs["proxy"] = profile["proxy_settings"]
     context = None
@@ -786,6 +797,13 @@ def _capture_browser_profile(browser, profile: dict, target_dir: str, timeout_ms
             observations,
             key=lambda item: (len(item.get("keyword_hits") or []), not item.get("fake_404"), item.get("body_bytes", 0)),
         )
+        selected_screenshot_path = next(
+            (
+                path for path in screenshot_paths
+                if os.path.basename(path).endswith(f"_{parsed.get('stage')}.png")
+            ),
+            screenshot_paths[-1] if screenshot_paths else "",
+        )
         try:
             resources = page.evaluate(
                 "() => performance.getEntriesByType('resource').map(entry => entry.name).slice(0, 500)"
@@ -811,7 +829,8 @@ def _capture_browser_profile(browser, profile: dict, target_dir: str, timeout_ms
             "mirror_document_header": False, "mirror_document_routes": [],
             "known_iocs": known_iocs, "observations": safe_observations,
             "resources": [str(item)[:2000] for item in resources],
-            "screenshot_path": screenshot_paths[-1] if screenshot_paths else "",
+            "screenshot_path": selected_screenshot_path,
+            "screenshot_stage": parsed.get("stage", ""),
             "screenshot_paths": screenshot_paths, **{
                 key: value for key, value in parsed.items()
                 if key not in {"stage", "final_url", "body_bytes", "body_sha256"}
@@ -841,11 +860,70 @@ def _capture_browser_profile(browser, profile: dict, target_dir: str, timeout_ms
             context.close()
 
 
+def _select_browser_evidence_pair(result: dict) -> tuple[list[dict], dict]:
+    """Choose at most two screenshots that demonstrate the strongest difference."""
+    profiles = result.get("profiles") or {}
+    selected_profiles: list[str] = []
+    reason = ""
+
+    ranked_signals = sorted(
+        enumerate(result.get("signals") or []),
+        key=lambda item: (-int(item[1].get("weight", 0)), item[0]),
+    )
+    for _index, signal in ranked_signals:
+        names = [name for name in signal.get("profiles") or [] if name in profiles]
+        available = [
+            name for name in names
+            if profiles[name].get("screenshot_path") and not profiles[name].get("error")
+        ]
+        if len(available) >= 2:
+            selected_profiles = available[:2]
+            reason = str(signal.get("kind") or "profile_difference")
+            break
+
+    if not selected_profiles:
+        candidates = [
+            comparison for comparison in result.get("comparisons") or []
+            if comparison.get("available")
+            and len(comparison.get("profiles") or []) >= 2
+            and (
+                comparison.get("keyword_delta")
+                or comparison.get("final_url_changed")
+                or float(comparison.get("text_similarity", 1.0)) < 0.6
+            )
+        ]
+        candidates.sort(key=lambda item: float(item.get("text_similarity", 1.0)))
+        for comparison in candidates:
+            names = comparison.get("profiles") or []
+            if all(
+                name in profiles
+                and profiles[name].get("screenshot_path")
+                and not profiles[name].get("error")
+                for name in names[:2]
+            ):
+                selected_profiles = list(names[:2])
+                reason = "strongest_visual_comparison"
+                break
+
+    screenshots = []
+    for name in selected_profiles:
+        profile = profiles[name]
+        stage = profile.get("screenshot_stage") or "selected"
+        screenshots.append({
+            "profile": name,
+            "label": f"{profile.get('label') or name} — {stage}",
+            "path": profile["screenshot_path"],
+            "title": profile.get("title", ""),
+            "final_url": profile.get("final_url", ""),
+        })
+    return screenshots, {"profiles": selected_profiles, "reason": reason}
+
+
 def probe_playwright_cloaking(
     target: str, *, timeout_ms: int = 15_000, evidence_root: str | None = None,
     vantage_points: list[dict] | None = None, _playwright_factory=None,
 ) -> dict:
-    """Passively render two browser profiles; never click, type, or submit forms."""
+    """Passively render browser profiles; never click, type, or submit forms."""
     target_url = _ensure_url(target)
     if not target_url:
         return {
@@ -902,15 +980,7 @@ def probe_playwright_cloaking(
         }
     result = analyze_profiles(profiles, target_url)
     result.update({"engine": "playwright", "available": True})
-    result["screenshots"] = [
-        {
-            "label": f"{profile.get('label')} — {os.path.splitext(os.path.basename(path))[0].rsplit('_', 1)[-1]}",
-            "path": path,
-        }
-        for profile in profiles.values()
-        for path in profile.get("screenshot_paths") or []
-        if path
-    ]
+    result["screenshots"], result["evidence_pair"] = _select_browser_evidence_pair(result)
     if evidence_root:
         try:
             result["evidence_path"] = save_evidence_manifest(result, evidence_root)

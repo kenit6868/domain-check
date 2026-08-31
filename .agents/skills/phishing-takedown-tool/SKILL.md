@@ -21,11 +21,19 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
 - Gửi email, submit report, đọc IMAP và mở URL nghi ngờ đều là hành động ngoài
   hệ thống: chỉ thực hiện khi người dùng cho phép rõ ràng; mặc định là draft/
   preview.
+- Helper SMTP phải tôn trọng transport của từng account: port 465/`ssl=true`
+  dùng implicit TLS; port khác mặc định STARTTLS và chỉ dùng SMTP thường khi có
+  `starttls=false` rõ ràng. Gửi bằng `EmailMessage`/`send_message`; email evidence
+  dùng timeout dài hơn email thường. Chỉ retry một lần với cùng Message-ID cho
+  lỗi kết nối tạm thời; không retry lỗi auth, sender hoặc recipient.
 - Khi đổi phân loại link, chốt semantics của `LIVE`, `BLOCKED`, `DIE`,
   `GEO-BLOCK`, `TEMP ERROR` và `UNREACHABLE`, rồi đồng bộ code, test và UI.
 - Detector cloaking phải thụ động: HTTP dùng session tách biệt theo profile;
   Playwright không click, type hoặc submit. Chỉ chạy Playwright sau lớp HTTP,
-  ưu tiên cho `POSSIBLE`/`INCONCLUSIVE`.
+  ưu tiên cho `POSSIBLE`/`INCONCLUSIVE`; trong worker cũng chạy cho `LIKELY` để
+  chụp lại bằng chứng trước khi duyệt/gửi. Email chỉ đính kèm tối đa hai ảnh tự
+  động đại diện cho cặp profile khác biệt mạnh nhất; ảnh quan sát còn lại chỉ lưu
+  nội bộ trong evidence.
 - Khác biệt giữa URL gốc và một path probe như `/vi-vn/` chỉ là khám phá đường
   dẫn, không được cộng điểm cloaking. Phân loại nội dung nhạy cảm phải tách khỏi
   verdict cloaking.
@@ -42,9 +50,23 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   `BLOCKED_OR_UNAVAILABLE`, bỏ manual review cloaking và cho worker tiếp tục gửi
   draft bình thường; không diễn giải trạng thái này thành bằng chứng chắc chắn
   domain đã bị thu hồi nếu chưa có WHOIS Hold/link status xác nhận.
-- Worker chỉ tự gửi case cloaking khi verdict cuối là `LIKELY` và bằng chứng đã
-  được ghi/đính kèm. `POSSIBLE`/`INCONCLUSIVE` phải dừng riêng domain để duyệt;
-  chỉ retry gửi sau khi URL nằm trong `approved_cloaking_targets`.
+- Worker không tự gửi bất kỳ case cloaking nào. `LIKELY`, `POSSIBLE`,
+  `INCONCLUSIVE` và coverage gap phải được tách khỏi luồng gửi để duyệt; chỉ
+  retry đúng các URL người vận hành đã tích chọn và xác nhận. Queue
+  review phải lưu bền vững tách khỏi worker job; trang Cloaking Review là nơi duy
+  nhất được tạo job gửi cloaking. `approved_cloaking_targets` và `retry_targets`
+  phải giới hạn job vào đúng record đã chọn.
+- Queue review phải dedupe theo ngày địa phương + full URL chuẩn hóa, không
+  theo worker job ID hoặc tài khoản SMTP. Observation trùng ngày phải giữ
+  source-job history, dùng evidence mới nhất và không làm mất terminal state.
+- Một queue case phải có delivery ledger tích lũy theo account + recipient +
+  draft. Chỉ đặt `SENT` khi mọi account thuộc phạm vi nguồn đã hoàn tất; một phần
+  thành công phải là `PARTIAL` và vẫn selectable. Retry phải giữ delivery thành
+  công/`already_sent`, chỉ ưu tiên account còn thiếu và migration job cũ phải
+  phục hồi được lượt `already_sent_today` từ event.
+- Quyết định review phải tách ba disposition: xác nhận cloaking (gửi kèm
+  evidence), không phải cloaking (gửi report thường, không evidence/attachment
+  cloaking) và bỏ qua. Không được suy ra selection từ toàn bộ queue.
 - Mọi nội dung do tool soạn để gửi nhà cung cấp phải dùng tiếng Anh. Không tái
   sử dụng trực tiếp label/detail tiếng Việt của UI trong draft; dữ liệu quan sát
   nguyên gốc như page title hoặc matched keyword có thể giữ nguyên làm bằng chứng.

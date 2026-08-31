@@ -475,8 +475,9 @@ class CloakingDetectorTests(unittest.TestCase):
                     screenshot_file.write(b"fake-png")
 
         class FakeContext:
-            def __init__(self, mobile):
-                self.page = FakePage(mobile)
+            def __init__(self, kwargs):
+                self.kwargs = kwargs
+                self.page = FakePage(kwargs["is_mobile"])
 
             def new_page(self):
                 return self.page
@@ -489,7 +490,7 @@ class CloakingDetectorTests(unittest.TestCase):
                 self.contexts = []
 
             def new_context(self, **kwargs):
-                context = FakeContext(kwargs["is_mobile"])
+                context = FakeContext(kwargs)
                 self.contexts.append(context)
                 return context
 
@@ -521,12 +522,28 @@ class CloakingDetectorTests(unittest.TestCase):
                 _playwright_factory=lambda: FakePlaywright(browser),
             )
             self.assertEqual(result["verdict"], "LIKELY")
-            self.assertEqual(len(result["screenshots"]), 9)
+            self.assertEqual(len(result["screenshots"]), 2)
             self.assertTrue(all(os.path.isfile(item["path"]) for item in result["screenshots"]))
+            self.assertEqual(
+                [item["profile"] for item in result["screenshots"]],
+                ["desktop_direct", "mobile_google"],
+            )
+            self.assertEqual(
+                result["evidence_pair"]["profiles"],
+                ["desktop_direct", "mobile_google"],
+            )
             self.assertTrue(os.path.isfile(result["evidence_path"]))
         self.assertIsNone(browser.contexts[0].page.goto_args[1]["referer"])
         self.assertEqual(browser.contexts[1].page.goto_args[1]["referer"], cd.GOOGLE_REFERRER)
         self.assertEqual(browser.contexts[2].page.goto_args[1]["referer"], cd.GOOGLE_REFERRER)
+        self.assertIsNone(browser.contexts[3].page.goto_args[1]["referer"])
+        self.assertIn("Googlebot", browser.contexts[3].kwargs["user_agent"])
+        self.assertEqual(
+            browser.contexts[3].kwargs["extra_http_headers"]["Sec-CH-UA-Mobile"], "?1",
+        )
+        self.assertEqual(
+            browser.contexts[3].page.goto_args[0], "https://example.test/",
+        )
 
     def test_playwright_likely_upgrades_http_possible(self):
         http_result = cd.analyze_profiles(self.base_profiles(), "https://example.test/")
@@ -544,6 +561,34 @@ class CloakingDetectorTests(unittest.TestCase):
         self.assertEqual(browser_result["verdict"], "LIKELY")
         self.assertEqual(merged["verdict"], "LIKELY")
         self.assertFalse(merged["manual_review_required"])
+
+    def test_evidence_pair_can_select_desktop_and_googlebot(self):
+        result = {
+            "profiles": {
+                "desktop_direct": {
+                    "name": "desktop_direct", "label": "Desktop", "title": "Construction",
+                    "final_url": "https://example.test/", "screenshot_path": "desktop.png",
+                    "screenshot_stage": "cold_5s", "error": "",
+                },
+                "googlebot_smartphone": {
+                    "name": "googlebot_smartphone", "label": "Googlebot Smartphone",
+                    "title": "Casino", "final_url": "https://example.test/",
+                    "screenshot_path": "googlebot.png", "screenshot_stage": "cold_5s",
+                    "error": "",
+                },
+            },
+            "signals": [{
+                "kind": "title_difference", "weight": 10,
+                "profiles": ["desktop_direct", "googlebot_smartphone"],
+            }],
+            "comparisons": [],
+        }
+        screenshots, pair = cd._select_browser_evidence_pair(result)
+        self.assertEqual(
+            [item["profile"] for item in screenshots],
+            ["desktop_direct", "googlebot_smartphone"],
+        )
+        self.assertEqual(pair["reason"], "title_difference")
 
 
 if __name__ == "__main__":

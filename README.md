@@ -16,6 +16,22 @@ Mở `config.ini`, điền:
 - `gsb_api_key` — API key Google Safe Browsing (tùy chọn).
 - `brand_name`, `contact_name`, `contact_email` — dùng để điền sẵn vào email báo cáo.
 
+### Cấu hình SMTP theo port
+
+Mỗi phần tử trong `smtp.accounts` có host, port, username và password riêng.
+Tool tự chọn đúng transport cho từng tài khoản:
+
+- Port `465` hoặc `"ssl": true`: TLS ngay khi kết nối (`SMTP_SSL`).
+- Port `587` và các port khác: dùng `STARTTLS` theo mặc định.
+- Chỉ với SMTP nội bộ không hỗ trợ TLS, đặt `"starttls": false` trên đúng
+  account đó; không tắt TLS cho Gmail hoặc dịch vụ công cộng.
+
+Email thường có timeout 30 giây. Email kèm manifest/ảnh evidence có timeout 60
+giây và dùng `send_message()` để giữ đúng MIME. Nếu kết nối bị timeout hoặc ngắt
+tạm thời, tool tạo kết nối mới và thử lại tối đa một lần với cùng Message-ID;
+lỗi xác thực, sender hoặc recipient không được retry. Kết quả lỗi ghi rõ bước
+`connect`, `starttls`, `authenticate` hoặc `send` để dễ chẩn đoán.
+
 ## Sử dụng
 
 ```bash
@@ -62,6 +78,8 @@ Các trang (xem sidebar bên trái):
   minh thụ động bằng Playwright khi HTTP chưa đủ kết luận
 - **Domain Worker** — kiểm tra theo batch, tự xử lý bằng chứng cloaking và chặn
   gửi các trường hợp còn cần duyệt thủ công
+- **Cloaking Review** — hàng đợi riêng để xem evidence và quyết định cho
+  đúng các domain đã tích chọn
 
 Trong khu vực **Browser Blocking** của **Check Domain** và **Quick Report** có
 thêm nút mở form báo cáo của **Chống Lừa Đảo** và **Cốc Cốc Safe**. Các nút chỉ
@@ -82,6 +100,7 @@ thu thập bằng chứng, báo cáo theo đúng thứ tự ưu tiên, tới the
 phishing_toolkit.py       - Tool chính (check / related / brandscan)
 cloaking_detector.py      - Detector HTTP đa profile + xác minh Playwright thụ động
 cloaking_ui.py            - Khối hiển thị kết quả cloaking dùng chung cho Streamlit
+cloaking_review_queue.py  - Hàng đợi review cloaking bền vững giữa các worker job
 domain_check.py           - Bản đơn giản chỉ check SSL + WHOIS (không cần API key)
 streamlit_app.py           - Trang chủ giao diện web (streamlit run streamlit_app.py)
 pages/                      - Các trang còn lại của giao diện web (multipage app)
@@ -127,7 +146,8 @@ process worker. Mỗi email thành công được ghi ngay vào `sent_log.csv`; 
 sách mới tự bỏ qua cặp domain/tài khoản đã gửi thành công, kể cả từ ngày trước.
 Draft VNCERT mặc định không tự gửi; chỉ bật nếu toàn bộ danh sách thực sự
 nhắm tới nạn nhân tại Việt Nam. Dữ liệu trạng thái được lưu trong
-`worker_jobs/` và thư mục này không được commit.
+  `worker_jobs/`. Case cloaking chờ duyệt được lưu tách biệt trong
+  `cloaking_review/`; cả hai thư mục runtime này không được commit.
 
 ### Cơ chế cloaking trong worker
 
@@ -138,32 +158,58 @@ Do đó, một URL cờ bạc công khai có thể là `GAMBLING_EXPOSED` nhưng
 `NO_SIGNAL` về cloaking. Trang `/vi-vn/` trả 404 khác trang gốc cũng không còn bị
 coi là cloaking. Kết quả cloaking có bốn mức:
 
-- `LIKELY`: bằng chứng đủ mạnh; draft được bổ sung phần kỹ thuật, manifest JSON
-  được đính kèm và worker tiếp tục gửi tự động.
+- `LIKELY`: bằng chứng đủ mạnh nhưng vẫn được tách khỏi luồng gửi tự động để
+  người vận hành xác nhận.
 - `POSSIBLE` hoặc `INCONCLUSIVE`: worker tự chạy Playwright headless với desktop
-  trực tiếp, Android từ Google và iPhone từ Google. Mỗi profile được quan sát sau
-  1 giây, 5 giây và sau warm reload. Playwright chỉ tải trang, đọc DOM/tài nguyên
-  và chụp ảnh; không click, nhập liệu hay gửi form.
+  trực tiếp, Android từ Google, iPhone từ Google và Googlebot Smartphone. Worker
+  cũng chạy bước này cho `LIKELY` để chụp lại evidence. Mỗi profile được quan sát
+  sau 1 giây, 5 giây và sau warm reload. Playwright chỉ tải trang, đọc DOM/tài
+  nguyên và chụp ảnh; không click, nhập liệu hay gửi form.
 - Nếu response khai báo biến theo cả quốc gia/IP và thiết bị nhưng chưa có vantage
   ngoài mạng hiện tại, worker cũng chạy Playwright rồi chuyển domain sang manual
   review nếu vẫn thiếu độ phủ; `NO_SIGNAL` trong trường hợp này không được tự gửi.
-- Nếu Playwright nâng kết quả lên `LIKELY`, worker đính kèm manifest cùng ảnh và
-  tiếp tục gửi. Nếu vẫn chưa chắc chắn, domain chuyển sang **Cần duyệt cloaking**
-  và không gửi email.
+- Nếu Playwright nâng kết quả lên `LIKELY`, domain vẫn chuyển sang **Cần duyệt
+  cloaking** và chưa gửi email. `POSSIBLE`/`INCONCLUSIVE` cũng được giữ lại.
 - Nếu toàn bộ profile hiển thị cảnh báo phishing của Cloudflare hoặc trang lỗi
   trình duyệt như **Không thể truy cập trang web này**, detector ghi nhận
   `BLOCKED_OR_UNAVAILABLE` và bỏ các trang đó khỏi phép tính cloaking. Worker
   không yêu cầu duyệt cloaking, không đính kèm ảnh lỗi và tiếp tục gửi draft bình
   thường. Trạng thái này không tự khẳng định domain đã bị thu hồi; WHOIS Hold/link
   status vẫn là nguồn xác nhận riêng.
-- Sau khi xem tín hiệu/manifest trên trang Domain Worker, chọn các domain đã duyệt
-  trong ô **Domain cloaking đã duyệt để retry**, rồi bấm retry. Cache gửi vẫn ngăn
-  gửi trùng những email đã thành công.
+- Domain Worker chỉ chạy luồng tự động. Case cloaking được ghi vào hàng đợi
+  bền vững và Domain Worker chỉ hiện số lượng kèm liên kết sang trang
+  **Cloaking Review**. Việc refresh, đóng tab hoặc chạy job mới không làm mất
+  danh sách chờ duyệt.
+- Tại **Cloaking Review**, xem tín hiệu/manifest/ảnh, tích đúng URL, xác nhận
+  rồi chọn một trong ba hành động: **Xác nhận cloaking và gửi kèm bằng
+  chứng**, **Không phải cloaking — gửi report thường**, hoặc **Bỏ qua domain đã
+  chọn**. Job gửi chỉ chứa đúng các record đã tích; cache gửi vẫn ngăn
+  email trùng. Với cloaking đã xác nhận, tool chọn tối đa hai ảnh của cặp
+  profile khác biệt mạnh nhất và đính kèm cùng manifest. Với report thường,
+  khối evidence cloaking và attachment cloaking được loại bỏ trước khi gửi.
+- Queue gộp theo **ngày địa phương + URL chuẩn hóa**, không theo worker job
+  hay số tài khoản email. Cùng URL bị phát hiện nhiều lần trong ngày chỉ
+  hiện một dòng với evidence mới nhất và lịch sử source job; sang ngày mới
+  sẽ tạo case mới. Bản ghi legacy bị gộp được chuyển vào
+  `data/cloaking_review/archive/` thay vì xóa. Chọn case bằng ô chọn dòng của
+  bảng native Streamlit; có thể chọn nhiều dòng.
+- Mỗi case vẫn theo dõi riêng từng cặp **tài khoản gửi + email nhận + draft**.
+  Trạng thái chỉ chuyển sang `SENT` khi tất cả tài khoản SMTP thuộc phạm vi của
+  case đã giao đủ draft. Nếu mới hoàn tất một phần, case ở `PARTIAL`, tiếp tục
+  nằm trong **Chờ xử lý** và lần gửi sau mặc định chỉ chọn các tài khoản còn
+  thiếu; delivery đã gửi hoặc đã có trong cache hôm nay không bị gửi lại.
+- Bảng và phần chi tiết hiển thị **Email nhận**, **Đã gửi từ**, **Còn chờ** và
+  tiến độ như `1/2`. Nếu một tài khoản còn thiếu đã bị xóa khỏi `config.ini`, UI
+  cảnh báo và giữ case chờ cho tới khi tài khoản đó được cấu hình lại. Nếu một
+  job mới trong cùng ngày bổ sung tài khoản gửi cho URL đã hoàn tất, case được
+  mở lại thành `PARTIAL` thay vì làm mất nghĩa vụ gửi mới.
 - Nếu bạn đã tự quan sát cùng URL hiển thị khác nhau, mở **Bổ sung bằng chứng
-  cloaking thủ công** ở Check Domain hoặc form tương ứng trong Domain Worker, tải
+  cloaking thủ công** ở Check Domain hoặc case tương ứng trong Cloaking Review, tải
   2–4 ảnh PNG/JPEG/WebP và xác nhận cặp ảnh. Tool lưu ảnh/manifest, chỉ nâng tối đa
   lên `POSSIBLE` và vẫn bắt buộc duyệt trước khi retry. Sau khi duyệt, manifest và
-  các ảnh này được đính kèm email.
+  các ảnh này được đính kèm email. Trên Cloaking Review, upload thủ công được đóng
+  mặc định dưới công tắc **Dùng ảnh tải lên thủ công**; nếu Playwright đã tự chụp
+  ảnh thì không cần bật mục này.
 
 Trên **Check Domain** và **Quick Report**, HTTP detector chạy cùng thao tác check.
 Khi kết quả là `POSSIBLE`/`INCONCLUSIVE`, nút xác minh Playwright xuất hiện để

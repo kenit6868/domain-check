@@ -128,21 +128,44 @@ Kết quả cloaking gồm:
 
 Ở **Check Domain** và **Quick Report**, nếu HTTP trả `POSSIBLE` hoặc
 `INCONCLUSIVE`, bấm **Xác minh cloaking bằng Playwright**. Trình duyệt headless
-mở desktop trực tiếp, Android từ Google và iPhone từ Google; mỗi profile được đọc
-sau 1 giây, 5 giây và sau warm reload. Nó không bấm nút, không nhập thông tin và
-không gửi form. Vì vậy các bước “chơi thử” trong phần thủ công phía trên vẫn phải
-do người kiểm tra thực hiện trong môi trường cô lập nếu thật sự cần.
+mở desktop trực tiếp, Android từ Google, iPhone từ Google và Googlebot Smartphone;
+mỗi profile được đọc sau 1 giây, 5 giây và sau warm reload. Nó không bấm nút,
+không nhập thông tin và không gửi form. Vì vậy các bước “chơi thử” trong phần thủ
+công phía trên vẫn phải do người kiểm tra thực hiện trong môi trường cô lập nếu
+thật sự cần.
 
 Trong **Domain Worker**, Playwright được chạy tự động chỉ cho các case HTTP chưa
 đủ kết luận:
 
-1. Nếu bằng chứng cuối là `LIKELY`, worker cập nhật draft, đính kèm manifest JSON
-   và ảnh Playwright rồi gửi tự động theo cấu hình job.
-2. Nếu kết quả vẫn là `POSSIBLE`/`INCONCLUSIVE`, hoặc server khai báo biến theo
-   quốc gia/IP và thiết bị nhưng chưa có vantage ngoài mạng hiện tại, worker dừng riêng domain đó và
-   gắn trạng thái **Cần duyệt cloaking**; các domain khác vẫn tiếp tục.
-3. Mở phần bằng chứng trên trang worker, kiểm tra tín hiệu và manifest. Nếu chấp
-   nhận gửi, chọn URL trong **Domain cloaking đã duyệt để retry** rồi bấm retry.
+1. Nếu bằng chứng cuối là `LIKELY`, `POSSIBLE` hoặc `INCONCLUSIVE`, worker tách
+   domain đó vào hàng đợi bền vững của trang **Cloaking Review** và chưa gửi email.
+2. Server khai báo biến theo quốc gia/IP và thiết bị nhưng chưa có vantage ngoài
+   mạng hiện tại cũng bị giữ lại; các domain không cloaking vẫn tiếp tục bình thường.
+3. Mở **Cloaking Review**, kiểm tra tín hiệu, manifest và ảnh rồi tích chọn đúng
+   các URL cần xử lý. Chọn **Xác nhận cloaking và gửi kèm bằng chứng**
+   nếu case là cloaking; worker chỉ retry URL vừa chọn, chụp lại trạng thái hiện tại
+   và chọn tối đa hai ảnh của cặp profile khác biệt mạnh nhất để đính kèm cùng
+   manifest. Nếu Desktop và Googlebot hiển thị hai title/giao diện khác nhau, hai
+   profile này có thể được chọn làm cặp evidence; ảnh quan sát khác vẫn lưu nội bộ.
+4. Nếu kiểm tra lại và kết luận không phải cloaking, chọn **Không phải
+   cloaking — gửi report thường**. Email vẫn được gửi về hành vi phishing/nội
+   dung xấu, nhưng không chèn hay đính kèm evidence cloaking. Nếu không muốn
+   gửi, chọn **Bỏ qua domain đã chọn**.
+
+Cùng một URL xuất hiện trong nhiều Domain Worker job của cùng ngày chỉ
+được tính là một case review. Case giữ evidence mới nhất và số lần phát
+hiện; số tài khoản email không làm nhân bản case. Sang ngày khác, URL
+đó có thể tạo case mới. Trong bảng **Chờ xử lý**, tích ô ở đầu dòng
+để chọn một hoặc nhiều case.
+
+Một case có thể cần gửi từ nhiều tài khoản email. Hãy xem các cột **Email nhận**,
+**Đã gửi từ**, **Còn chờ** và **Tiến độ gửi email** trước khi thao tác. Ví dụ
+`1/2` nghĩa là một tài khoản đã gửi nhưng tài khoản thứ hai chưa gửi; case vẫn ở
+**Chờ xử lý**. Khi tích case này, mục **Tài khoản gửi email** mặc định chỉ chọn
+tài khoản còn thiếu. Tool giữ lại lượt đã gửi (kể cả lượt được cache ghi nhận là
+đã gửi trong ngày), nên retry tài khoản còn lại không làm mất hoặc gửi lại lượt
+đã hoàn tất. Phần chi tiết cho biết từng tài khoản đã gửi tới email nào, draft
+nào, thành công, đã gửi trước đó hay đang lỗi.
 
 Nếu tất cả profile đều hiện cảnh báo phishing của Cloudflare hoặc trang lỗi trình
 duyệt như **Không thể truy cập trang web này**, công cụ ghi
@@ -153,11 +176,13 @@ thời điểm kiểm tra; để kết luận domain đã bị thu hồi cần x
 kết quả Check Link Status.
 
 Nếu bạn thấy nội dung khác mà detector không lấy được, mở **Bổ sung bằng chứng
-cloaking thủ công** trong Check Domain hoặc form bằng chứng ở Domain Worker. Tải
+cloaking thủ công** trong Check Domain hoặc case bằng chứng ở Cloaking Review. Tải
 2–4 ảnh của cùng URL (nên có thanh địa chỉ), chọn thiết bị/mạng và xác nhận sự khác
 nhau. Tool chỉ nâng kết quả lên tối đa `POSSIBLE`; upload không tự phê duyệt và
-không gửi mail. Trong worker, xem lại ảnh, chọn URL ở mục duyệt rồi retry; lúc đó
-manifest và ảnh thủ công mới được đính kèm email.
+không gửi mail. Trong Cloaking Review, xem lại ảnh, chọn URL rồi xác nhận gửi; lúc đó
+manifest và ảnh thủ công mới được đính kèm email. Mục upload trên Cloaking Review
+được đóng mặc định dưới công tắc **Dùng ảnh tải lên thủ công (chỉ là phương án dự
+phòng)**. Nếu giao diện báo Playwright đã tự chụp ảnh, không cần bật công tắc này.
 
 Trường hợp nội dung phụ thuộc IP/quốc gia, có thể khai báo `vantage_points` trong
 mục `[cloaking]` của `config.ini` theo mẫu trong `config.example.ini`. Proxy và

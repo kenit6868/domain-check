@@ -45,6 +45,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 from urllib.parse import urlparse
 
 import cloaking_detector
@@ -2598,6 +2599,96 @@ Technical details:
 # report xuyên suốt dự án (plan_phishing_takedown.md bước 2).
 
 
+SMTP_DEFAULT_TIMEOUT = 30.0
+SMTP_ATTACHMENT_TIMEOUT = 60.0
+SMTP_TRANSIENT_RETRIES = 1
+
+
+def _config_bool(value, default: bool = False) -> bool:
+    """Parse bool values without treating the string ``"false"`` as true."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off", ""}:
+        return False
+    return default
+
+
+def _smtp_transport(account: dict) -> tuple[int, bool, bool, str]:
+    """Resolve SMTP port and security mode while preserving existing defaults."""
+    ssl_requested = _config_bool(account.get("ssl"), False)
+    default_port = 465 if ssl_requested else 587
+    port = int(account.get("port") or default_port)
+    if not 1 <= port <= 65535:
+        raise ValueError(f"Invalid SMTP port: {port}")
+    implicit_tls = ssl_requested or port == 465
+    starttls = False if implicit_tls else _config_bool(account.get("starttls"), True)
+    transport = "implicit_tls" if implicit_tls else ("starttls" if starttls else "plain")
+    return port, implicit_tls, starttls, transport
+
+
+def _smtp_error_is_transient(exc: Exception) -> bool:
+    """Return true only for failures that are safe to retry on a new connection."""
+    permanent = (
+        smtplib.SMTPAuthenticationError,
+        smtplib.SMTPRecipientsRefused,
+        smtplib.SMTPSenderRefused,
+        smtplib.SMTPNotSupportedError,
+    )
+    if isinstance(exc, permanent):
+        return False
+    if isinstance(exc, smtplib.SMTPResponseException):
+        try:
+            return 400 <= int(exc.smtp_code) < 500
+        except (TypeError, ValueError):
+            return False
+    if isinstance(
+        exc,
+        (smtplib.SMTPServerDisconnected, TimeoutError, socket.timeout, ConnectionError, socket.gaierror),
+    ):
+        return True
+    # SMTPException also inherits OSError, so exclude protocol errors here.
+    return isinstance(exc, OSError) and not isinstance(exc, smtplib.SMTPException)
+
+
+def _close_smtp_server(server) -> None:
+    """Close a connection without masking the original send error."""
+    if server is None:
+        return
+    try:
+        server.quit()
+    except Exception:
+        try:
+            server.close()
+        except Exception:
+            pass
+
+
+def _open_smtp_server(
+    account: dict, proxy_str: str | None, timeout: float,
+    port: int, implicit_tls: bool,
+):
+    host = str(account.get("host") or "smtp.gmail.com").strip()
+    if not host:
+        raise ValueError("SMTP host is missing")
+    if proxy_str:
+        if _socks is None:
+            raise RuntimeError("SMTP proxy is configured but PySocks is not installed")
+        proxy_info = _parse_proxy_url(proxy_str)
+        if proxy_info is None:
+            raise RuntimeError("Unable to parse the configured SMTP proxy")
+        smtp_class = _SMTPWithProxySSL if implicit_tls else _SMTPWithProxy
+        return smtp_class(host, port, proxy_info, timeout=timeout)
+    smtp_class = smtplib.SMTP_SSL if implicit_tls else smtplib.SMTP
+    return smtp_class(host, port, timeout=timeout)
+
+
 def _parse_proxy_url(proxy_str: str):
     """Parse chuỗi proxy thành tuple (proxy_type, host, port, username, password).
 
@@ -2728,21 +2819,30 @@ def _send_via_account(
     """Gửi email qua 1 SMTP account cụ thể, tùy chọn qua proxy.
 
     Tự detect mode:
-    - port 465 hoặc ssl=true  → smtplib.SMTP_SSL (SSL/TLS ngay từ đầu, dùng cho mail.camellrp.com)
-    - port 587 (mặc định)     → smtplib.SMTP + starttls() (STARTTLS, dùng cho Gmail)
+    - port 465 hoặc ssl=true  → smtplib.SMTP_SSL (SSL/TLS ngay từ đầu)
+    - port khác (mặc định 587) → smtplib.SMTP + starttls()
+    - starttls=false           → SMTP thường trên port đã cấu hình
+
+    Email có evidence dùng timeout 60 giây; email thường dùng 30 giây. Lỗi mất
+    kết nối/timeout được kết nối lại và retry đúng một lần. Lỗi auth, sender
+    hoặc recipient không retry.
     Không raise — trả về dict {"account", "proxy", "success", "error"}.
     """
     username = account.get("username", "")
-    host = account.get("host", "smtp.gmail.com")
-    port = int(account.get("port", 587))
     password = account.get("password", "")
-    use_ssl = bool(account.get("ssl", False)) or port == 465
     proxy_label = proxy_str or "—"
+    attempts = 0
+    stage = "prepare"
     try:
+        port, implicit_tls, use_starttls, transport = _smtp_transport(account)
         msg = EmailMessage()
         msg["Subject"] = subject
         msg["From"] = username
         msg["To"] = to
+        msg["Date"] = formatdate(localtime=False, usegmt=True)
+        msg["Message-ID"] = make_msgid(
+            domain=username.split("@")[-1] if "@" in username else None,
+        )
         msg.set_content(body, charset="utf-8")
 
         for attachment_path in attachments or []:
@@ -2760,41 +2860,70 @@ def _send_via_account(
                 )
 
         to_list = [a.strip() for a in to.split(",") if a.strip()]
+        if not to_list:
+            raise ValueError("SMTP recipient is missing")
 
-        if proxy_str:
-            if _socks is None:
-                raise RuntimeError("Proxy được cấu hình nhưng PySocks chưa cài (pip install PySocks)")
-            proxy_info = _parse_proxy_url(proxy_str)
-            if proxy_info is None:
-                raise RuntimeError(f"Không parse được proxy: {proxy_str}")
-            # SSL (port 465): dùng _SMTPWithProxySSL để SSL handshake đúng thứ tự sau SOCKS tunnel
-            # STARTTLS (port 587): dùng _SMTPWithProxy rồi gọi starttls() sau
-            if use_ssl:
-                server_ctx = _SMTPWithProxySSL(host, port, proxy_info, timeout=15)
-            else:
-                server_ctx = _SMTPWithProxy(host, port, proxy_info, timeout=15)
-            with server_ctx as server:
-                if not use_ssl:
+        timeout = SMTP_ATTACHMENT_TIMEOUT if attachments else SMTP_DEFAULT_TIMEOUT
+        max_attempts = 1 + SMTP_TRANSIENT_RETRIES
+        last_error = None
+        for attempts in range(1, max_attempts + 1):
+            server = None
+            try:
+                stage = "connect"
+                server = _open_smtp_server(
+                    account, proxy_str, timeout, port, implicit_tls,
+                )
+                if use_starttls:
+                    stage = "starttls"
                     server.starttls()
+                stage = "authenticate"
                 server.login(username, password)
-                server.sendmail(username, to_list, msg.as_string())
-        elif use_ssl:
-            with smtplib.SMTP_SSL(host, port, timeout=15) as server:
-                server.login(username, password)
-                server.sendmail(username, to_list, msg.as_string())
-        else:
-            with smtplib.SMTP(host, port, timeout=15) as server:
-                server.starttls()
-                server.login(username, password)
-                server.sendmail(username, to_list, msg.as_string())
+                stage = "send"
+                server.send_message(msg, from_addr=username, to_addrs=to_list)
+                last_error = None
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempts >= max_attempts or not _smtp_error_is_transient(exc):
+                    break
+            finally:
+                _close_smtp_server(server)
+
+        if last_error is not None:
+            return {
+                "account": username,
+                "proxy": proxy_label,
+                "success": False,
+                "error": f"SMTP {stage} failed after {attempts} attempt(s): {last_error}",
+                "stage": stage,
+                "attempts": attempts,
+                "transport": transport,
+            }
 
         # Lưu copy vào Sent folder qua IMAP (không làm gì với Gmail — tự lưu)
         imap_err = _imap_save_sent(account, msg.as_bytes())
         imap_note = f" (IMAP Sent: {imap_err})" if imap_err else ""
 
-        return {"account": username, "proxy": proxy_label, "success": True, "error": None, "imap_note": imap_note}
+        return {
+            "account": username,
+            "proxy": proxy_label,
+            "success": True,
+            "error": None,
+            "imap_note": imap_note,
+            "stage": "sent",
+            "attempts": attempts,
+            "transport": transport,
+        }
     except Exception as e:
-        return {"account": username, "proxy": proxy_label, "success": False, "error": str(e)}
+        return {
+            "account": username,
+            "proxy": proxy_label,
+            "success": False,
+            "error": f"SMTP {stage} failed after {attempts} attempt(s): {e}",
+            "stage": stage,
+            "attempts": attempts,
+            "transport": locals().get("transport", "unknown"),
+        }
 
 
 def personalize_email_body(body: str, cfg: dict, account: dict) -> str:
@@ -3174,6 +3303,26 @@ def append_cloaking_evidence_to_drafts(drafts: list, cloaking_result: dict) -> l
             ).rstrip()
             with open(path, "w", encoding="utf-8") as file:
                 file.write(content + "\n\n" + evidence_block + "\n")
+            updated.append(path)
+        except OSError:
+            continue
+    return updated
+
+
+def remove_cloaking_evidence_from_drafts(drafts: list) -> list:
+    """Remove detector evidence when an operator classifies a case as non-cloaking."""
+    updated = []
+    for path in drafts or []:
+        try:
+            with open(path, encoding="utf-8") as file:
+                content = file.read()
+            cleaned = re.sub(
+                r"\n*--- Technical Evidence: Multi-profile Cloaking Check ---.*?"
+                r"--- End of Cloaking Evidence ---\n*",
+                "\n", content, flags=re.DOTALL,
+            ).rstrip()
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(cleaned + "\n")
             updated.append(path)
         except OSError:
             continue

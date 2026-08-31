@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 from datetime import datetime, timedelta, timezone
 
 import domain_worker
+import cloaking_review_queue as review_queue
 
 
 class DomainWorkerTests(unittest.TestCase):
@@ -302,6 +303,17 @@ class DomainWorkerTests(unittest.TestCase):
                 domain_worker.run_job(job_path)
 
             self.assertEqual(send.call_count, 1)
+            with open(os.path.join(job_dir, "status.json"), encoding="utf-8") as f:
+                status = json.load(f)
+            sent_to = status["results"][0]["sent_to"]
+            self.assertEqual(len(sent_to), 2)
+            self.assertEqual(
+                {(row["account"], row["status"], row["to"]) for row in sent_to},
+                {
+                    ("sender1@example.org", "already_sent", "abuse@example.net"),
+                    ("sender2@example.org", "sent", "abuse@example.net"),
+                },
+            )
 
     def test_job_resumes_without_reprocessing_completed_targets(self):
         with tempfile.TemporaryDirectory() as job_dir:
@@ -401,6 +413,281 @@ class DomainWorkerTests(unittest.TestCase):
             self.assertEqual(run_domain.call_count, 1)
             self.assertEqual(status["results"][-1]["sent_ok"], 1)
             self.assertEqual(status["results"][-1]["sent_failed"], 0)
+
+    def test_manual_cloaking_retry_processes_only_selected_targets(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            job_path = os.path.join(job_dir, "job.json")
+            status_path = os.path.join(job_dir, "status.json")
+            preflight_path = os.path.join(job_dir, "preflight.json")
+            selected = "https://selected.example/"
+            unselected = "https://unselected.example/"
+            ready = [
+                {"target_url": selected, "domain": "selected.example", "recipients": []},
+                {"target_url": unselected, "domain": "unselected.example", "recipients": []},
+            ]
+            with open(job_path, "w", encoding="utf-8") as job_file:
+                json.dump({
+                    "job_id": "cloaking-selection", "domains": [selected, unselected],
+                    "batch_size": 5, "interval_seconds": 0, "precheck_only": False,
+                    "preflight_version": 2,
+                    "approved_cloaking_targets": [selected],
+                    "retry_targets": [selected],
+                }, job_file)
+            with open(preflight_path, "w", encoding="utf-8") as preflight_file:
+                json.dump({"version": 2, "ready": ready}, preflight_file)
+            with open(status_path, "w", encoding="utf-8") as status_file:
+                json.dump({
+                    "job_id": "cloaking-selection", "state": "completed",
+                    "results": [
+                        {"target_url": selected, "skipped": "manual_review_required"},
+                        {"target_url": unselected, "skipped": "manual_review_required"},
+                    ],
+                }, status_file)
+
+            sent_result = {
+                "target_url": selected, "domain": "selected.example",
+                "sent_ok": 1, "sent_failed": 0,
+            }
+            with (
+                patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                patch.object(
+                    domain_worker, "_run_prechecked_domain",
+                    return_value=(sent_result, set(), False),
+                ) as run_domain,
+            ):
+                domain_worker.run_job(job_path)
+
+            self.assertEqual(run_domain.call_count, 1)
+            self.assertEqual(run_domain.call_args.args[0]["target_url"], selected)
+            self.assertTrue(run_domain.call_args.kwargs["approved_cloaking"])
+
+    def test_create_review_job_contains_only_selected_queue_items(self):
+        with tempfile.TemporaryDirectory() as worker_dir, tempfile.TemporaryDirectory() as review_dir:
+            with (
+                patch.object(domain_worker, "WORKER_DIR", worker_dir),
+                patch.object(review_queue, "REVIEW_DIR", review_dir),
+            ):
+                selected = review_queue.enqueue_worker_result(
+                    job={"job_id": "source-1"}, job_dir=worker_dir,
+                    prepared={
+                        "target_url": "https://selected.example/", "domain": "selected.example",
+                        "recipients": [{"channel": "registry", "email": "abuse@example.org"}],
+                    },
+                    domain_result={
+                        "target_url": "https://selected.example/", "domain": "selected.example",
+                        "skipped": "manual_review_required",
+                    },
+                )
+                unselected = review_queue.enqueue_worker_result(
+                    job={"job_id": "source-2"}, job_dir=worker_dir,
+                    prepared={"target_url": "https://unselected.example/", "domain": "unselected.example"},
+                    domain_result={
+                        "target_url": "https://unselected.example/", "domain": "unselected.example",
+                        "skipped": "manual_review_required",
+                    },
+                )
+                job_path = domain_worker.create_cloaking_review_job(
+                    [selected["queue_id"]], decision="confirmed_cloaking",
+                    allowed_accounts=["sender@example.org"],
+                )
+                with open(job_path, encoding="utf-8") as job_file:
+                    job = json.load(job_file)
+                with open(os.path.join(os.path.dirname(job_path), "preflight.json"), encoding="utf-8") as preflight_file:
+                    preflight = json.load(preflight_file)
+
+                self.assertEqual(job["domains"], ["https://selected.example/"])
+                self.assertEqual(job["approved_cloaking_targets"], job["domains"])
+                self.assertEqual(job["force_normal_targets"], [])
+                self.assertEqual(len(preflight["ready"]), 1)
+                self.assertEqual(
+                    review_queue.load_item(selected["queue_id"])["state"],
+                    review_queue.QUEUED_CLOAKING,
+                )
+                self.assertEqual(
+                    review_queue.load_item(selected["queue_id"])["attempt_accounts"],
+                    ["sender@example.org"],
+                )
+                self.assertEqual(
+                    review_queue.load_item(unselected["queue_id"])["state"],
+                    review_queue.PENDING_REVIEW,
+                )
+
+    def test_worker_persists_manual_review_result_in_queue(self):
+        with tempfile.TemporaryDirectory() as job_dir, tempfile.TemporaryDirectory() as review_dir:
+            target = "https://review.example/path"
+            job_path = os.path.join(job_dir, "job.json")
+            with open(job_path, "w", encoding="utf-8") as job_file:
+                json.dump({
+                    "job_id": "source-review", "domains": [target],
+                    "batch_size": 5, "interval_seconds": 0, "precheck_only": False,
+                    "preflight_version": 2, "allowed_accounts": ["sender@example.org"],
+                }, job_file)
+            with open(os.path.join(job_dir, "preflight.json"), "w", encoding="utf-8") as preflight_file:
+                json.dump({
+                    "version": 2,
+                    "ready": [{
+                        "target_url": target, "domain": "review.example",
+                        "recipients": [{"channel": "registry", "email": "abuse@example.org"}],
+                    }],
+                }, preflight_file)
+            manual_result = {
+                "target_url": target, "domain": "review.example", "success": False,
+                "skipped": "manual_review_required", "manual_review_required": True,
+                "cloaking_verdict": "POSSIBLE", "cloaking_score": 55,
+                "sent_ok": 0, "sent_failed": 0,
+            }
+            with (
+                patch.object(review_queue, "REVIEW_DIR", review_dir),
+                patch.object(domain_worker.pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                patch.object(
+                    domain_worker, "_run_prechecked_domain",
+                    return_value=(manual_result, set(), False),
+                ),
+            ):
+                domain_worker.run_job(job_path)
+                queued = review_queue.list_items({review_queue.PENDING_REVIEW})
+
+            self.assertEqual(len(queued), 1)
+            self.assertEqual(queued[0]["target_url"], target)
+            self.assertEqual(queued[0]["result"]["cloaking_score"], 55)
+
+    def test_review_worker_completion_marks_exact_queue_item_sent(self):
+        with tempfile.TemporaryDirectory() as worker_dir, tempfile.TemporaryDirectory() as review_dir:
+            target = "https://confirmed.example/"
+            with (
+                patch.object(domain_worker, "WORKER_DIR", worker_dir),
+                patch.object(review_queue, "REVIEW_DIR", review_dir),
+            ):
+                item = review_queue.enqueue_worker_result(
+                    job={"job_id": "source-confirmed"}, job_dir=worker_dir,
+                    prepared={
+                        "target_url": target, "domain": "confirmed.example",
+                        "recipients": [{"channel": "registry", "email": "abuse@example.org"}],
+                    },
+                    domain_result={
+                        "target_url": target, "domain": "confirmed.example",
+                        "skipped": "manual_review_required",
+                    },
+                )
+                job_path = domain_worker.create_cloaking_review_job(
+                    [item["queue_id"]], decision="confirmed_cloaking",
+                    allowed_accounts=["sender@example.org"],
+                )
+                sent_result = {
+                    "target_url": target, "domain": "confirmed.example",
+                    "success": True, "sent_ok": 1, "sent_failed": 0,
+                    "already_sent": 0,
+                }
+                with (
+                    patch.object(domain_worker.pt, "load_config", return_value={
+                        "smtp_accounts": [{"username": "sender@example.org"}],
+                    }),
+                    patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                    patch.object(
+                        domain_worker, "_run_prechecked_domain",
+                        return_value=(sent_result, set(), False),
+                    ),
+                ):
+                    domain_worker.run_job(job_path)
+                completed = review_queue.load_item(item["queue_id"])
+
+            self.assertEqual(completed["state"], review_queue.SENT)
+            self.assertEqual(completed["send_result"]["sent_ok"], 1)
+
+    def test_review_worker_keeps_case_partial_when_second_sender_was_not_attempted(self):
+        with tempfile.TemporaryDirectory() as worker_dir, tempfile.TemporaryDirectory() as review_dir:
+            target = "https://partial-review.example/"
+            accounts = ["sender1@example.org", "sender2@example.org"]
+            with (
+                patch.object(domain_worker, "WORKER_DIR", worker_dir),
+                patch.object(review_queue, "REVIEW_DIR", review_dir),
+            ):
+                item = review_queue.enqueue_worker_result(
+                    job={"job_id": "source-partial-review", "allowed_accounts": accounts},
+                    job_dir=worker_dir,
+                    prepared={
+                        "target_url": target, "domain": "partial-review.example",
+                        "recipients": [{"channel": "registry", "email": "abuse@example.org"}],
+                    },
+                    domain_result={
+                        "target_url": target, "domain": "partial-review.example",
+                        "skipped": "manual_review_required",
+                    },
+                )
+                job_path = domain_worker.create_cloaking_review_job(
+                    [item["queue_id"]], decision="confirmed_cloaking",
+                    allowed_accounts=[accounts[0]],
+                )
+                sent_result = {
+                    "target_url": target, "domain": "partial-review.example",
+                    "success": True, "drafts_sendable": 1,
+                    "sent_ok": 1, "sent_failed": 0, "already_sent": 0,
+                    "sent_to": [{
+                        "account": accounts[0], "to": "abuse@example.org",
+                        "draft": "partial-review.example_registry_report.txt",
+                        "ok": True, "status": "sent", "error": "",
+                    }],
+                }
+                with (
+                    patch.object(domain_worker.pt, "load_config", return_value={
+                        "smtp_accounts": [{"username": accounts[0]}],
+                    }),
+                    patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                    patch.object(
+                        domain_worker, "_run_prechecked_domain",
+                        return_value=(sent_result, {accounts[0]}, False),
+                    ),
+                ):
+                    domain_worker.run_job(job_path)
+                partial = review_queue.load_item(item["queue_id"])
+
+            self.assertEqual(partial["state"], review_queue.PARTIAL)
+            summary = review_queue.delivery_summary(partial)
+            self.assertEqual(summary["completed_accounts"], [accounts[0]])
+            self.assertEqual(summary["pending_accounts"], [accounts[1]])
+
+    def test_not_cloaking_decision_sends_without_detector_evidence(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            draft_path = os.path.join(job_dir, "report.txt")
+            with open(draft_path, "w", encoding="utf-8") as draft_file:
+                draft_file.write(
+                    "Report body\n\n"
+                    "--- Technical Evidence: Multi-profile Cloaking Check ---\n"
+                    "Detector evidence\n"
+                    "--- End of Cloaking Evidence ---\n"
+                )
+            result = {
+                "domain": "target.example", "drafts": [draft_path],
+                "reputation": {"verdict": "suspicious"},
+                "cloaking": {"verdict": "LIKELY", "score": 90, "signals": []},
+            }
+            mail = {
+                "drafts_total": 1, "drafts_sendable": 1, "sent_ok": 1,
+                "sent_failed": 0, "already_sent": 0, "sent_to": [],
+            }
+            with (
+                patch.object(domain_worker.pt, "run_check", return_value=result),
+                patch.object(domain_worker.pt, "run_cloaking_browser_check") as browser_check,
+                patch.object(
+                    domain_worker, "_send_domain_drafts",
+                    return_value=(mail, set(), False),
+                ) as send,
+            ):
+                domain_result, _accounts, _stopped = domain_worker._run_prechecked_domain(
+                    {"target_url": "https://target.example/"}, {}, [], False,
+                    os.path.join(job_dir, "events.jsonl"), None, set(),
+                    force_normal_report=True,
+                )
+            with open(draft_path, encoding="utf-8") as draft_file:
+                body = draft_file.read()
+            browser_check.assert_not_called()
+            self.assertNotIn("Multi-profile Cloaking Check", body)
+            self.assertEqual(send.call_args.kwargs["attachments"], [])
+            self.assertEqual(domain_result["cloaking_disposition"], "not_cloaking")
 
     def test_possible_cloaking_requires_manual_review_and_does_not_send(self):
         with tempfile.TemporaryDirectory() as job_dir:
@@ -503,11 +790,54 @@ class DomainWorkerTests(unittest.TestCase):
         self.assertEqual(domain_result["skipped"], "manual_review_required")
         self.assertEqual(domain_result["cloaking_review_reason"], "coverage_gap")
 
-    def test_likely_cloaking_sends_with_evidence_attachment(self):
+    def test_likely_cloaking_requires_manual_confirmation(self):
+        result = {
+            "domain": "target.example", "drafts": ["report.txt"],
+            "reputation": {"verdict": "suspicious"},
+            "cloaking": {
+                "verdict": "LIKELY", "score": 90,
+                "signals": [{"code": "known_cloaking_asset"}],
+            },
+        }
+        browser_result = {
+            **result["cloaking"], "screenshots": [],
+            "playwright": {"available": True, "verdict": "LIKELY"},
+        }
+        with tempfile.TemporaryDirectory() as job_dir:
+            with (
+                patch.object(domain_worker.pt, "run_check", return_value=result),
+                patch.object(
+                    domain_worker.pt, "run_cloaking_browser_check",
+                    return_value=browser_result,
+                ) as browser_check,
+                patch.object(
+                    domain_worker.pt, "append_cloaking_evidence_to_drafts",
+                    return_value=["report.txt"],
+                ),
+                patch.object(domain_worker, "_send_domain_drafts") as send,
+            ):
+                domain_result, accounts, stopped = domain_worker._run_prechecked_domain(
+                    {"target_url": "https://target.example/"}, {}, [], False,
+                    os.path.join(job_dir, "events.jsonl"), None, set(),
+                )
+        self.assertFalse(stopped)
+        self.assertEqual(accounts, set())
+        self.assertEqual(domain_result["skipped"], "manual_review_required")
+        self.assertEqual(domain_result["cloaking_verdict"], "LIKELY")
+        self.assertEqual(domain_result["cloaking_review_reason"], "confirmed_signal")
+        browser_check.assert_called_once()
+        send.assert_not_called()
+
+    def test_approved_likely_cloaking_sends_with_evidence_attachment(self):
         with tempfile.TemporaryDirectory() as job_dir:
             evidence_path = os.path.join(job_dir, "cloaking-evidence.json")
             with open(evidence_path, "w", encoding="utf-8") as evidence_file:
                 json.dump({"verdict": "LIKELY"}, evidence_file)
+            desktop_path = os.path.join(job_dir, "desktop.png")
+            googlebot_path = os.path.join(job_dir, "googlebot.png")
+            for path in (desktop_path, googlebot_path):
+                with open(path, "wb") as screenshot_file:
+                    screenshot_file.write(b"evidence")
             result = {
                 "domain": "target.example", "drafts": ["report.txt"],
                 "reputation": {"verdict": "suspicious"},
@@ -517,25 +847,46 @@ class DomainWorkerTests(unittest.TestCase):
                     "evidence_path": evidence_path,
                 },
             }
+            browser_result = {
+                **result["cloaking"],
+                "screenshots": [
+                    {"path": desktop_path, "profile": "desktop_direct"},
+                    {"path": googlebot_path, "profile": "googlebot_smartphone"},
+                ],
+                "playwright": {"available": True, "verdict": "LIKELY"},
+            }
             mail = {
                 "drafts_total": 1, "drafts_sendable": 1, "sent_ok": 1,
                 "sent_failed": 0, "already_sent": 0, "sent_to": [],
             }
             with (
                 patch.object(domain_worker.pt, "run_check", return_value=result),
+                patch.object(
+                    domain_worker.pt, "run_cloaking_browser_check",
+                    return_value=browser_result,
+                ) as browser_check,
+                patch.object(
+                    domain_worker.pt, "append_cloaking_evidence_to_drafts",
+                    return_value=["report.txt"],
+                ),
                 patch.object(domain_worker, "_send_domain_drafts", return_value=(mail, {"sender@example.org"}, False)) as send,
             ):
                 domain_result, accounts, stopped = domain_worker._run_prechecked_domain(
                     {"target_url": "https://target.example/"},
                     {}, [{"username": "sender@example.org"}], False,
                     os.path.join(job_dir, "events.jsonl"), None, set(),
+                    approved_cloaking=True,
                 )
             self.assertFalse(stopped)
             self.assertTrue(domain_result["success"])
             self.assertEqual(accounts, {"sender@example.org"})
-            self.assertEqual(send.call_args.kwargs["attachments"], [evidence_path])
+            browser_check.assert_called_once()
+            self.assertEqual(
+                send.call_args.kwargs["attachments"],
+                [evidence_path, desktop_path, googlebot_path],
+            )
 
-    def test_playwright_can_upgrade_possible_and_worker_then_sends(self):
+    def test_playwright_upgrade_to_likely_still_requires_manual_confirmation(self):
         with tempfile.TemporaryDirectory() as job_dir:
             draft_path = os.path.join(job_dir, "report.txt")
             evidence_path = os.path.join(job_dir, "combined-evidence.json")
@@ -562,19 +913,17 @@ class DomainWorkerTests(unittest.TestCase):
                 patch.object(domain_worker.pt, "run_check", return_value=initial),
                 patch.object(domain_worker.pt, "run_cloaking_browser_check", return_value=upgraded) as browser_check,
                 patch.object(domain_worker.pt, "append_cloaking_evidence_to_drafts", return_value=[draft_path]),
-                patch.object(domain_worker, "_send_domain_drafts", return_value=(mail, set(), False)) as send,
+                patch.object(domain_worker, "_send_domain_drafts") as send,
             ):
                 domain_result, _accounts, _stopped = domain_worker._run_prechecked_domain(
                     {"target_url": "https://target.example/"}, {}, [], False,
                     os.path.join(job_dir, "events.jsonl"), None, set(),
                 )
             browser_check.assert_called_once()
-            self.assertTrue(domain_result["success"])
+            self.assertFalse(domain_result["success"])
+            self.assertEqual(domain_result["skipped"], "manual_review_required")
             self.assertEqual(domain_result["cloaking_verdict"], "LIKELY")
-            self.assertEqual(
-                send.call_args.kwargs["attachments"],
-                [evidence_path, screenshot_path],
-            )
+            send.assert_not_called()
 
     def test_approved_possible_cloaking_can_retry_and_send(self):
         result = {
@@ -589,6 +938,10 @@ class DomainWorkerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as job_dir:
             with (
                 patch.object(domain_worker.pt, "run_check", return_value=result),
+                patch.object(
+                    domain_worker.pt, "run_cloaking_browser_check",
+                    return_value=result["cloaking"],
+                ) as browser_check,
                 patch.object(domain_worker, "_send_domain_drafts", return_value=(mail, set(), False)) as send,
                 patch.object(domain_worker, "_log_no_email"),
             ):
@@ -599,6 +952,7 @@ class DomainWorkerTests(unittest.TestCase):
                 )
         self.assertTrue(domain_result["success"])
         self.assertTrue(domain_result["cloaking_approved"])
+        browser_check.assert_called_once()
         send.assert_called_once()
 
     def test_approved_operator_evidence_is_attached_on_retry(self):

@@ -6,23 +6,32 @@ import html
 import json
 import os
 import re
-import subprocess
-import sys
 import uuid
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 import phishing_toolkit as pt
 import domain_worker
-from cloaking_ui import render_cloaking_result
+import cloaking_review_queue as review_queue
 from domain_worker import stop_job_process
 from domain_utils import extract_domains_from_text
 
 WORKER_DIR = domain_worker.WORKER_DIR
+
+
+def _review_page_link(label: str) -> None:
+    """Render the multipage link, with a harmless fallback for standalone AppTest."""
+    try:
+        st.page_link(
+            "pages/10_Cloaking_Review.py",
+            label=label,
+            icon=":material/visibility:",
+        )
+    except KeyError:
+        st.caption(f"👁️ {label} — chọn trang Cloaking Review trong menu bên trái.")
 
 
 def _dataframe_with_copy(df: pd.DataFrame):
@@ -47,24 +56,26 @@ def _dataframe_with_copy(df: pd.DataFrame):
             cells.append(cell)
         rows.append("<tr>" + "".join(cells) + "</tr>")
     table_height = min(620, max(110, 48 * (len(df) + 1) + 8))
-    components.html(
+    st.html(
         f"""
         <style>
-          html, body {{ margin: 0; background: transparent; color: #fafafa; font-family: sans-serif; }}
-          .table-wrap {{ height: {table_height - 8}px; overflow: auto; border: 1px solid #33363f; border-radius: 10px; }}
-          table {{ width: 100%; min-width: 900px; border-collapse: separate; border-spacing: 0; font-size: 15px; }}
-          th {{ position: sticky; top: 0; z-index: 1; background: #1c1e26; color: #aeb0b8; text-align: left; }}
-          th, td {{ padding: 11px 12px; border-right: 1px solid #303238; border-bottom: 1px solid #303238; white-space: nowrap; }}
-          th:last-child, td:last-child {{ border-right: 0; }}
-          tr:last-child td {{ border-bottom: 0; }}
-          .copy-cell {{ display: flex; align-items: center; justify-content: space-between; gap: 10px; }}
-          .copy-cell button {{
+          .worker-copy-table {{
+            height: {table_height - 8}px; overflow: auto; color: #fafafa;
+            font-family: sans-serif; border: 1px solid #33363f; border-radius: 10px;
+          }}
+          .worker-copy-table table {{ width: 100%; min-width: 900px; border-collapse: separate; border-spacing: 0; font-size: 15px; }}
+          .worker-copy-table th {{ position: sticky; top: 0; z-index: 1; background: #1c1e26; color: #aeb0b8; text-align: left; }}
+          .worker-copy-table th, .worker-copy-table td {{ padding: 11px 12px; border-right: 1px solid #303238; border-bottom: 1px solid #303238; white-space: nowrap; }}
+          .worker-copy-table th:last-child, .worker-copy-table td:last-child {{ border-right: 0; }}
+          .worker-copy-table tr:last-child td {{ border-bottom: 0; }}
+          .worker-copy-table .copy-cell {{ display: flex; align-items: center; justify-content: space-between; gap: 10px; }}
+          .worker-copy-table .copy-cell button {{
             flex: 0 0 auto; color: #dbeafe; background: #252831; border: 1px solid #596171;
             border-radius: 6px; padding: 3px 7px; cursor: pointer; font-size: 15px;
           }}
-          .copy-cell button:hover {{ color: white; background: #2563eb; border-color: #60a5fa; }}
+          .worker-copy-table .copy-cell button:hover {{ color: white; background: #2563eb; border-color: #60a5fa; }}
         </style>
-        <div class="table-wrap"><table><thead><tr>{headers}</tr></thead><tbody>{''.join(rows)}</tbody></table></div>
+        <div class="worker-copy-table"><table><thead><tr>{headers}</tr></thead><tbody>{''.join(rows)}</tbody></table></div>
         <script>
           async function copyValue(encodedValue, button) {{
             const bytes = Uint8Array.from(atob(encodedValue), c => c.charCodeAt(0));
@@ -81,8 +92,7 @@ def _dataframe_with_copy(df: pd.DataFrame):
           }}
         </script>
         """,
-        height=table_height,
-        scrolling=False,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -275,6 +285,18 @@ st.markdown(
 )
 st.title("⚙️ Domain Report Worker")
 st.caption("Nhận danh sách domain, xử lý theo batch và tự gửi các email report có địa chỉ người nhận hợp lệ.")
+try:
+    review_queue.sync_from_worker_jobs(WORKER_DIR)
+except OSError:
+    pass
+pending_review_count = len(review_queue.list_items(review_queue.ACTIVE_STATES))
+if pending_review_count:
+    st.warning(
+        f"Có **{pending_review_count}** domain cloaking đã được cách ly khỏi luồng gửi tự động."
+    )
+    _review_page_link(f"Mở Cloaking Review ({pending_review_count})")
+else:
+    st.caption("Không có domain cloaking nào đang chờ duyệt.")
 cached_sends = {
     (domain, account)
     for domain, accounts in _sent_domain_accounts_today().items()
@@ -467,24 +489,7 @@ def _render_job_metrics(status, total_sent=None):
 
 
 def launch_job_process(job_path):
-    # Một job đã dừng có thể được resume. Xóa cờ dừng cũ ngay trước khi tạo
-    # process mới; các kết quả hoàn tất vẫn nằm trong status.json để worker skip.
-    stop_path = os.path.join(os.path.dirname(job_path), "stop.requested")
-    try:
-        os.remove(stop_path)
-    except FileNotFoundError:
-        pass
-    if getattr(sys, "frozen", False):
-        command = [sys.executable, "--worker-job", job_path]
-    else:
-        worker_script = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "domain_worker.py")
-        command = [sys.executable, worker_script, job_path]
-    subprocess.Popen(
-        command,
-        cwd=pt.BASE_DIR,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        start_new_session=os.name != "nt",
-    )
+    return domain_worker.launch_job_process(job_path)
 
 
 prepared_dir_ui = st.session_state.get("worker_job_dir") or latest_job_dir()
@@ -676,11 +681,6 @@ else:
                 account for account in (prepared_job_ui.get("allowed_accounts") or [])
                 if account in _account_labels
             ]
-            manual_review_items = {
-                item.get("target_url"): item
-                for item in (status.get("results") or [])
-                if item.get("target_url") and item.get("skipped") == "manual_review_required"
-            }
             st.caption(
                 "Tài khoản gửi đã chọn từ đầu job: "
                 + (", ".join(job_selected_accounts) if job_selected_accounts else "—")
@@ -695,20 +695,6 @@ else:
                     help="Chỉ bật khi toàn bộ domain trong danh sách nhắm tới nạn nhân tại Việt Nam.",
                 )
                 selected_accounts = job_selected_accounts
-                approved_review_targets = []
-                if manual_review_items:
-                    st.warning(
-                        f"Có {len(manual_review_items)} domain cần duyệt thủ công vì tín hiệu cloaking "
-                        "chưa đủ chắc chắn. Chỉ chọn khi bạn đã xem bằng chứng và đồng ý cho gửi."
-                    )
-                    approved_review_targets = st.multiselect(
-                        "Domain cloaking đã duyệt để retry",
-                        options=list(manual_review_items),
-                        format_func=lambda target: (
-                            f"{target} — {manual_review_items[target].get('cloaking_verdict', 'INCONCLUSIVE')} "
-                            f"({manual_review_items[target].get('cloaking_score', 0)} điểm)"
-                        ),
-                    )
                 if not _all_accounts:
                     st.error("⚠️ Chưa cấu hình SMTP account trong config.ini.")
                 confirmed = st.checkbox(
@@ -744,10 +730,8 @@ else:
                         "include_vncert": bool(include_vncert),
                         "allowed_accounts": selected_accounts,
                         "precheck_only": False,
-                        "approved_cloaking_targets": sorted(set(
-                            prepared_job.get("approved_cloaking_targets") or []
-                        ) | set(approved_review_targets)),
                     })
+                    prepared_job.pop("retry_targets", None)
                     domain_worker._atomic_json(prepared_job_path, prepared_job)
                     launch_job_process(prepared_job_path)
                     action_text = "retry" if worker_state == "completed" else "xử lý"
@@ -764,7 +748,7 @@ else:
         worker_items = preflight_ready or results_list
         summary_rows = []
         _SKIP_LABELS = {
-            "manual_review_required": "⚠️ Cần duyệt cloaking",
+            "manual_review_required": "⏸ Chờ xác nhận cloaking",
             "already_sent": "✅ Đã gửi trước đó",
             "no_sendable_email": "⏭ không có email để gửi",
         }
@@ -865,112 +849,18 @@ else:
                 )
         _dataframe_with_copy(results_df)
 
-        manual_review_results = [
-            item for item in results_list
+        manual_review_count = sum(
+            1 for item in result_by_target.values()
             if item.get("skipped") == "manual_review_required"
-        ]
-        if manual_review_results:
-            with st.expander(
-                f"⚠️ Bằng chứng cloaking cần duyệt ({len(manual_review_results)})",
-                expanded=True,
-            ):
-                for evidence_index, item in enumerate(manual_review_results):
-                    st.markdown(
-                        f"**{item.get('domain', item.get('target_url', ''))}** — "
-                        f"`{item.get('cloaking_verdict', 'INCONCLUSIVE')}` / "
-                        f"{item.get('cloaking_score', 0)} điểm"
-                    )
-                    for signal in item.get("cloaking_signals") or []:
-                        st.caption(f"• {signal.get('message') or signal.get('code') or signal}")
-                    evidence_path = item.get("cloaking_evidence_path")
-                    if evidence_path:
-                        st.caption(f"Manifest bằng chứng: `{evidence_path}`")
-                    cloaking_result = item.get("cloaking_result") or {}
-                    if cloaking_result:
-                        render_cloaking_result(cloaking_result)
-                    with st.form(
-                        f"worker_operator_evidence_{evidence_index}",
-                        clear_on_submit=False,
-                    ):
-                        st.caption(
-                            "Nếu detector không thấy nội dung do khác mạng/thiết bị, bổ sung 2–4 ảnh "
-                            "của cùng URL. Upload không tự phê duyệt hoặc gửi email."
-                        )
-                        operator_url = st.text_input(
-                            "URL đã chụp",
-                            value=item.get("target_url", ""),
-                            key=f"worker_operator_url_{evidence_index}",
-                        )
-                        operator_device = st.selectbox(
-                            "Thiết bị",
-                            ["desktop and mobile", "desktop", "Android", "iPhone", "other"],
-                            key=f"worker_operator_device_{evidence_index}",
-                        )
-                        operator_network = st.selectbox(
-                            "Mạng / nguồn truy cập",
-                            ["direct and Google", "direct", "Google referrer", "mobile data", "other"],
-                            key=f"worker_operator_network_{evidence_index}",
-                        )
-                        operator_files = st.file_uploader(
-                            "Ảnh đối chiếu (2–4 ảnh)",
-                            type=["png", "jpg", "jpeg", "webp"],
-                            accept_multiple_files=True,
-                            key=f"worker_operator_files_{evidence_index}",
-                        )
-                        operator_confirmed = st.checkbox(
-                            "Tôi xác nhận các ảnh là của cùng URL nhưng hiển thị nội dung khác nhau.",
-                            key=f"worker_operator_confirmed_{evidence_index}",
-                        )
-                        save_operator = st.form_submit_button(
-                            "Lưu bằng chứng", icon=":material/add_photo_alternate:",
-                            disabled=status.get("state") in {"prechecking", "running", "waiting"},
-                        )
-                    if save_operator:
-                        if not operator_confirmed:
-                            st.warning("Bạn cần xác nhận cặp ảnh là của cùng một URL.")
-                        elif not 2 <= len(operator_files or []) <= 4:
-                            st.warning("Hãy tải lên từ 2 đến 4 ảnh đối chiếu.")
-                        else:
-                            try:
-                                updated = pt.add_operator_cloaking_evidence(
-                                    cloaking_result,
-                                    images=[(upload.name, upload.getvalue()) for upload in operator_files],
-                                    acquisition_url=operator_url.strip(),
-                                    device=operator_device,
-                                    network=operator_network,
-                                    confirmed_difference=True,
-                                )
-                                item.update({
-                                    "cloaking_result": updated,
-                                    "cloaking_verdict": updated.get("verdict", "POSSIBLE"),
-                                    "cloaking_score": updated.get("score", 0),
-                                    "cloaking_signals": updated.get("signals") or [],
-                                    "cloaking_evidence_path": updated.get("evidence_path", ""),
-                                    "cloaking_review_reason": "operator_evidence",
-                                })
-                                domain_worker._atomic_json(
-                                    os.path.join(job_dir, "status.json"), status,
-                                )
-                                job_path = os.path.join(job_dir, "job.json")
-                                try:
-                                    with open(job_path, encoding="utf-8") as job_file:
-                                        persisted_job = json.load(job_file)
-                                except (OSError, ValueError):
-                                    persisted_job = {}
-                                evidence_by_target = dict(
-                                    persisted_job.get("operator_cloaking_evidence") or {}
-                                )
-                                evidence_by_target[item.get("target_url", "")] = (
-                                    updated.get("operator_evidence") or {}
-                                )
-                                persisted_job["operator_cloaking_evidence"] = evidence_by_target
-                                domain_worker._atomic_json(job_path, persisted_job)
-                                st.success(
-                                    "Đã lưu bằng chứng. Hãy xem lại rồi chọn domain ở mục duyệt để retry gửi."
-                                )
-                                st.rerun()
-                            except (OSError, ValueError) as exc:
-                                st.error(f"Không thể lưu bằng chứng: {exc}")
+        )
+        if manual_review_count:
+            with st.container(border=True):
+                st.subheader("Cloaking đã được cách ly")
+                st.write(
+                    f"**{manual_review_count}** domain trong job này không được gửi tự động. "
+                    "Hãy duyệt bằng chứng và chọn hành động tại trang riêng."
+                )
+                _review_page_link("Mở Cloaking Review")
 
         error_rows = []
         for item in results_list:

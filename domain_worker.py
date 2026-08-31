@@ -15,6 +15,7 @@ import uuid
 from datetime import date, datetime, timezone
 
 import phishing_toolkit as pt
+import cloaking_review_queue as review_queue
 from domain_utils import extract_domains_from_text
 
 
@@ -57,6 +58,121 @@ def _atomic_json(path: str, data: dict):
                 os.remove(tmp)
         except OSError:
             pass
+
+
+def launch_job_process(job_path: str):
+    """Launch one persisted worker job without opening a visible console window."""
+    job_path = os.path.abspath(job_path)
+    stop_path = os.path.join(os.path.dirname(job_path), "stop.requested")
+    try:
+        os.remove(stop_path)
+    except FileNotFoundError:
+        pass
+    if getattr(sys, "frozen", False):
+        command = [sys.executable, "--worker-job", job_path]
+    else:
+        command = [sys.executable, os.path.abspath(__file__), job_path]
+    return subprocess.Popen(
+        command,
+        cwd=pt.BASE_DIR,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        start_new_session=os.name != "nt",
+    )
+
+
+def find_active_job_dir() -> str | None:
+    """Return an active worker directory, if any persisted job is still running."""
+    if not os.path.isdir(WORKER_DIR):
+        return None
+    for name in os.listdir(WORKER_DIR):
+        job_dir = os.path.join(WORKER_DIR, name)
+        try:
+            with open(os.path.join(job_dir, "status.json"), encoding="utf-8") as status_file:
+                state = json.load(status_file).get("state")
+        except (OSError, ValueError, TypeError):
+            continue
+        if state in {"prechecking", "running", "waiting"}:
+            return job_dir
+    return None
+
+
+def create_cloaking_review_job(
+    queue_ids: list[str], *, decision: str, allowed_accounts: list[str],
+    batch_size: int = 5, interval_seconds: int = 0,
+) -> str:
+    """Create a persisted worker job for exactly the selected review records."""
+    if decision not in {"confirmed_cloaking", "not_cloaking"}:
+        raise ValueError("Unsupported cloaking review decision")
+    if not queue_ids:
+        raise ValueError("Select at least one cloaking review item")
+    if not allowed_accounts:
+        raise ValueError("Select at least one SMTP account")
+    items = []
+    seen_targets = set()
+    for queue_id in dict.fromkeys(queue_ids):
+        item = review_queue.load_item(queue_id)
+        if not item or item.get("state") not in review_queue.ACTIVE_STATES:
+            raise ValueError(f"Review item is no longer selectable: {queue_id}")
+        target = str(item.get("target_url") or "").strip()
+        if not target:
+            raise ValueError(f"Review item has no target URL: {queue_id}")
+        if target in seen_targets:
+            raise ValueError(f"Select only one pending record for duplicate URL: {target}")
+        seen_targets.add(target)
+        items.append(item)
+
+    os.makedirs(WORKER_DIR, exist_ok=True)
+    job_id = "review_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
+    job_dir = os.path.join(WORKER_DIR, job_id)
+    os.makedirs(job_dir)
+    targets = [item["target_url"] for item in items]
+    queue_id_by_target = {item["target_url"]: item["queue_id"] for item in items}
+    operator_evidence = {
+        item["target_url"]: (item.get("result") or {}).get("cloaking_result", {}).get("operator_evidence")
+        for item in items
+        if (item.get("result") or {}).get("cloaking_result", {}).get("operator_evidence")
+    }
+    job = {
+        "job_id": job_id,
+        "created_at": _now(),
+        "domains": targets,
+        "batch_size": max(1, int(batch_size)),
+        "interval_seconds": max(0, int(interval_seconds)),
+        "include_vncert": False,
+        "allowed_accounts": list(dict.fromkeys(allowed_accounts)),
+        "force_precheck": False,
+        "precheck_only": False,
+        "preflight_version": 2,
+        "retry_targets": targets,
+        "approved_cloaking_targets": targets if decision == "confirmed_cloaking" else [],
+        "force_normal_targets": targets if decision == "not_cloaking" else [],
+        "operator_cloaking_evidence": operator_evidence,
+        "review_queue_ids": queue_id_by_target,
+        "review_decision": decision,
+    }
+    ready = []
+    for item in items:
+        prepared = dict(item.get("prepared") or {})
+        prepared.setdefault("target_url", item["target_url"])
+        prepared.setdefault("domain", item.get("domain") or pt.normalize_domain(item["target_url"]))
+        prepared.setdefault("recipients", [])
+        ready.append(prepared)
+    _atomic_json(os.path.join(job_dir, "job.json"), job)
+    _atomic_json(os.path.join(job_dir, "preflight.json"), {
+        "version": 2, "ready": ready,
+        "excluded_no_email": [], "excluded_already_sent": [],
+    })
+    review_queue.mark_selected_for_send(
+        [item["queue_id"] for item in items],
+        state=(
+            review_queue.QUEUED_CLOAKING
+            if decision == "confirmed_cloaking"
+            else review_queue.QUEUED_NORMAL
+        ),
+        decision=decision, send_job_id=job_id,
+        attempt_accounts=allowed_accounts,
+    )
+    return os.path.join(job_dir, "job.json")
 
 
 def _append_event(path: str, event: dict):
@@ -305,9 +421,18 @@ def _send_domain_drafts(
             )
             if delivery_key in sent_deliveries:
                 summary["already_sent"] += 1
+                summary["sent_to"].append({
+                    "to": parsed["to"],
+                    "draft": filename,
+                    "account": account_username,
+                    "ok": True,
+                    "status": "already_sent",
+                    "error": "",
+                })
                 _append_event(events_path, {
                     "type": "draft_skipped", "domain": domain, "draft": filename,
-                    "account": account_username, "reason": "already_sent_today",
+                    "to": parsed["to"], "account": account_username,
+                    "reason": "already_sent_today",
                 })
                 continue
             send_args = (
@@ -321,16 +446,18 @@ def _send_domain_drafts(
                 result = pt.send_report_email_single(*send_args)
             ok = bool(result.get("success"))
             account = str(result.get("account") or "").strip()
-            if ok and account:
-                successful_accounts.add(account.lower())
+            delivery_account = account or account_username
+            if ok and delivery_account:
+                successful_accounts.add(delivery_account.lower())
                 sent_deliveries.add(delivery_key)
             summary["sent_ok" if ok else "sent_failed"] += 1
             # Track địa chỉ đã gửi để hiển thị trong UI
             summary["sent_to"].append({
                 "to": parsed["to"],
                 "draft": filename,
-                "account": account,
+                "account": delivery_account,
                 "ok": ok,
+                "status": "sent" if ok else "failed",
                 "error": result.get("error") or "",
             })
             row = {
@@ -339,7 +466,7 @@ def _send_domain_drafts(
                 "draft_file": filename,
                 "to": parsed["to"],
                 "subject": parsed["subject"],
-                "account": account,
+                "account": delivery_account,
                 "success": ok,
                 "error": result.get("error") or "",
             }
@@ -349,7 +476,7 @@ def _send_domain_drafts(
                 _append_event(events_path, {"type": "log_error", "domain": domain, "draft": filename, "error": str(exc)})
             _append_event(events_path, {
                 "type": "email_result", "domain": domain, "draft": filename,
-                "to": parsed["to"], "account": result.get("account"), "success": ok,
+                "to": parsed["to"], "account": delivery_account, "success": ok,
                 "error": result.get("error") or "",
             })
     return summary, successful_accounts, False
@@ -439,6 +566,7 @@ def _precheck_report_recipients(domain: str) -> list[dict]:
 def _run_prechecked_domain(
     prepared, cfg, selected_accounts, include_vncert, events_path, stop_path,
     sent_deliveries, approved_cloaking=False, operator_cloaking_evidence=None,
+    force_normal_report=False,
 ):
     """Run the full investigation once, then send only after revalidating draft recipients."""
     target = prepared["target_url"]
@@ -448,7 +576,7 @@ def _run_prechecked_domain(
     result = pt.run_check(target, False, cfg)
     domain = result["domain"]
     cloaking = result.get("cloaking") or {"verdict": "NO_SIGNAL", "score": 0, "signals": []}
-    if operator_cloaking_evidence:
+    if operator_cloaking_evidence and not force_normal_report:
         cloaking = pt.merge_operator_cloaking_evidence(cloaking, operator_cloaking_evidence)
         result["cloaking"] = cloaking
     cloaking_verdict = cloaking.get("verdict", "INCONCLUSIVE")
@@ -456,8 +584,8 @@ def _run_prechecked_domain(
         (cloaking.get("coverage") or {}).get("multi_vantage_recommended")
     )
     if (
-        cloaking_verdict in {"POSSIBLE", "INCONCLUSIVE"} or coverage_gap
-    ) and not approved_cloaking:
+        cloaking_verdict in {"LIKELY", "POSSIBLE", "INCONCLUSIVE"} or coverage_gap
+    ) and not operator_cloaking_evidence and not force_normal_report:
         cloaking = pt.run_cloaking_browser_check(target, cloaking, cfg)
         result["cloaking"] = cloaking
         cloaking_verdict = cloaking.get("verdict", "INCONCLUSIVE")
@@ -471,7 +599,11 @@ def _run_prechecked_domain(
                     str(result.get("drafts_error") or "")
                     + "; Cloaking evidence could not be appended to every draft"
                 ).strip("; ")
-    elif operator_cloaking_evidence and cloaking_verdict in {"LIKELY", "POSSIBLE"}:
+    elif (
+        operator_cloaking_evidence
+        and cloaking_verdict in {"LIKELY", "POSSIBLE"}
+        and not force_normal_report
+    ):
         refreshed = pt.append_cloaking_evidence_to_drafts(result.get("drafts") or [], cloaking)
         if len(refreshed) != len(result.get("drafts") or []):
             result["drafts_error"] = (
@@ -483,9 +615,12 @@ def _run_prechecked_domain(
         and "cloaking evidence" in str(result.get("drafts_error") or "").lower()
     )
     needs_review = (
-        cloaking_verdict in {"POSSIBLE", "INCONCLUSIVE"}
-        or evidence_failed
-        or coverage_gap
+        not force_normal_report
+        and (
+            cloaking_verdict in {"LIKELY", "POSSIBLE", "INCONCLUSIVE"}
+            or evidence_failed
+            or coverage_gap
+        )
     )
     if needs_review and not approved_cloaking:
         _append_event(events_path, {
@@ -504,16 +639,29 @@ def _run_prechecked_domain(
             "cloaking_score": cloaking.get("score", 0),
             "cloaking_signals": cloaking.get("signals") or [],
             "cloaking_evidence_path": cloaking.get("evidence_path", ""),
-            "cloaking_review_reason": "coverage_gap" if coverage_gap else "detector_signal",
+            "cloaking_review_reason": (
+                "coverage_gap" if coverage_gap
+                else "confirmed_signal" if cloaking_verdict == "LIKELY"
+                else "detector_signal"
+            ),
             "cloaking_result": cloaking,
         }, set(), False)
+    if force_normal_report:
+        refreshed = pt.remove_cloaking_evidence_from_drafts(result.get("drafts") or [])
+        if len(refreshed) != len(result.get("drafts") or []):
+            result["drafts_error"] = (
+                str(result.get("drafts_error") or "")
+                + "; Cloaking evidence could not be removed from every draft"
+            ).strip("; ")
     evidence_path = str(cloaking.get("evidence_path") or "").strip()
     evidence_attachments = (
         [evidence_path]
-        if cloaking_verdict in {"LIKELY", "POSSIBLE"} and os.path.isfile(evidence_path)
+        if not force_normal_report
+        and cloaking_verdict in {"LIKELY", "POSSIBLE"}
+        and os.path.isfile(evidence_path)
         else []
     )
-    if cloaking_verdict in {"LIKELY", "POSSIBLE"}:
+    if not force_normal_report and cloaking_verdict in {"LIKELY", "POSSIBLE"}:
         evidence_attachments.extend(
             screenshot.get("path") for screenshot in cloaking.get("screenshots") or []
             if screenshot.get("path") and os.path.isfile(screenshot["path"])
@@ -537,6 +685,9 @@ def _run_prechecked_domain(
         "cloaking_signals": cloaking.get("signals") or [],
         "cloaking_evidence_path": cloaking.get("evidence_path", ""),
         "cloaking_approved": bool(approved_cloaking),
+        "cloaking_disposition": "not_cloaking" if force_normal_report else (
+            "confirmed_cloaking" if approved_cloaking else "automatic"
+        ),
         "cloaking_result": cloaking,
         **mail,
     }
@@ -567,6 +718,14 @@ def run_job(job_path: str):
     force_precheck = bool(job.get("force_precheck", False))
     allowed_accounts = job.get("allowed_accounts")  # list of usernames, or None = all
     approved_cloaking_targets = set(job.get("approved_cloaking_targets") or [])
+    force_normal_targets = set(job.get("force_normal_targets") or [])
+    review_queue_ids = dict(job.get("review_queue_ids") or {})
+    retry_targets_config = job.get("retry_targets")
+    retry_targets = (
+        set(retry_targets_config)
+        if isinstance(retry_targets_config, list)
+        else None
+    )
     operator_cloaking_evidence = job.get("operator_cloaking_evidence") or {}
     cfg = pt.load_config()
 
@@ -577,6 +736,11 @@ def run_job(job_path: str):
             acc for acc in (cfg.get("smtp_accounts") or [])
             if str(acc.get("username", "")).strip().lower() in allowed_lower
         ]
+    attempted_account_names = [
+        str(account.get("username") or "").strip().lower()
+        for account in (cfg.get("smtp_accounts") or [])
+        if str(account.get("username") or "").strip()
+    ]
     # Dedup CHỈ theo ngày hiện tại (không phải all-time): domain đã gửi ở các ngày
     # trước vẫn được coi là "chưa gửi" cho hôm nay, vì mỗi ngày cho phép report lại.
     sent_deliveries = _successfully_sent_deliveries_today()
@@ -605,6 +769,10 @@ def run_job(job_path: str):
             # counters were added.
             or item.get("success") is True
             or item.get("skipped") in ("already_sent", "no_sendable_email")
+            or (
+                item.get("skipped") == "manual_review_required"
+                and item.get("target_url") not in (retry_targets or set())
+            )
         )
     }
     status = {
@@ -698,6 +866,12 @@ def run_job(job_path: str):
                 "excluded_already_sent": status["excluded_already_sent"],
             })
 
+        if retry_targets is not None:
+            ready = [
+                item for item in ready
+                if item.get("target_url") in retry_targets
+            ]
+
         next_state = "ready" if precheck_only else "running"
         status.update({
             "state": next_state, "total": len(previous_results) + len(ready),
@@ -735,6 +909,7 @@ def run_job(job_path: str):
                             prepared, cfg, configured_accounts, include_vncert, events_path, stop_path,
                             sent_deliveries, approved_cloaking=target in approved_cloaking_targets,
                             operator_cloaking_evidence=operator_cloaking_evidence.get(target),
+                            force_normal_report=target in force_normal_targets,
                         )
                         domain = domain_result["domain"]
                     except Exception as exc:
@@ -752,6 +927,23 @@ def run_job(job_path: str):
                         "target_url": target, "domain": domain, "success": False,
                         "error": "No selected SMTP accounts are available in config.ini",
                     }
+                try:
+                    if domain_result.get("skipped") == "manual_review_required":
+                        review_queue.enqueue_worker_result(
+                            job=job, job_dir=job_dir, prepared=prepared,
+                            domain_result=domain_result,
+                        )
+                    elif review_queue_ids.get(target):
+                        review_queue.complete_send(
+                            review_queue_ids[target], domain_result,
+                            attempted_accounts=attempted_account_names,
+                            send_job_id=str(job.get("job_id") or ""),
+                        )
+                except Exception as exc:
+                    _append_event(events_path, {
+                        "type": "cloaking_review_queue_error",
+                        "target_url": target, "error": str(exc),
+                    })
                 status["results"].append(domain_result)
                 status["processed"] += 1
                 status["current_domain"] = None

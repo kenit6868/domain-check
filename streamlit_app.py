@@ -28,6 +28,7 @@ _pages = st.navigation([
 #     st.Page("pages/2_Related_Domains.py",     title="Related Domains",  icon="🕸️"),
 #     st.Page("pages/3_Brand_Scan.py",          title="Brand Scan",       icon="🛡️"),
     st.Page("pages/6_Domain_Worker.py",       title="Domain Worker",    icon="⚙️"),
+    st.Page("pages/10_Cloaking_Review.py",    title="Cloaking Review",  icon=":material/visibility:"),
     st.Page("pages/8_Check_Link_Status.py",   title="Check Link Status",icon="🔗"),
     st.Page("pages/4_Case_Log.py",            title="Case Log",         icon="📋"),
     st.Page("pages/5_Report_Drafts.py",       title="Report Drafts",    icon="✉️"),

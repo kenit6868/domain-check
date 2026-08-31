@@ -192,6 +192,46 @@ draft bình thường và không đính kèm ảnh lỗi. Đây không phải b�
 rằng registrar/registry đã thu hồi domain; cần đối chiếu WHOIS Hold và Check Link
 Status nếu cần kết luận takedown.
 
+Mọi kết quả cloaking `LIKELY`, `POSSIBLE`, `INCONCLUSIVE` hoặc thiếu vantage đều
+được Domain Worker cách ly khỏi luồng gửi tự động và ghi thành record JSON
+riêng trong `data/cloaking_review/`. Trang **Cloaking Review** là nơi duy nhất để
+người vận hành xem evidence, tích chọn từng URL và quyết định: gửi kèm
+evidence cloaking, gửi report thường sau khi loại evidence cloaking, hoặc bỏ qua.
+Mỗi thao tác gửi tạo job riêng chỉ chứa các queue ID đã chọn; không dùng nút
+retry chung để phê duyệt cloaking. Trạng thái `PENDING_REVIEW`, `PARTIAL`,
+`QUEUED_*`, `SENT`, `FAILED`, `SKIPPED` cho phép khôi phục danh sách sau
+refresh/restart.
+Queue ID được tính từ ngày địa phương và full URL đã chuẩn hóa, không
+từ worker job ID. Nhiều observation trong cùng ngày được merge vào một record;
+`source_job_ids`/`observations` giữ lịch sử và result mới nhất dùng để duyệt.
+Legacy record được archive có thể khôi phục sau khi migration.
+
+Queue schema v3 giữ `required_accounts`, `deliveries`, số draft cần giao cho mỗi
+tài khoản và lịch sử `send_attempts`. Một delivery được định danh theo tài khoản
+SMTP, draft và email nhận; `sent` và `already_sent` đều là đã giao, còn `failed`
+vẫn có thể retry. Case chỉ thành `SENT` khi mọi `required_accounts` hoàn tất;
+nếu ít nhất một tài khoản hoàn tất nhưng còn tài khoản khác chưa giao, case là
+`PARTIAL` và vẫn thuộc tập selectable. Trang review hiển thị recipient, sender
+đã hoàn tất, sender còn chờ và ledger chi tiết. Khi mở trang, migration đọc
+review job/result/event cũ để khôi phục cả lượt `already_sent_today` vốn trước
+đây chỉ có trong `events.jsonl`.
+
+Worker Playwright bao gồm Desktop trực tiếp, Android/iPhone từ Google và
+Googlebot Smartphone. Với case HTTP đã `LIKELY`, browser vẫn được chạy để tái
+hiện bằng chứng. Hệ thống chọn tối đa hai ảnh của cặp profile có chênh lệch mạnh
+nhất (title/nội dung/redirect/keyword), rồi đính kèm cặp ảnh cùng manifest sau khi
+người vận hành phê duyệt. Không đính kèm toàn bộ ảnh quan sát vào email.
+
+#### Vận chuyển SMTP cho evidence
+
+Mỗi SMTP account giữ port và chế độ bảo mật riêng. Port 465 dùng implicit TLS;
+port 587 và port tùy chỉnh mặc định dùng STARTTLS. Chỉ đặt `starttls=false` cho
+máy chủ SMTP nội bộ đã xác nhận không hỗ trợ TLS. Email thường có timeout 30
+giây, còn email kèm manifest/ảnh cloaking có timeout 60 giây. Lỗi kết nối tạm
+thời được mở kết nối mới và retry tối đa một lần với cùng Message-ID; lỗi xác
+thực `535`, sender hoặc recipient không retry. Không kiểm tra thay đổi này bằng
+SMTP thật trong test tự động; dùng mock để tránh gửi báo cáo ngoài ý muốn.
+
 Chạy script Python Playwright dưới đây để tự động hóa việc chụp ảnh toàn trang, trích xuất HTML nguồn, HAR log mạng và tính mã băm SHA256 để gửi báo cáo lạm dụng:
 
 ```python
