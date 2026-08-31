@@ -20,6 +20,8 @@ from domain_utils import extract_domains_from_text
 
 
 WORKER_DIR = pt._runtime_path("worker_jobs")
+CLOAKING_WORKER_DIR = pt._runtime_path("cloaking_send_jobs")
+ACTIVE_JOB_STATES = {"prechecking", "running", "waiting"}
 # Log riêng các domain đã được worker check nhưng KHÔNG tìm được email report nào để gửi
 # (registrar chỉ nhận web form, chưa tra được abuse email...). Tách khỏi sent_log.csv vì
 # đây không phải 1 lần gửi thành/thất bại — chỉ là "đã thử, không có gì để gửi". Dùng để
@@ -80,20 +82,51 @@ def launch_job_process(job_path: str):
     )
 
 
-def find_active_job_dir() -> str | None:
-    """Return an active worker directory, if any persisted job is still running."""
-    if not os.path.isdir(WORKER_DIR):
+def is_cloaking_review_job_dir(job_dir: str) -> bool:
+    """Identify new and legacy review-send jobs without relying on their parent folder."""
+    try:
+        with open(os.path.join(job_dir, "job.json"), encoding="utf-8") as job_file:
+            job = json.load(job_file)
+    except (OSError, ValueError, TypeError):
+        return os.path.basename(os.path.abspath(job_dir)).startswith("review_")
+    return bool(
+        job.get("review_queue_ids")
+        or job.get("review_decision")
+        or str(job.get("job_id") or "").startswith("review_")
+    )
+
+
+def _find_active_job_dir(root: str, *, review_job: bool) -> str | None:
+    if not os.path.isdir(root):
         return None
-    for name in os.listdir(WORKER_DIR):
-        job_dir = os.path.join(WORKER_DIR, name)
+    candidates = []
+    for name in os.listdir(root):
+        job_dir = os.path.join(root, name)
+        if not os.path.isdir(job_dir) or is_cloaking_review_job_dir(job_dir) != review_job:
+            continue
         try:
             with open(os.path.join(job_dir, "status.json"), encoding="utf-8") as status_file:
                 state = json.load(status_file).get("state")
         except (OSError, ValueError, TypeError):
             continue
-        if state in {"prechecking", "running", "waiting"}:
-            return job_dir
-    return None
+        if state in ACTIVE_JOB_STATES:
+            candidates.append(job_dir)
+    return max(candidates, key=os.path.getmtime) if candidates else None
+
+
+def find_active_job_dir() -> str | None:
+    """Return only an active primary Domain Worker job (never a review-send job)."""
+    return _find_active_job_dir(WORKER_DIR, review_job=False)
+
+
+def find_active_cloaking_job_dir() -> str | None:
+    """Return an active Cloaking Review send job, including legacy job locations."""
+    candidates = []
+    for root in dict.fromkeys([CLOAKING_WORKER_DIR, WORKER_DIR]):
+        active = _find_active_job_dir(root, review_job=True)
+        if active:
+            candidates.append(active)
+    return max(candidates, key=os.path.getmtime) if candidates else None
 
 
 def create_cloaking_review_job(
@@ -121,9 +154,9 @@ def create_cloaking_review_job(
         seen_targets.add(target)
         items.append(item)
 
-    os.makedirs(WORKER_DIR, exist_ok=True)
+    os.makedirs(CLOAKING_WORKER_DIR, exist_ok=True)
     job_id = "review_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
-    job_dir = os.path.join(WORKER_DIR, job_id)
+    job_dir = os.path.join(CLOAKING_WORKER_DIR, job_id)
     os.makedirs(job_dir)
     targets = [item["target_url"] for item in items]
     queue_id_by_target = {item["target_url"]: item["queue_id"] for item in items}
@@ -563,6 +596,86 @@ def _precheck_report_recipients(domain: str) -> list[dict]:
     return unique
 
 
+def _cloaking_coverage_gap(cloaking: dict) -> bool:
+    return bool((cloaking.get("coverage") or {}).get("multi_vantage_recommended"))
+
+
+def _cloaking_requires_browser(cloaking: dict) -> bool:
+    return (
+        str(cloaking.get("verdict") or "INCONCLUSIVE")
+        in {"LIKELY", "POSSIBLE", "INCONCLUSIVE"}
+        or _cloaking_coverage_gap(cloaking)
+    )
+
+
+def _cloaking_requires_review(cloaking: dict) -> bool:
+    return (
+        str(cloaking.get("verdict") or "INCONCLUSIVE")
+        in {"LIKELY", "POSSIBLE", "INCONCLUSIVE"}
+        or _cloaking_coverage_gap(cloaking)
+    )
+
+
+def _cloaking_review_reason(cloaking: dict) -> str:
+    if _cloaking_coverage_gap(cloaking):
+        return "coverage_gap"
+    if str(cloaking.get("verdict") or "") == "LIKELY":
+        return "confirmed_signal"
+    return "detector_signal"
+
+
+def _verify_cloaking_with_browser(target: str, cloaking: dict, cfg: dict) -> dict:
+    """Run passive browser verification only for detector results that need it."""
+    if not _cloaking_requires_browser(cloaking):
+        return cloaking
+    return pt.run_cloaking_browser_check(target, cloaking, cfg)
+
+
+def _manual_review_domain_result(
+    target: str, domain: str, cloaking: dict, *, duration_seconds: float,
+    reputation=None, drafts_total: int = 0,
+) -> dict:
+    """Build the shared non-send result persisted in the Cloaking Review queue."""
+    return {
+        "target_url": target, "domain": domain, "success": False,
+        "duration_seconds": round(duration_seconds, 1),
+        "reputation": reputation,
+        "drafts_total": drafts_total, "drafts_sendable": 0,
+        "sent_ok": 0, "sent_failed": 0, "already_sent": 0, "sent_to": [],
+        "skipped": "manual_review_required", "manual_review_required": True,
+        "cloaking_verdict": cloaking.get("verdict", "INCONCLUSIVE"),
+        "cloaking_score": cloaking.get("score", 0),
+        "cloaking_signals": cloaking.get("signals") or [],
+        "cloaking_evidence_path": cloaking.get("evidence_path", ""),
+        "cloaking_review_reason": _cloaking_review_reason(cloaking),
+        "cloaking_result": cloaking,
+    }
+
+
+def _precheck_cloaking(target: str, cfg: dict) -> dict:
+    """Check one exact URL and collect browser evidence before the send phase."""
+    cloaking = pt.run_cloaking_check(target, "full", cfg)
+    return _verify_cloaking_with_browser(target, cloaking, cfg)
+
+
+def _write_preflight(
+    path: str, *, version: int, ready: list[dict], excluded_no_email: list[dict],
+    excluded_already_sent: list[dict], cloaking_review: list[dict], complete: bool,
+) -> None:
+    payload = {
+        "version": version,
+        "ready": ready,
+        "excluded_no_email": excluded_no_email,
+        "excluded_already_sent": excluded_already_sent,
+    }
+    if version >= 3:
+        payload.update({
+            "cloaking_review": cloaking_review,
+            "complete": bool(complete),
+        })
+    _atomic_json(path, payload)
+
+
 def _run_prechecked_domain(
     prepared, cfg, selected_accounts, include_vncert, events_path, stop_path,
     sent_deliveries, approved_cloaking=False, operator_cloaking_evidence=None,
@@ -580,18 +693,10 @@ def _run_prechecked_domain(
         cloaking = pt.merge_operator_cloaking_evidence(cloaking, operator_cloaking_evidence)
         result["cloaking"] = cloaking
     cloaking_verdict = cloaking.get("verdict", "INCONCLUSIVE")
-    coverage_gap = bool(
-        (cloaking.get("coverage") or {}).get("multi_vantage_recommended")
-    )
-    if (
-        cloaking_verdict in {"LIKELY", "POSSIBLE", "INCONCLUSIVE"} or coverage_gap
-    ) and not operator_cloaking_evidence and not force_normal_report:
-        cloaking = pt.run_cloaking_browser_check(target, cloaking, cfg)
+    if _cloaking_requires_browser(cloaking) and not operator_cloaking_evidence and not force_normal_report:
+        cloaking = _verify_cloaking_with_browser(target, cloaking, cfg)
         result["cloaking"] = cloaking
         cloaking_verdict = cloaking.get("verdict", "INCONCLUSIVE")
-        coverage_gap = bool(
-            (cloaking.get("coverage") or {}).get("multi_vantage_recommended")
-        )
         if cloaking_verdict in {"LIKELY", "POSSIBLE"}:
             refreshed = pt.append_cloaking_evidence_to_drafts(result.get("drafts") or [], cloaking)
             if len(refreshed) != len(result.get("drafts") or []):
@@ -616,11 +721,7 @@ def _run_prechecked_domain(
     )
     needs_review = (
         not force_normal_report
-        and (
-            cloaking_verdict in {"LIKELY", "POSSIBLE", "INCONCLUSIVE"}
-            or evidence_failed
-            or coverage_gap
-        )
+        and (_cloaking_requires_review(cloaking) or evidence_failed)
     )
     if needs_review and not approved_cloaking:
         _append_event(events_path, {
@@ -628,24 +729,15 @@ def _run_prechecked_domain(
             "verdict": cloaking_verdict, "score": cloaking.get("score", 0),
             "evidence_path": cloaking.get("evidence_path", ""),
         })
-        return ({
-            "target_url": target, "domain": domain, "success": False,
-            "duration_seconds": round(time.time() - started, 1),
-            "reputation": result.get("reputation", {}).get("verdict"),
-            "drafts_total": len(result.get("drafts") or []), "drafts_sendable": 0,
-            "sent_ok": 0, "sent_failed": 0, "already_sent": 0, "sent_to": [],
-            "skipped": "manual_review_required", "manual_review_required": True,
-            "cloaking_verdict": cloaking_verdict,
-            "cloaking_score": cloaking.get("score", 0),
-            "cloaking_signals": cloaking.get("signals") or [],
-            "cloaking_evidence_path": cloaking.get("evidence_path", ""),
-            "cloaking_review_reason": (
-                "coverage_gap" if coverage_gap
-                else "confirmed_signal" if cloaking_verdict == "LIKELY"
-                else "detector_signal"
+        return (
+            _manual_review_domain_result(
+                target, domain, cloaking,
+                duration_seconds=time.time() - started,
+                reputation=result.get("reputation", {}).get("verdict"),
+                drafts_total=len(result.get("drafts") or []),
             ),
-            "cloaking_result": cloaking,
-        }, set(), False)
+            set(), False,
+        )
     if force_normal_report:
         refreshed = pt.remove_cloaking_evidence_from_drafts(result.get("drafts") or [])
         if len(refreshed) != len(result.get("drafts") or []):
@@ -779,7 +871,7 @@ def run_job(job_path: str):
         "job_id": job.get("job_id"), "state": "prechecking", "pid": os.getpid(),
         "started_at": _now(), "finished_at": None, "total": len(targets), "processed": 0,
         "precheck_total": len(targets), "precheck_processed": 0, "ready_total": 0,
-        "precheck_cached": 0,
+        "precheck_cached": 0, "cloaking_review_total": 0,
         "current_domain": None, "current_batch": 0, "total_batches": 0,
         "next_batch_in_seconds": 0, "results": previous_results, "excluded_no_email": [],
         "excluded_already_sent": [], "error": None,
@@ -788,19 +880,40 @@ def run_job(job_path: str):
     _append_event(events_path, {"type": "job_started", "total": len(targets), "batch_size": batch_size})
 
     try:
-        if os.path.exists(preflight_path) and job.get("preflight_version") == 2:
-            with open(preflight_path, encoding="utf-8") as f:
-                preflight = json.load(f)
-            ready = preflight.get("ready") or [] if preflight.get("version") == 2 else []
+        requested_preflight_version = max(2, int(job.get("preflight_version", 2) or 2))
+        preflight = {}
+        if os.path.exists(preflight_path):
+            try:
+                with open(preflight_path, encoding="utf-8") as preflight_file:
+                    preflight = json.load(preflight_file)
+            except (OSError, ValueError, TypeError):
+                preflight = {}
+        persisted_version = int(preflight.get("version", 0) or 0)
+        reusable_preflight = (
+            persisted_version == requested_preflight_version
+            and (persisted_version == 2 or bool(preflight.get("complete")))
+        )
+        if reusable_preflight:
+            ready = preflight.get("ready") or []
+            cloaking_review_items = preflight.get("cloaking_review") or []
             # Resume cùng job: chỉ giữ các domain chưa có kết quả. Domain đang
             # xử lý lúc bị dừng chưa được append nên vẫn được chạy lại an toàn.
             ready = [item for item in ready if item.get("target_url") not in completed_targets]
             status["excluded_no_email"] = preflight.get("excluded_no_email") or []
             status["excluded_already_sent"] = preflight.get("excluded_already_sent") or []
             status["precheck_processed"] = len(targets)
+            status["cloaking_review_total"] = len(cloaking_review_items)
         else:
             ready = []
+            cloaking_review_items = []
             configured_accounts = cfg.get("smtp_accounts") or []
+            detect_cloaking_early = requested_preflight_version >= 3
+            _write_preflight(
+                preflight_path, version=requested_preflight_version, ready=ready,
+                excluded_no_email=status["excluded_no_email"],
+                excluded_already_sent=status["excluded_already_sent"],
+                cloaking_review=cloaking_review_items, complete=False,
+            )
             for target in targets:
                 if _should_stop(stop_path):
                     status["state"] = "stopped"
@@ -815,56 +928,137 @@ def run_job(job_path: str):
                 _append_event(events_path, {"type": "precheck_started", "target_url": target})
                 started = time.time()
                 target_domain = pt.normalize_domain(target).lower().rstrip(".")
-                if configured_accounts:
-                    try:
-                        cached_precheck = None if force_precheck else precheck_cache.get(target_domain)
-                        if cached_precheck is not None:
-                            recipients = cached_precheck.get("recipients") or []
-                            status["precheck_cached"] += 1
-                            _append_event(events_path, {
-                                "type": "precheck_cache_hit", "target_url": target,
-                                "domain": target_domain,
-                            })
-                        else:
-                            recipients = _precheck_report_recipients(target_domain)
+                recipients = []
+                recipient_error = None
+                cloaking = {
+                    "target_url": target, "verdict": "NO_SIGNAL", "score": 0,
+                    "signals": [], "coverage": {"multi_vantage_recommended": False},
+                }
+                cached_precheck = (
+                    None if force_precheck else precheck_cache.get(target_domain)
+                ) if configured_accounts else None
+                if cached_precheck is not None:
+                    recipients = cached_precheck.get("recipients") or []
+                    status["precheck_cached"] += 1
+                    _append_event(events_path, {
+                        "type": "precheck_cache_hit", "target_url": target,
+                        "domain": target_domain,
+                    })
+
+                recipient_future = None
+                cloaking_future = None
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                    if configured_accounts and cached_precheck is None:
+                        recipient_future = pool.submit(
+                            _precheck_report_recipients, target_domain,
+                        )
+                    if detect_cloaking_early:
+                        cloaking_future = pool.submit(_precheck_cloaking, target, cfg)
+                    if recipient_future is not None:
+                        try:
+                            recipients = recipient_future.result()
                             precheck_cache[target_domain] = {
                                 "checked_at": _now(), "recipients": recipients,
                             }
                             _save_precheck_cache(precheck_cache)
-                        if recipients:
-                            ready.append({
-                                "target_url": target, "domain": target_domain,
-                                "recipients": recipients,
-                                "precheck_duration_seconds": round(time.time() - started, 1),
-                            })
-                        else:
-                            excluded = {
-                                "target_url": target, "domain": target_domain,
-                                "status": "no_sendable_email",
+                        except Exception as exc:
+                            recipient_error = str(exc)
+                    if cloaking_future is not None:
+                        try:
+                            cloaking = cloaking_future.result()
+                        except Exception as exc:
+                            cloaking = {
+                                "target_url": target, "verdict": "INCONCLUSIVE",
+                                "score": 0, "signals": [], "profiles": {},
+                                "coverage": {"multi_vantage_recommended": False},
+                                "manual_review_required": True, "evidence_path": "",
+                                "error": str(exc),
                             }
-                            status["excluded_no_email"].append(excluded)
-                            _log_no_email(target_domain, target)
+                            _append_event(events_path, {
+                                "type": "cloaking_precheck_error",
+                                "target_url": target, "error": str(exc),
+                            })
+
+                prepared = {
+                    "target_url": target, "domain": target_domain,
+                    "recipients": recipients,
+                    "precheck_duration_seconds": round(time.time() - started, 1),
+                    "cloaking_verdict": cloaking.get("verdict", "INCONCLUSIVE"),
+                    "cloaking_score": cloaking.get("score", 0),
+                }
+                if detect_cloaking_early and _cloaking_requires_review(cloaking):
+                    domain_result = _manual_review_domain_result(
+                        target, target_domain, cloaking,
+                        duration_seconds=time.time() - started,
+                    )
+                    queue_error = ""
+                    queue_item = {}
+                    try:
+                        queue_item = review_queue.enqueue_worker_result(
+                            job=job, job_dir=job_dir, prepared=prepared,
+                            domain_result=domain_result,
+                        )
                     except Exception as exc:
-                        status["excluded_no_email"].append({
-                            "target_url": target, "domain": target_domain,
-                            "status": "precheck_error", "error": str(exc),
+                        queue_error = str(exc)
+                        _append_event(events_path, {
+                            "type": "cloaking_review_queue_error",
+                            "target_url": target, "error": queue_error,
                         })
-                        _append_event(events_path, {"type": "precheck_error", "target_url": target, "error": str(exc)})
+                    cloaking_review_items.append({
+                        **prepared,
+                        "cloaking_evidence_path": cloaking.get("evidence_path", ""),
+                        "cloaking_review_reason": _cloaking_review_reason(cloaking),
+                        "queue_id": queue_item.get("queue_id", ""),
+                        "queue_state": queue_item.get("state", ""),
+                        "queue_error": queue_error,
+                    })
+                    _append_event(events_path, {
+                        "type": "cloaking_precheck_isolated", "target_url": target,
+                        "domain": target_domain,
+                        "verdict": cloaking.get("verdict", "INCONCLUSIVE"),
+                        "score": cloaking.get("score", 0),
+                        "queue_id": queue_item.get("queue_id", ""),
+                    })
+                elif recipient_error:
+                    status["excluded_no_email"].append({
+                        "target_url": target, "domain": target_domain,
+                        "status": "precheck_error", "error": recipient_error,
+                    })
+                    _append_event(events_path, {
+                        "type": "precheck_error", "target_url": target,
+                        "error": recipient_error,
+                    })
+                elif recipients:
+                    ready.append(prepared)
+                elif configured_accounts:
+                    excluded = {
+                        "target_url": target, "domain": target_domain,
+                        "status": "no_sendable_email",
+                    }
+                    status["excluded_no_email"].append(excluded)
+                    _log_no_email(target_domain, target)
                 status["precheck_processed"] += 1
                 status["processed"] = status["precheck_processed"]
                 status["ready_total"] = len(ready)
+                status["cloaking_review_total"] = len(cloaking_review_items)
                 status["current_domain"] = None
+                _write_preflight(
+                    preflight_path, version=requested_preflight_version, ready=ready,
+                    excluded_no_email=status["excluded_no_email"],
+                    excluded_already_sent=status["excluded_already_sent"],
+                    cloaking_review=cloaking_review_items, complete=False,
+                )
                 _atomic_json(status_path, status)
                 _append_event(events_path, {"type": "precheck_finished", "target_url": target})
 
             if status["state"] == "stopped":
                 return
-            _atomic_json(preflight_path, {
-                "version": 2,
-                "ready": ready,
-                "excluded_no_email": status["excluded_no_email"],
-                "excluded_already_sent": status["excluded_already_sent"],
-            })
+            _write_preflight(
+                preflight_path, version=requested_preflight_version, ready=ready,
+                excluded_no_email=status["excluded_no_email"],
+                excluded_already_sent=status["excluded_already_sent"],
+                cloaking_review=cloaking_review_items, complete=True,
+            )
 
         if retry_targets is not None:
             ready = [
@@ -883,6 +1077,7 @@ def run_job(job_path: str):
         _append_event(events_path, {
             "type": "precheck_completed", "ready": len(ready),
             "excluded_no_email": len(status["excluded_no_email"]),
+            "cloaking_review": len(cloaking_review_items),
         })
         if precheck_only:
             return

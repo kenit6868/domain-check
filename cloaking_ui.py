@@ -14,6 +14,12 @@ VERDICT_LABELS = {
     "INCONCLUSIVE": "Chưa đủ dữ liệu — cần xác minh",
     "NO_SIGNAL": "Chưa phát hiện dấu hiệu cloaking",
 }
+COMPACT_VERDICT_LABELS = {
+    "LIKELY": "Khả năng cao",
+    "POSSIBLE": "Nghi ngờ",
+    "INCONCLUSIVE": "Chưa đủ dữ liệu",
+    "NO_SIGNAL": "Không phát hiện",
+}
 CONTENT_LABELS = {
     "GAMBLING_EXPOSED": "Phát hiện nội dung cờ bạc công khai trên nhiều profile",
     "PROFILE_DEPENDENT": "Nội dung nhạy cảm chỉ xuất hiện trên một số profile",
@@ -24,6 +30,15 @@ CONTENT_LABELS = {
 def verdict_label(result: dict) -> str:
     verdict = (result or {}).get("verdict", "INCONCLUSIVE")
     return VERDICT_LABELS.get(verdict, verdict)
+
+
+def cloaking_details_label(result: dict) -> str:
+    """Build the compact verdict summary shown on a collapsed details panel."""
+    result = result or {}
+    verdict = result.get("verdict", "INCONCLUSIVE")
+    summary = COMPACT_VERDICT_LABELS.get(verdict, verdict_label(result))
+    score = int(result.get("score", 0) or 0)
+    return f"Chi tiết kiểm tra cloaking · {summary} · {score}/100 điểm"
 
 
 def render_cloaking_result(result: dict, *, compact: bool = False) -> None:
@@ -149,3 +164,10 @@ def render_cloaking_result(result: dict, *, compact: bool = False) -> None:
             path = screenshot.get("path", "")
             if path and os.path.isfile(path):
                 st.image(path, caption=os.path.basename(path), width="stretch")
+
+
+def render_cloaking_details(result: dict) -> None:
+    """Render one collapsed panel; keep the verdict visible in its label."""
+    result = result or {}
+    with st.expander(cloaking_details_label(result), expanded=False):
+        render_cloaking_result(result)

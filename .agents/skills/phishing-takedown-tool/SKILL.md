@@ -52,10 +52,17 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   domain đã bị thu hồi nếu chưa có WHOIS Hold/link status xác nhận.
 - Worker không tự gửi bất kỳ case cloaking nào. `LIKELY`, `POSSIBLE`,
   `INCONCLUSIVE` và coverage gap phải được tách khỏi luồng gửi để duyệt; chỉ
-  retry đúng các URL người vận hành đã tích chọn và xác nhận. Queue
-  review phải lưu bền vững tách khỏi worker job; trang Cloaking Review là nơi duy
-  nhất được tạo job gửi cloaking. `approved_cloaking_targets` và `retry_targets`
-  phải giới hạn job vào đúng record đã chọn.
+  retry đúng các URL người vận hành đã tích chọn và xác nhận. Bước precheck của
+  Domain Worker phải chạy lookup recipient và detector cloaking đồng thời trên
+  từng full URL, enqueue case ngay khi phát hiện và chỉ đưa case không cloaking
+  vào danh sách gửi thường; không đợi pipeline gửi mới phân loại. Queue review
+  phải lưu bền vững tách khỏi worker job; trang Cloaking Review là nơi duy nhất
+  được tạo job gửi cloaking. `approved_cloaking_targets` và `retry_targets` phải
+  giới hạn job vào đúng record đã chọn.
+- Job Domain Worker thường và job gửi Cloaking Review phải dùng namespace cùng
+  active-job lock riêng. Một luồng đang chạy không được khóa luồng còn lại; vẫn
+  nhận diện job review legacy trong thư mục worker cũ để migrate/sync nhưng không
+  tính nó là Domain Worker thường.
 - Queue review phải dedupe theo ngày địa phương + full URL chuẩn hóa, không
   theo worker job ID hoặc tài khoản SMTP. Observation trùng ngày phải giữ
   source-job history, dùng evidence mới nhất và không làm mất terminal state.

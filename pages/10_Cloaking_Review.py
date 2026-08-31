@@ -20,10 +20,13 @@ st.caption(
     "rồi quyết định gửi kèm bằng chứng, gửi như report thường hoặc bỏ qua."
 )
 
-try:
-    review_queue.sync_from_worker_jobs(domain_worker.WORKER_DIR)
-except OSError:
-    pass
+for review_job_root in dict.fromkeys([
+    domain_worker.WORKER_DIR, domain_worker.CLOAKING_WORKER_DIR,
+]):
+    try:
+        review_queue.sync_from_worker_jobs(review_job_root)
+    except OSError:
+        pass
 
 flash = st.session_state.pop("cloaking_review_flash", "")
 if flash:
@@ -333,28 +336,33 @@ if editable:
         "Tôi đã kiểm tra evidence và xác nhận hành động cho các domain được chọn.",
         value=False,
     )
-    active_job_dir = domain_worker.find_active_job_dir()
-    if active_job_dir:
+    active_cloaking_job_dir = domain_worker.find_active_cloaking_job_dir()
+    if active_cloaking_job_dir:
         st.warning(
-            "Một Domain Worker đang chạy. Hãy chờ job đó hoàn tất trước khi gửi queue cloaking.",
+            "Một job gửi Cloaking Review đang chạy. Hãy chờ job gửi đó hoàn tất trước khi tạo lượt gửi mới.",
             icon=":material/schedule:",
+        )
+    else:
+        st.caption(
+            "Luồng gửi này độc lập với Domain Worker thường; bạn có thể duyệt và gửi "
+            "cloaking ngay cả khi precheck hoặc job domain vẫn đang chạy."
         )
 
     with st.container(horizontal=True, gap="small"):
         send_cloaking = st.button(
             "Xác nhận cloaking và gửi kèm bằng chứng",
             type="primary", icon=":material/send:",
-            disabled=bool(active_job_dir) or not account_names,
+            disabled=bool(active_cloaking_job_dir) or not account_names,
         )
         send_normal = st.button(
             "Không phải cloaking — gửi report thường",
             icon=":material/outgoing_mail:",
-            disabled=bool(active_job_dir) or not account_names,
+            disabled=bool(active_cloaking_job_dir) or not account_names,
         )
         skip_items = st.button(
             "Bỏ qua domain đã chọn",
             icon=":material/block:",
-            disabled=bool(active_job_dir),
+            disabled=bool(active_cloaking_job_dir),
         )
 
     def _validate_action() -> bool:

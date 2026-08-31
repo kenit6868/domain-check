@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import threading
 import unittest
 from unittest.mock import Mock, patch
 from datetime import datetime, timedelta, timezone
@@ -115,13 +116,20 @@ class DomainWorkerTests(unittest.TestCase):
                     "job_id": "precheck-only", "domains": ["target.example"],
                     "batch_size": 5, "interval_seconds": 0,
                     "include_vncert": False, "precheck_only": True,
-                    "preflight_version": 2,
+                    "preflight_version": 3,
                 }, f)
             recipients = [{"channel": "registry", "email": "abuse@example.net"}]
             with (
                 patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
                 patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
                 patch.object(domain_worker, "_precheck_report_recipients", return_value=recipients),
+                patch.object(
+                    domain_worker.pt, "run_cloaking_check",
+                    return_value={
+                        "verdict": "NO_SIGNAL", "score": 0, "signals": [],
+                        "coverage": {"multi_vantage_recommended": False},
+                    },
+                ) as cloaking_check,
                 patch.object(domain_worker.pt, "run_check") as run_check,
             ):
                 domain_worker.run_job(job_path)
@@ -131,8 +139,182 @@ class DomainWorkerTests(unittest.TestCase):
                 preflight = json.load(f)
             self.assertEqual(status["state"], "ready")
             self.assertEqual(status["ready_total"], 1)
+            self.assertEqual(status["cloaking_review_total"], 0)
+            self.assertEqual(preflight["version"], 3)
+            self.assertTrue(preflight["complete"])
             self.assertEqual(preflight["ready"][0]["recipients"], recipients)
+            self.assertEqual(preflight["ready"][0]["cloaking_verdict"], "NO_SIGNAL")
+            cloaking_check.assert_called_once_with("target.example", "full", {"smtp_accounts": [{}]})
             run_check.assert_not_called()
+
+    def test_precheck_runs_recipient_lookup_and_cloaking_detection_concurrently(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            job_path = os.path.join(job_dir, "job.json")
+            with open(job_path, "w", encoding="utf-8") as job_file:
+                json.dump({
+                    "job_id": "parallel-precheck", "domains": ["https://parallel.example/path"],
+                    "batch_size": 5, "interval_seconds": 0,
+                    "include_vncert": False, "precheck_only": True,
+                    "preflight_version": 3,
+                }, job_file)
+            rendezvous = threading.Barrier(2, timeout=2)
+
+            def resolve_recipients(_domain):
+                rendezvous.wait()
+                return [{"channel": "registry", "email": "abuse@example.net"}]
+
+            def detect_cloaking(_target, _mode, _cfg):
+                rendezvous.wait()
+                return {
+                    "verdict": "NO_SIGNAL", "score": 0, "signals": [],
+                    "coverage": {"multi_vantage_recommended": False},
+                }
+
+            with (
+                patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                patch.object(domain_worker, "_precheck_report_recipients", side_effect=resolve_recipients),
+                patch.object(domain_worker.pt, "run_cloaking_check", side_effect=detect_cloaking),
+                patch.object(domain_worker.pt, "run_check") as run_check,
+            ):
+                domain_worker.run_job(job_path)
+
+            with open(os.path.join(job_dir, "preflight.json"), encoding="utf-8") as preflight_file:
+                preflight = json.load(preflight_file)
+            self.assertEqual(len(preflight["ready"]), 1)
+            self.assertEqual(preflight["cloaking_review"], [])
+            run_check.assert_not_called()
+
+    def test_precheck_enqueues_cloaking_immediately_and_excludes_it_from_normal_worker(self):
+        with tempfile.TemporaryDirectory() as job_dir, tempfile.TemporaryDirectory() as review_dir:
+            target = "https://cloaked.example/vi-vn/"
+            job_path = os.path.join(job_dir, "job.json")
+            with open(job_path, "w", encoding="utf-8") as job_file:
+                json.dump({
+                    "job_id": "early-cloaking", "created_at": "2026-08-31T01:00:00+00:00",
+                    "domains": [target], "batch_size": 5, "interval_seconds": 0,
+                    "include_vncert": False, "precheck_only": True,
+                    "preflight_version": 3,
+                    "allowed_accounts": ["sender@example.org"],
+                }, job_file)
+            recipients = [{"channel": "registry", "email": "abuse@example.net"}]
+            http_result = {
+                "target_url": target, "verdict": "POSSIBLE", "score": 35,
+                "signals": [{"code": "profile_difference"}],
+                "coverage": {"multi_vantage_recommended": False},
+            }
+            browser_result = {
+                **http_result, "verdict": "LIKELY", "score": 85,
+                "evidence_path": os.path.join(job_dir, "evidence.json"),
+                "screenshots": [],
+            }
+            with (
+                patch.object(review_queue, "REVIEW_DIR", review_dir),
+                patch.object(domain_worker.pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                patch.object(domain_worker, "_precheck_report_recipients", return_value=recipients),
+                patch.object(domain_worker.pt, "run_cloaking_check", return_value=http_result) as http_check,
+                patch.object(
+                    domain_worker.pt, "run_cloaking_browser_check", return_value=browser_result,
+                ) as browser_check,
+                patch.object(domain_worker.pt, "run_check") as run_check,
+            ):
+                domain_worker.run_job(job_path)
+                queued = review_queue.list_items(review_queue.ACTIVE_STATES)
+
+            with open(os.path.join(job_dir, "status.json"), encoding="utf-8") as status_file:
+                status = json.load(status_file)
+            with open(os.path.join(job_dir, "preflight.json"), encoding="utf-8") as preflight_file:
+                preflight = json.load(preflight_file)
+            self.assertEqual(status["state"], "ready")
+            self.assertEqual(status["ready_total"], 0)
+            self.assertEqual(status["cloaking_review_total"], 1)
+            self.assertEqual(preflight["ready"], [])
+            self.assertEqual(preflight["cloaking_review"][0]["target_url"], target)
+            self.assertEqual(preflight["cloaking_review"][0]["cloaking_verdict"], "LIKELY")
+            self.assertEqual(len(queued), 1)
+            self.assertEqual(queued[0]["target_url"], target)
+            self.assertEqual(queued[0]["prepared"]["recipients"], recipients)
+            http_check.assert_called_once_with(
+                target, "full", {"smtp_accounts": [{"username": "sender@example.org"}]},
+            )
+            browser_check.assert_called_once_with(
+                target, http_result, {"smtp_accounts": [{"username": "sender@example.org"}]},
+            )
+            run_check.assert_not_called()
+
+    def test_first_cloaking_case_is_reviewable_before_remaining_precheck_finishes(self):
+        with tempfile.TemporaryDirectory() as job_dir, tempfile.TemporaryDirectory() as review_dir:
+            first = "https://first-cloaked.example/"
+            second = "https://second-slow.example/"
+            job_path = os.path.join(job_dir, "job.json")
+            with open(job_path, "w", encoding="utf-8") as job_file:
+                json.dump({
+                    "job_id": "streaming-cloaking", "domains": [first, second],
+                    "batch_size": 5, "interval_seconds": 0,
+                    "include_vncert": False, "precheck_only": True,
+                    "preflight_version": 3,
+                    "allowed_accounts": ["sender@example.org"],
+                }, job_file)
+            second_started = threading.Event()
+            release_second = threading.Event()
+
+            def detect(target, _mode, _cfg):
+                if target == second:
+                    second_started.set()
+                    if not release_second.wait(timeout=5):
+                        raise TimeoutError("test did not release second detector")
+                    return {
+                        "verdict": "NO_SIGNAL", "score": 0, "signals": [],
+                        "coverage": {"multi_vantage_recommended": False},
+                    }
+                return {
+                    "verdict": "POSSIBLE", "score": 40, "signals": [],
+                    "coverage": {"multi_vantage_recommended": False},
+                }
+
+            with (
+                patch.object(review_queue, "REVIEW_DIR", review_dir),
+                patch.object(domain_worker.pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                patch.object(
+                    domain_worker, "_precheck_report_recipients",
+                    return_value=[{"channel": "registry", "email": "abuse@example.net"}],
+                ),
+                patch.object(domain_worker.pt, "run_cloaking_check", side_effect=detect),
+                patch.object(
+                    domain_worker.pt, "run_cloaking_browser_check",
+                    side_effect=lambda target, result, _cfg: {
+                        **result, "target_url": target, "verdict": "LIKELY", "score": 80,
+                    },
+                ),
+            ):
+                worker_thread = threading.Thread(
+                    target=domain_worker.run_job, args=(job_path,), daemon=True,
+                )
+                worker_thread.start()
+                try:
+                    self.assertTrue(second_started.wait(timeout=5))
+                    queued = review_queue.list_items(review_queue.ACTIVE_STATES)
+                    self.assertEqual([item["target_url"] for item in queued], [first])
+                    with open(os.path.join(job_dir, "status.json"), encoding="utf-8") as status_file:
+                        status_while_running = json.load(status_file)
+                    with open(os.path.join(job_dir, "preflight.json"), encoding="utf-8") as preflight_file:
+                        partial_preflight = json.load(preflight_file)
+                    self.assertEqual(status_while_running["state"], "prechecking")
+                    self.assertFalse(partial_preflight["complete"])
+                    self.assertEqual(
+                        [item["target_url"] for item in partial_preflight["cloaking_review"]],
+                        [first],
+                    )
+                finally:
+                    release_second.set()
+                    worker_thread.join(timeout=5)
+            self.assertFalse(worker_thread.is_alive())
 
     def test_reads_only_successful_domain_accounts_from_current_day(self):
         with tempfile.TemporaryDirectory() as job_dir:
@@ -414,6 +596,57 @@ class DomainWorkerTests(unittest.TestCase):
             self.assertEqual(status["results"][-1]["sent_ok"], 1)
             self.assertEqual(status["results"][-1]["sent_failed"], 0)
 
+    def test_normal_worker_uses_only_ready_items_from_completed_v3_preflight(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            normal = "https://normal.example/path"
+            cloaked = "https://cloaked.example/path"
+            job_path = os.path.join(job_dir, "job.json")
+            with open(job_path, "w", encoding="utf-8") as job_file:
+                json.dump({
+                    "job_id": "v3-separated-send", "domains": [normal, cloaked],
+                    "batch_size": 5, "interval_seconds": 0,
+                    "include_vncert": False, "precheck_only": False,
+                    "preflight_version": 3,
+                }, job_file)
+            with open(os.path.join(job_dir, "preflight.json"), "w", encoding="utf-8") as preflight_file:
+                json.dump({
+                    "version": 3, "complete": True,
+                    "ready": [{
+                        "target_url": normal, "domain": "normal.example",
+                        "recipients": [{"channel": "registry", "email": "abuse@example.net"}],
+                    }],
+                    "cloaking_review": [{
+                        "target_url": cloaked, "domain": "cloaked.example",
+                        "cloaking_verdict": "LIKELY", "cloaking_score": 80,
+                    }],
+                    "excluded_no_email": [], "excluded_already_sent": [],
+                }, preflight_file)
+            sent_result = {
+                "target_url": normal, "domain": "normal.example",
+                "success": True, "sent_ok": 1, "sent_failed": 0,
+            }
+            with (
+                patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                patch.object(domain_worker, "_precheck_report_recipients") as recipient_check,
+                patch.object(domain_worker.pt, "run_cloaking_check") as cloaking_check,
+                patch.object(
+                    domain_worker, "_run_prechecked_domain",
+                    return_value=(sent_result, set(), False),
+                ) as run_domain,
+            ):
+                domain_worker.run_job(job_path)
+
+            with open(os.path.join(job_dir, "status.json"), encoding="utf-8") as status_file:
+                status = json.load(status_file)
+            recipient_check.assert_not_called()
+            cloaking_check.assert_not_called()
+            run_domain.assert_called_once()
+            self.assertEqual(run_domain.call_args.args[0]["target_url"], normal)
+            self.assertEqual(status["state"], "completed")
+            self.assertEqual(status["cloaking_review_total"], 1)
+            self.assertEqual([item["target_url"] for item in status["results"]], [normal])
+
     def test_manual_cloaking_retry_processes_only_selected_targets(self):
         with tempfile.TemporaryDirectory() as job_dir:
             job_path = os.path.join(job_dir, "job.json")
@@ -463,9 +696,14 @@ class DomainWorkerTests(unittest.TestCase):
             self.assertTrue(run_domain.call_args.kwargs["approved_cloaking"])
 
     def test_create_review_job_contains_only_selected_queue_items(self):
-        with tempfile.TemporaryDirectory() as worker_dir, tempfile.TemporaryDirectory() as review_dir:
+        with (
+            tempfile.TemporaryDirectory() as worker_dir,
+            tempfile.TemporaryDirectory() as cloaking_worker_dir,
+            tempfile.TemporaryDirectory() as review_dir,
+        ):
             with (
                 patch.object(domain_worker, "WORKER_DIR", worker_dir),
+                patch.object(domain_worker, "CLOAKING_WORKER_DIR", cloaking_worker_dir),
                 patch.object(review_queue, "REVIEW_DIR", review_dir),
             ):
                 selected = review_queue.enqueue_worker_result(
@@ -496,6 +734,10 @@ class DomainWorkerTests(unittest.TestCase):
                 with open(os.path.join(os.path.dirname(job_path), "preflight.json"), encoding="utf-8") as preflight_file:
                     preflight = json.load(preflight_file)
 
+                self.assertEqual(
+                    os.path.commonpath([job_path, cloaking_worker_dir]),
+                    os.path.abspath(cloaking_worker_dir),
+                )
                 self.assertEqual(job["domains"], ["https://selected.example/"])
                 self.assertEqual(job["approved_cloaking_targets"], job["domains"])
                 self.assertEqual(job["force_normal_targets"], [])
@@ -512,6 +754,67 @@ class DomainWorkerTests(unittest.TestCase):
                     review_queue.load_item(unselected["queue_id"])["state"],
                     review_queue.PENDING_REVIEW,
                 )
+
+    def test_primary_and_cloaking_workers_have_independent_active_job_locks(self):
+        with (
+            tempfile.TemporaryDirectory() as worker_dir,
+            tempfile.TemporaryDirectory() as cloaking_worker_dir,
+            tempfile.TemporaryDirectory() as review_dir,
+        ):
+            with (
+                patch.object(domain_worker, "WORKER_DIR", worker_dir),
+                patch.object(domain_worker, "CLOAKING_WORKER_DIR", cloaking_worker_dir),
+                patch.object(review_queue, "REVIEW_DIR", review_dir),
+            ):
+                primary_dir = os.path.join(worker_dir, "primary")
+                os.makedirs(primary_dir)
+                with open(os.path.join(primary_dir, "job.json"), "w", encoding="utf-8") as job_file:
+                    json.dump({"job_id": "primary", "domains": ["normal.example"]}, job_file)
+                with open(os.path.join(primary_dir, "status.json"), "w", encoding="utf-8") as status_file:
+                    json.dump({"state": "running"}, status_file)
+
+                item = review_queue.enqueue_worker_result(
+                    job={"job_id": "source-locks"}, job_dir=worker_dir,
+                    prepared={
+                        "target_url": "https://review-lock.example/",
+                        "domain": "review-lock.example", "recipients": [],
+                    },
+                    domain_result={
+                        "target_url": "https://review-lock.example/",
+                        "domain": "review-lock.example",
+                        "skipped": "manual_review_required",
+                    },
+                )
+                review_job_path = domain_worker.create_cloaking_review_job(
+                    [item["queue_id"]], decision="confirmed_cloaking",
+                    allowed_accounts=["sender@example.org"],
+                )
+                review_job_dir = os.path.dirname(review_job_path)
+                with open(os.path.join(review_job_dir, "status.json"), "w", encoding="utf-8") as status_file:
+                    json.dump({"state": "running"}, status_file)
+
+                self.assertEqual(domain_worker.find_active_job_dir(), primary_dir)
+                self.assertEqual(domain_worker.find_active_cloaking_job_dir(), review_job_dir)
+
+                # Legacy review jobs may still live in WORKER_DIR, but must never
+                # block or replace the primary Domain Worker lock.
+                with open(os.path.join(primary_dir, "status.json"), "w", encoding="utf-8") as status_file:
+                    json.dump({"state": "completed"}, status_file)
+                legacy_dir = os.path.join(worker_dir, "review_legacy")
+                os.makedirs(legacy_dir)
+                with open(os.path.join(legacy_dir, "job.json"), "w", encoding="utf-8") as job_file:
+                    json.dump({
+                        "job_id": "review_legacy", "review_queue_ids": {
+                            "https://review-lock.example/": item["queue_id"],
+                        },
+                    }, job_file)
+                with open(os.path.join(legacy_dir, "status.json"), "w", encoding="utf-8") as status_file:
+                    json.dump({"state": "running"}, status_file)
+                with open(os.path.join(review_job_dir, "status.json"), "w", encoding="utf-8") as status_file:
+                    json.dump({"state": "completed"}, status_file)
+
+                self.assertIsNone(domain_worker.find_active_job_dir())
+                self.assertEqual(domain_worker.find_active_cloaking_job_dir(), legacy_dir)
 
     def test_worker_persists_manual_review_result_in_queue(self):
         with tempfile.TemporaryDirectory() as job_dir, tempfile.TemporaryDirectory() as review_dir:
@@ -556,10 +859,15 @@ class DomainWorkerTests(unittest.TestCase):
             self.assertEqual(queued[0]["result"]["cloaking_score"], 55)
 
     def test_review_worker_completion_marks_exact_queue_item_sent(self):
-        with tempfile.TemporaryDirectory() as worker_dir, tempfile.TemporaryDirectory() as review_dir:
+        with (
+            tempfile.TemporaryDirectory() as worker_dir,
+            tempfile.TemporaryDirectory() as cloaking_worker_dir,
+            tempfile.TemporaryDirectory() as review_dir,
+        ):
             target = "https://confirmed.example/"
             with (
                 patch.object(domain_worker, "WORKER_DIR", worker_dir),
+                patch.object(domain_worker, "CLOAKING_WORKER_DIR", cloaking_worker_dir),
                 patch.object(review_queue, "REVIEW_DIR", review_dir),
             ):
                 item = review_queue.enqueue_worker_result(
@@ -599,11 +907,16 @@ class DomainWorkerTests(unittest.TestCase):
             self.assertEqual(completed["send_result"]["sent_ok"], 1)
 
     def test_review_worker_keeps_case_partial_when_second_sender_was_not_attempted(self):
-        with tempfile.TemporaryDirectory() as worker_dir, tempfile.TemporaryDirectory() as review_dir:
+        with (
+            tempfile.TemporaryDirectory() as worker_dir,
+            tempfile.TemporaryDirectory() as cloaking_worker_dir,
+            tempfile.TemporaryDirectory() as review_dir,
+        ):
             target = "https://partial-review.example/"
             accounts = ["sender1@example.org", "sender2@example.org"]
             with (
                 patch.object(domain_worker, "WORKER_DIR", worker_dir),
+                patch.object(domain_worker, "CLOAKING_WORKER_DIR", cloaking_worker_dir),
                 patch.object(review_queue, "REVIEW_DIR", review_dir),
             ):
                 item = review_queue.enqueue_worker_result(

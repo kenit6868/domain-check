@@ -19,7 +19,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import phishing_toolkit as pt
-from cloaking_ui import render_cloaking_result
+from cloaking_ui import render_cloaking_details
 from community_report_ui import render_community_report_buttons
 
 _MAX_CHECK_WORKERS = 1
@@ -210,11 +210,8 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
         if tags:
             st.caption("  ·  ".join(tags))
 
-        render_cloaking_result(result.get("cloaking", {}), compact=True)
-        if (result.get("cloaking") or {}).get("profiles"):
-            with st.expander("Chi tiết kiểm tra cloaking", expanded=False):
-                render_cloaking_result(result["cloaking"])
         cloaking = result.get("cloaking") or {}
+        render_cloaking_details(cloaking)
         if cloaking.get("verdict") in {"POSSIBLE", "INCONCLUSIVE"}:
             if st.button(
                 "Xác minh cloaking bằng Playwright",

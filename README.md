@@ -76,10 +76,10 @@ Các trang (xem sidebar bên trái):
 - **Report Drafts** — xem, copy, tải các email báo cáo đã sinh sẵn
 - **Quick Report** — kiểm tra nhanh nhiều URL, hiển thị cloaking và cho phép xác
   minh thụ động bằng Playwright khi HTTP chưa đủ kết luận
-- **Domain Worker** — kiểm tra theo batch, tự xử lý bằng chứng cloaking và chặn
-  gửi các trường hợp còn cần duyệt thủ công
-- **Cloaking Review** — hàng đợi riêng để xem evidence và quyết định cho
-  đúng các domain đã tích chọn
+- **Domain Worker** — nút precheck kiểm tra email và cloaking đồng thời; case
+  cloaking được tách ngay, còn domain thường mới đi vào job gửi batch
+- **Cloaking Review** — hàng đợi và tiến trình gửi riêng để xem evidence, chọn
+  đúng domain và gửi ngay mà không phải chờ Domain Worker thường hoàn tất
 
 Trong khu vực **Browser Blocking** của **Check Domain** và **Quick Report** có
 thêm nút mở form báo cáo của **Chống Lừa Đảo** và **Cốc Cốc Safe**. Các nút chỉ
@@ -101,6 +101,7 @@ phishing_toolkit.py       - Tool chính (check / related / brandscan)
 cloaking_detector.py      - Detector HTTP đa profile + xác minh Playwright thụ động
 cloaking_ui.py            - Khối hiển thị kết quả cloaking dùng chung cho Streamlit
 cloaking_review_queue.py  - Hàng đợi review cloaking bền vững giữa các worker job
+domain_worker.py          - Precheck email/cloaking, worker gửi thường và job gửi review
 domain_check.py           - Bản đơn giản chỉ check SSL + WHOIS (không cần API key)
 streamlit_app.py           - Trang chủ giao diện web (streamlit run streamlit_app.py)
 pages/                      - Các trang còn lại của giao diện web (multipage app)
@@ -140,14 +141,32 @@ Trang **Domain Worker** nhận danh sách domain và tự chạy pipeline kiểm
 draft, rồi gửi những draft có địa chỉ email hợp lệ. Mặc định mỗi batch xử lý 5
 domain, nghỉ 5 phút rồi mới lấy batch tiếp theo.
 
+Luồng sử dụng hiện tại:
+
+1. Chọn tài khoản gửi, nhập danh sách full URL và bấm **Check toàn bộ, lọc email
+   & cloaking**. Với từng URL, lookup email và detector cloaking chạy đồng thời.
+   Cache trong ngày chỉ áp dụng cho email; cloaking luôn được kiểm tra mới theo
+   đúng full URL/path. Pha này không gửi email.
+2. Ngay khi một URL có verdict `LIKELY`, `POSSIBLE`, `INCONCLUSIVE` hoặc thiếu
+   vantage, case được ghi vào **Cloaking Review** và hiện trong bảng “Cloaking
+   tách riêng”; không cần đợi hết danh sách precheck. Case đó không nằm trong
+   danh sách gửi tự động của Domain Worker.
+3. Khi precheck hoàn tất, chỉ danh sách domain thường có email mới có thể chạy
+   **Domain Worker**. Worker vẫn kiểm tra lại trong pipeline đầy đủ để cách ly
+   một case nếu website thay đổi sau precheck.
+4. Có thể mở **Cloaking Review**, duyệt và tạo job gửi cloaking ngay trong lúc
+   precheck hoặc Domain Worker thường đang chạy. Hai luồng có khóa tiến trình và
+   thư mục job riêng; chỉ một job gửi Cloaking Review được chạy tại một thời điểm.
+
 Worker chạy bằng process riêng nên vẫn tiếp tục nếu đóng hoặc refresh tab trình
 duyệt. Trang này hiển thị tiến độ, kết quả gửi của từng domain và có nút dừng hẳn
 process worker. Mỗi email thành công được ghi ngay vào `sent_log.csv`; job và danh
-sách mới tự bỏ qua cặp domain/tài khoản đã gửi thành công, kể cả từ ngày trước.
+sách mới tự bỏ qua delivery đã gửi thành công trong ngày hiện tại.
 Draft VNCERT mặc định không tự gửi; chỉ bật nếu toàn bộ danh sách thực sự
-nhắm tới nạn nhân tại Việt Nam. Dữ liệu trạng thái được lưu trong
-  `worker_jobs/`. Case cloaking chờ duyệt được lưu tách biệt trong
-  `cloaking_review/`; cả hai thư mục runtime này không được commit.
+nhắm tới nạn nhân tại Việt Nam. Job Domain Worker thường nằm trong
+`data/worker_jobs/`; job gửi từ Cloaking Review nằm trong
+`data/cloaking_send_jobs/`; queue case bền vững nằm trong
+`data/cloaking_review/`. Các thư mục runtime này không được commit.
 
 ### Cơ chế cloaking trong worker
 
@@ -176,10 +195,12 @@ coi là cloaking. Kết quả cloaking có bốn mức:
   không yêu cầu duyệt cloaking, không đính kèm ảnh lỗi và tiếp tục gửi draft bình
   thường. Trạng thái này không tự khẳng định domain đã bị thu hồi; WHOIS Hold/link
   status vẫn là nguồn xác nhận riêng.
-- Domain Worker chỉ chạy luồng tự động. Case cloaking được ghi vào hàng đợi
-  bền vững và Domain Worker chỉ hiện số lượng kèm liên kết sang trang
-  **Cloaking Review**. Việc refresh, đóng tab hoặc chạy job mới không làm mất
-  danh sách chờ duyệt.
+- Ngay trong bước **Check toàn bộ, lọc email & cloaking**, lookup email và
+  detector chạy đồng thời. Mỗi case cần duyệt được ghi vào queue theo từng URL
+  ngay khi kiểm tra xong, trước khi toàn bộ precheck hoàn tất; preflight được
+  lưu tăng dần để UI hiển thị số lượng và bảng case đã tách. Domain Worker chỉ
+  nhận danh sách không cloaking. Refresh, đóng tab hoặc chạy job mới không làm
+  mất danh sách chờ duyệt.
 - Tại **Cloaking Review**, xem tín hiệu/manifest/ảnh, tích đúng URL, xác nhận
   rồi chọn một trong ba hành động: **Xác nhận cloaking và gửi kèm bằng
   chứng**, **Không phải cloaking — gửi report thường**, hoặc **Bỏ qua domain đã
@@ -187,6 +208,10 @@ coi là cloaking. Kết quả cloaking có bốn mức:
   email trùng. Với cloaking đã xác nhận, tool chọn tối đa hai ảnh của cặp
   profile khác biệt mạnh nhất và đính kèm cùng manifest. Với report thường,
   khối evidence cloaking và attachment cloaking được loại bỏ trước khi gửi.
+- Job gửi từ **Cloaking Review** độc lập với job Domain Worker thường. Vì vậy
+  nút gửi review không bị khóa khi precheck/worker thường đang chạy; ngược lại,
+  một job review đang gửi chỉ khóa lượt gửi review kế tiếp, không khóa Domain
+  Worker.
 - Queue gộp theo **ngày địa phương + URL chuẩn hóa**, không theo worker job
   hay số tài khoản email. Cùng URL bị phát hiện nhiều lần trong ngày chỉ
   hiện một dòng với evidence mới nhất và lịch sử source job; sang ngày mới
@@ -217,6 +242,9 @@ người dùng chủ động chạy bước trình duyệt nặng hơn. Bằng c
 `evidence/cloaking/`; nội dung trang đầy đủ không được đưa vào giao diện hoặc
 manifest, chỉ giữ preview, hash, metadata và ảnh chụp. Gallery ảnh Playwright
 hiển thị dạng thumbnail nhỏ trên một hàng để phục vụ đối chiếu nhanh.
+Riêng **Quick Report**, verdict và điểm nằm ngay trên nhãn **Chi tiết kiểm tra
+cloaking**; hai thông báo Cloaking/Nội dung chỉ hiển thị sau khi mở phần chi tiết
+để danh sách nhiều URL không bị kéo dài.
 
 Phần cloaking được chèn vào email nhà cung cấp luôn được soạn bằng tiếng Anh.
 Nhãn/mô tả tiếng Việt chỉ dùng trong giao diện nội bộ; page title và matched

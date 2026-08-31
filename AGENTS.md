@@ -13,8 +13,9 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
   helper SMTP.
 - `streamlit_app.py`, `streamlit_home.py`, `pages/`: điểm vào và các luồng UI
   Streamlit.
-- `domain_worker.py`: worker batch nền có resume, lưu trạng thái tại
-  `data/worker_jobs/`.
+- `domain_worker.py`: precheck email/cloaking và worker batch nền có resume;
+  job thường lưu tại `data/worker_jobs/`, job gửi Cloaking Review lưu tại
+  `data/cloaking_send_jobs/`.
 - `provider_replies.py`: đọc IMAP, phân loại phản hồi NCC, tạo reply theo
   thread và xử lý evidence.
 - `link_status.py`, `domain_utils.py`: tiện ích kiểm tra link/domain.
@@ -78,6 +79,13 @@ Không tự khởi động Streamlit nếu người dùng chưa yêu cầu. Buil
   xử lý case không cloaking; mọi quyết định cloaking phải thực hiện tại
   Cloaking Review trên đúng record đã tích. Quyết định `not_cloaking` phải
   loại khối evidence và attachment cloaking trước khi gửi report thường.
+- Nút precheck Domain Worker dùng schema v3: lookup email và cloaking chạy song
+  song theo từng full URL, cloaking không dùng cache email và case cần duyệt phải
+  enqueue/ghi preflight tăng dần ngay khi phát hiện. Chỉ `ready` được chuyển sang
+  job gửi thường; không chờ pipeline gửi mới phân loại cloaking.
+- Job Domain Worker thường và job gửi Cloaking Review dùng thư mục/active lock
+  riêng, được phép chạy đồng thời. Job review legacy trong `data/worker_jobs/`
+  vẫn phải sync/migrate nhưng không được khóa hoặc hiển thị như job thường.
 - Queue cloaking dedupe theo ngày địa phương + full URL chuẩn hóa, không theo
   job/tài khoản SMTP; giữ source-job history, evidence mới nhất và terminal state.
   UI chọn case bằng native dataframe multi-row selection, không dùng checkbox
@@ -169,21 +177,6 @@ nội dung quan trọng vào “Bản đồ dự án”, “Quy ước phát tri
 hợp rồi bỏ mục cũ. Không ghi secret, dữ liệu case, email thật hoặc URL nghi ngờ
 vào phần này.
 
-- 2026-08-25 — Khởi tạo ngữ cảnh Codex: thêm `AGENTS.md` và skill
-  `phishing-takedown-tool`; đã kiểm tra diff và cấu trúc skill thủ công; tài
-  liệu: chính file này và `.agents/skills/phishing-takedown-tool/SKILL.md`;
-  lưu ý: validator tự động của skill chưa chạy vì môi trường thiếu `PyYAML`.
-- 2026-08-29 — Phát hiện cloaking đa profile: thêm detector HTTP dùng chung cho
-  Trang chủ/Check Domain/Quick Report/worker; bản đầu từng tự gửi `LIKELY` sau
-  Playwright và giữ `POSSIBLE`/`INCONCLUSIVE` (hành vi gửi đã được thay thế bởi
-  cơ chế cách ly mọi cloaking ngày 2026-08-30); file chính:
-  `cloaking_detector.py`, `cloaking_ui.py`, `phishing_toolkit.py`,
-  `domain_worker.py`, `pages/1_Check_Domain.py`, `pages/6_Domain_Worker.py`,
-  `pages/7_Quick_Report.py`; đã kiểm tra: 76 test trước Playwright, 80/80 test
-  cuối (gồm fake Playwright/attachment/worker), Chromium local smoke, AppTest
-  4 page, compileall và pip check; tài liệu: `README.md`,
-  `huong-dan-phat-hien-cloaking.md`, file này
-  và skill dự án; lưu ý: cần `python -m playwright install chromium` trên máy mới.
 - 2026-08-29 — Chuẩn hóa ngôn ngữ evidence gửi nhà cung cấp: formatter cloaking
   dùng profile label và signal description tiếng Anh riêng, không lấy chuỗi
   tiếng Việt của UI; dữ liệu quan sát gốc vẫn được bảo toàn; file chính:
@@ -262,12 +255,31 @@ vào phần này.
   `huong-dan-phat-hien-cloaking.md`, file này và skill dự án; lưu ý: không gửi
   SMTP thật, migration chạy idempotent khi mở Cloaking Review; skill được kiểm
   tra thủ công vì `quick_validate.py` thiếu dependency `PyYAML` trong môi trường.
+- 2026-08-31 — Precheck cloaking sớm và tách tiến trình gửi: nút Domain Worker
+  chạy lookup recipient + detector cloaking đồng thời, ghi preflight v3 tăng dần
+  và enqueue case ngay khi từng URL hoàn tất; chỉ domain thường vào job gửi,
+  còn Cloaking Review dùng `data/cloaking_send_jobs/` và active lock riêng nên có
+  thể gửi trong lúc precheck/worker thường đang chạy; file chính:
+  `domain_worker.py`, `pages/6_Domain_Worker.py`,
+  `pages/10_Cloaking_Review.py`, test worker/UI; đã kiểm tra: regression đồng
+  thời/queue sớm/legacy lock, AppTest hai page và 137/137 full unittest; tài liệu:
+  `README.md`, `03_Technical_Guide.md`,
+  `huong-dan-phat-hien-cloaking.md`, file này và skill dự án; lưu ý: không gửi
+  SMTP thật, không đọc/hiển thị secret runtime; skill đã kiểm tra thủ công vì
+  `quick_validate.py` thiếu dependency `PyYAML` trong môi trường.
+- 2026-08-31 — Thu gọn trạng thái cloaking trên Quick Report: bỏ hai callout
+  Cloaking/Nội dung bị lặp bên ngoài expander, đưa verdict và điểm vào nhãn
+  “Chi tiết kiểm tra cloaking”, chi tiết chỉ render một lần bên trong; file chính:
+  `cloaking_ui.py`, `pages/7_Quick_Report.py`, `tests/test_cloaking_ui.py`; đã
+  kiểm tra: 2 test UI tập trung, Streamlit AppTest, 138/138 full unittest và
+  compileall; tài liệu: `README.md`, file này; lưu ý: không đổi detector,
+  verdict, Playwright hay workflow gửi mail.
 
 ## Baseline chất lượng hiện tại
 
 Nhóm `link_status` đã thống nhất Cloudflare warning/HTTP 403 là `BLOCKED`, không
 phải `LIVE` hay `DIE`; mock response không iterable được xử lý an toàn. Toàn bộ
-test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 130 test.
+test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 138 test.
 Detector cloaking có test thuần cho scoring/profile/path/vantage, fake browser
 cho Playwright và mock attachment worker; không dùng URL nghi ngờ hay SMTP thật
 trong test.

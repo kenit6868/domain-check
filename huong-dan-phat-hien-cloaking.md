@@ -134,11 +134,15 @@ không nhập thông tin và không gửi form. Vì vậy các bước “chơi 
 công phía trên vẫn phải do người kiểm tra thực hiện trong môi trường cô lập nếu
 thật sự cần.
 
-Trong **Domain Worker**, Playwright được chạy tự động chỉ cho các case HTTP chưa
-đủ kết luận:
+Trong **Domain Worker**, bấm **Check toàn bộ, lọc email & cloaking** để chạy
+lookup email và detector cloaking đồng thời cho từng full URL. Cache trong ngày
+chỉ dùng cho email; cloaking luôn được kiểm tra lại. Playwright được chạy tự động
+cho các case cần review/evidence, kể cả HTTP đã là `LIKELY` để chụp bằng chứng:
 
 1. Nếu bằng chứng cuối là `LIKELY`, `POSSIBLE` hoặc `INCONCLUSIVE`, worker tách
-   domain đó vào hàng đợi bền vững của trang **Cloaking Review** và chưa gửi email.
+   domain đó vào hàng đợi bền vững của trang **Cloaking Review** ngay khi URL này
+   kiểm tra xong. Không cần chờ toàn bộ precheck hoặc job gửi thường hoàn tất và
+   chưa có email nào được gửi trong bước precheck.
 2. Server khai báo biến theo quốc gia/IP và thiết bị nhưng chưa có vantage ngoài
    mạng hiện tại cũng bị giữ lại; các domain không cloaking vẫn tiếp tục bình thường.
 3. Mở **Cloaking Review**, kiểm tra tín hiệu, manifest và ảnh rồi tích chọn đúng
@@ -151,6 +155,12 @@ Trong **Domain Worker**, Playwright được chạy tự động chỉ cho các 
    cloaking — gửi report thường**. Email vẫn được gửi về hành vi phishing/nội
    dung xấu, nhưng không chèn hay đính kèm evidence cloaking. Nếu không muốn
    gửi, chọn **Bỏ qua domain đã chọn**.
+
+Danh sách gửi thường và danh sách cloaking là hai luồng độc lập. Case đã tách
+không còn nằm trong danh sách **Domain sẵn sàng gửi**. Bạn có thể mở Cloaking
+Review, chọn case và bấm gửi trong lúc Domain Worker vẫn đang precheck hoặc xử
+lý các domain thường. Chỉ khi một job gửi Cloaking Review khác đang chạy thì các
+nút tạo lượt gửi review mới tạm khóa; Domain Worker thường không bị khóa theo.
 
 Cùng một URL xuất hiện trong nhiều Domain Worker job của cùng ngày chỉ
 được tính là một case review. Case giữ evidence mới nhất và số lần phát

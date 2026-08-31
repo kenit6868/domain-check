@@ -197,10 +197,28 @@ Mọi kết quả cloaking `LIKELY`, `POSSIBLE`, `INCONCLUSIVE` hoặc thiếu v
 riêng trong `data/cloaking_review/`. Trang **Cloaking Review** là nơi duy nhất để
 người vận hành xem evidence, tích chọn từng URL và quyết định: gửi kèm
 evidence cloaking, gửi report thường sau khi loại evidence cloaking, hoặc bỏ qua.
+
+Nút **Check toàn bộ, lọc email & cloaking** tạo preflight schema v3. Với từng
+full URL, lookup recipient và HTTP detector chạy song song; cache theo ngày chỉ
+áp dụng cho recipient. Khi HTTP cần xác minh, Playwright chạy ngay trong precheck.
+Kết quả cần duyệt được enqueue và ghi tăng dần vào `preflight.json` trước khi
+chuyển sang URL kế tiếp, nên case đầu tiên có thể được duyệt/gửi trong lúc phần
+còn lại của danh sách vẫn đang precheck. Chỉ các mục trong `ready` mới được đưa
+vào job gửi thường; mục `cloaking_review` không bao giờ được gửi bởi job đó.
+
 Mỗi thao tác gửi tạo job riêng chỉ chứa các queue ID đã chọn; không dùng nút
 retry chung để phê duyệt cloaking. Trạng thái `PENDING_REVIEW`, `PARTIAL`,
 `QUEUED_*`, `SENT`, `FAILED`, `SKIPPED` cho phép khôi phục danh sách sau
 refresh/restart.
+
+Job Domain Worker thường lưu tại `data/worker_jobs/`; job gửi đã duyệt lưu tại
+`data/cloaking_send_jobs/`. Hai namespace có active-job lock độc lập: một
+precheck/job thường đang chạy không khóa nút gửi Cloaking Review, và một job gửi
+review không khóa Domain Worker. Chỉ các job gửi review mới khóa lẫn nhau để
+tránh tạo hai lượt gửi review đồng thời. Job review cũ còn nằm trong
+`data/worker_jobs/` vẫn được nhận diện/migrate nhưng không được tính là job
+Domain Worker thường.
+
 Queue ID được tính từ ngày địa phương và full URL đã chuẩn hóa, không
 từ worker job ID. Nhiều observation trong cùng ngày được merge vào một record;
 `source_job_ids`/`observations` giữ lịch sử và result mới nhất dùng để duyệt.
