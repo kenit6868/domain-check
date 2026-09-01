@@ -94,7 +94,8 @@ Các trang (xem sidebar bên trái):
   (fallback theo tên Junk/Spam), gộp các phản hồi tìm được và hiển thị tổng số
   thư Inbox/Thư rác theo đúng bộ đếm ngày địa phương của menu Thống kê email;
   không tính thư Đã gửi. Nút **Seen all** nhóm UID theo mailbox nguồn để cập
-  nhật đúng cả Inbox và Thư rác.
+  nhật đúng toàn bộ Inbox và Thư rác, kể cả thư bị loại khỏi danh sách NCC; bảng
+  đối soát hiển thị tổng, số đưa vào danh sách NCC và số không liên quan.
   Sau mỗi lần **Kiểm tra**, kết quả được lưu theo ngày vào
   `data/mail_statistics_cache.json` và tự hiện lại khi mở trang; nút **Xóa cache
   ngày đã chọn** chỉ xóa ngày đang chọn. Cache không chứa password hay body thư.

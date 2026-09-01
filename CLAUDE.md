@@ -534,6 +534,9 @@ UID lấy từ cache phải là chuỗi ASCII chỉ gồm chữ số; giá trị
 STORE được chia batch tối đa 100 UID để tránh lệnh IMAP quá dài.
 Page kiểm tra cả `provider_replies.MODULE_VERSION` trước các `from import` để
 hot reload của Streamlit không giữ hàm Seen cũ.
+Đồng bộ Phản hồi NCC gọi fetch với `include_unrelated=True`: cache giữ toàn bộ
+Inbox/Junk đúng phạm vi để Seen all khớp tổng IMAP; UI mới lọc unknown +
+manual_review khỏi bảng NCC và hiển thị số bị loại để đối soát.
 
 - `mail_statistics.py` đếm toàn bộ UID trong Inbox và thư mục có cờ IMAP
   `\\Sent`/`\\Junk`; chỉ fetch `INTERNALDATE`, không tải body và luôn select

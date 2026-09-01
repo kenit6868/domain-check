@@ -150,6 +150,7 @@ Cloudflare Trust & Safety"""
         self.assertEqual(fetch.call_count, 2)
         self.assertEqual([mail.source_mailbox for mail in mails], ["INBOX", "Junk Email"])
         self.assertEqual([(row["folder"], row["matched"]) for row in statistics], [("Inbox", 1), ("Thư rác", 1)])
+        self.assertTrue(all(call.kwargs.get("include_unrelated") for call in fetch.call_args_list))
 
     def test_fetch_provider_mail_all_folders_keeps_inbox_when_junk_fails(self):
         inbox_mail = self.make_mail("abuse@dynadot.com", "Inbox response", "Please provide the full URL")

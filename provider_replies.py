@@ -17,7 +17,7 @@ from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr, parsedate_to_datetime
 from html import unescape
 
-MODULE_VERSION = 2
+MODULE_VERSION = 3
 
 # Proxy support — tái dùng từ phishing_toolkit để tránh duplicate code
 try:
@@ -363,7 +363,7 @@ def parse_message(uid, account, raw_message):
                         "" if is_bounce else _ticket(f"{subject}\n{body}"), channel, risk)
 
 
-def fetch_provider_mail(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None):
+def fetch_provider_mail(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None, include_unrelated=False):
     host = account.get("imap_host") or account.get("host")
     if not host or not account.get("username") or not account.get("password"): raise ValueError("Tài khoản thiếu cấu hình IMAP")
     conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)))
@@ -398,7 +398,7 @@ def fetch_provider_mail(account, limit=None, unread_only=False, date_from=None, 
                 item.server_date = _imap_internal_date(payload[0][0])
                 # Giữ lại: email từ provider đã nhận diện, HOẶC email có request cụ thể (không phải manual_review)
                 # Bỏ qua: provider unknown + manual_review = email rác không liên quan
-                if item.provider != "unknown" or item.request_type != "manual_review":
+                if include_unrelated or item.provider != "unknown" or item.request_type != "manual_review":
                     result.append(item)
             if progress_callback:
                 progress_callback(result, position, total)
@@ -462,7 +462,7 @@ def fetch_provider_mail_all_folders(account, limit=None, unread_only=False, date
         try:
             found = fetch_provider_mail(
                 folder_account, limit, unread_only, date_from, date_to,
-                folder_progress if progress_callback else None,
+                folder_progress if progress_callback else None, include_unrelated=True,
             )
             for mail in found:
                 mail.source_mailbox = mailbox

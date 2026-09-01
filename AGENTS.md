@@ -202,6 +202,8 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
   UID theo mailbox; file chính: `provider_replies.py`, `mail_statistics.py`,
   UID cache không phải số ASCII bị bỏ qua và STORE Seen chia batch 100;
   page có version handshake cho cả module provider để tránh gọi hàm Seen cũ;
+  cache phản hồi giữ cả mail không liên quan để Seen all khớp tổng IMAP, còn
+  bảng NCC lọc riêng và công khai số bị loại;
   `pages/9_Provider_Replies.py`, test provider; đã kiểm tra: test tập trung,
   full unittest và compileall; tài liệu: `README.md`, `CLAUDE.md`,
   `03_Technical_Guide.md`, file này; lưu ý: chỉ mock IMAP, không đọc mail thật.

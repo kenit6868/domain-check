@@ -13,7 +13,7 @@ import mail_statistics
 if getattr(mail_statistics, "MODULE_VERSION", 0) < 5:
     mail_statistics = importlib.reload(mail_statistics)
 import provider_replies
-if getattr(provider_replies, "MODULE_VERSION", 0) < 2:
+if getattr(provider_replies, "MODULE_VERSION", 0) < 3:
     provider_replies = importlib.reload(provider_replies)
 from provider_replies import (
     ACTION_REQUIRED_TYPES, build_reply, build_reply_vi, capture_dom_link_evidence, clear_mail_cache, download_evidence_image,
@@ -146,24 +146,42 @@ if sync_clicked:
             st.warning(f"Không đối soát được thư mục Đã gửi: {sent_sync.get('error')}")
     except Exception as exc: st.error(f"Không đọc được Inbox/Thư rác: {exc}")
 
-folder_statistics = st.session_state.get("provider_folder_statistics", [])
-if folder_statistics:
-    st.subheader("Thống kê đồng bộ theo thư mục")
-    st.dataframe(pd.DataFrame([{
-        "Loại": row["folder"], "Thư mục IMAP": row["mailbox"],
-        "Tổng số email": row["matched"], "Trạng thái": row["status"],
-    } for row in folder_statistics]), width="stretch", hide_index=True)
-
 all_mails = st.session_state.get("provider_mails", [])
 if not all_mails:
     st.info("Chưa có email trong khoảng ngày đã chọn. Hãy đổi ngày hoặc bấm đồng bộ lại."); st.stop()
 
-all_filtered = []
+all_day_mails = []
 for item in all_mails:
     if mail_is_in_selected_dates(item):
-        all_filtered.append(item)
+        all_day_mails.append(item)
+all_filtered = [
+    item for item in all_day_mails
+    if item.provider != "unknown" or item.request_type != "manual_review"
+]
 if not all_filtered:
     st.warning("Không có email trong khoảng ngày đã chọn."); st.stop()
+
+folder_statistics = st.session_state.get("provider_folder_statistics", [])
+if folder_statistics:
+    inbox_mailbox = account.get("imap_mailbox", "INBOX")
+    included_by_folder = {
+        "Inbox": sum(m.source_mailbox == inbox_mailbox for m in all_filtered),
+        "Thư rác": sum(m.source_mailbox != inbox_mailbox for m in all_filtered),
+    }
+    st.subheader("Thống kê đồng bộ theo thư mục")
+    st.dataframe(pd.DataFrame([{
+        "Loại": row["folder"], "Thư mục IMAP": row["mailbox"],
+        "Tổng email": row["matched"],
+        "Đưa vào danh sách NCC": included_by_folder.get(row["folder"], 0),
+        "Bị loại không liên quan": max(0, row["matched"] - included_by_folder.get(row["folder"], 0)),
+        "Trạng thái": row["status"],
+    } for row in folder_statistics]), width="stretch", hide_index=True)
+    total_mail = sum(int(row.get("matched", 0)) for row in folder_statistics)
+    excluded_mail = max(0, total_mail - len(all_filtered))
+    st.caption(
+        f"Tổng IMAP: {total_mail} email; danh sách NCC: {len(all_filtered)} email; "
+        f"loại {excluded_mail} email không nhận diện là NCC hoặc không có yêu cầu liên quan."
+    )
 
 st.subheader("1. Tất cả email NCC theo ngày")
 all_table = pd.DataFrame([{"Thư mục": "Thư rác" if m.source_mailbox != account.get("imap_mailbox", "INBOX") else "Inbox", "NCC": m.provider_label, "Domain": m.domain or "—", "Phân loại": m.request_label,
@@ -173,14 +191,14 @@ st.dataframe(all_table, width="stretch", hide_index=True)
 
 seen_col, count_col = st.columns([1, 4])
 with seen_col:
-    if st.button(f"Seen all ({len(all_filtered)})", type="secondary", help="Đánh dấu đã đọc đúng thư mục nguồn cho email trong Inbox và Thư rác"):
-        result = mark_mails_seen(account, all_filtered)
+    if st.button(f"Seen all ({len(all_day_mails)})", type="secondary", help="Đánh dấu đã đọc toàn bộ email đúng ngày trong Inbox và Thư rác, kể cả email không liên quan NCC"):
+        result = mark_mails_seen(account, all_day_mails)
         if result["success"]:
             st.success(f"Đã đánh dấu Seen {result['marked']} email.")
             if result.get("skipped"):
                 st.warning(f"Đã bỏ qua {result['skipped']} email có UID cache không hợp lệ; hãy Clear cache và đồng bộ lại nếu cần.")
             if unread_only:
-                seen_keys = {(m.source_mailbox, m.uid) for m in all_filtered}
+                seen_keys = {(m.source_mailbox, m.uid) for m in all_day_mails}
                 st.session_state.provider_mails = [
                     m for m in st.session_state.provider_mails
                     if (m.source_mailbox, m.uid) not in seen_keys
