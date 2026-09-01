@@ -17,6 +17,8 @@ from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr, parsedate_to_datetime
 from html import unescape
 
+MODULE_VERSION = 2
+
 # Proxy support — tái dùng từ phishing_toolkit để tránh duplicate code
 try:
     from phishing_toolkit import _SMTPWithProxy, _SMTPWithProxySSL, _parse_proxy_url as _pt_parse_proxy
@@ -103,6 +105,7 @@ class ProviderMail:
     subject: str; date: str; message_id: str; body: str; request_type: str; request_label: str
     domain: str; urls: list[str]; ticket: str; channel: str; risk: str
     server_date: str = ""
+    source_mailbox: str = "INBOX"
     def to_dict(self): return asdict(self)
 
 
@@ -414,6 +417,64 @@ def _read_cache_file():
         return {}
 
 
+def discover_junk_mailbox(account):
+    """Find the account's Junk/Spam mailbox without changing message state."""
+    configured = account.get("imap_junk_mailbox", "")
+    if configured:
+        return configured
+    host = account.get("imap_host") or account.get("host")
+    if not host or not account.get("username") or not account.get("password"):
+        return ""
+    conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)))
+    try:
+        conn.login(account["username"], account["password"])
+        status, lines = conn.list()
+        if status != "OK":
+            return ""
+        parsed = [_parse_imap_list_line(line) for line in (lines or [])]
+        flagged = next((mailbox for flags, _, mailbox in parsed if "\\junk" in flags.lower() and mailbox), "")
+        if flagged:
+            return flagged
+        known = {mailbox.lower(): mailbox for _, _, mailbox in parsed if mailbox}
+        for candidate in ("Junk", "Spam", "Junk Email", "INBOX.Junk", "INBOX.Spam"):
+            if candidate.lower() in known:
+                return known[candidate.lower()]
+        return ""
+    finally:
+        try: conn.logout()
+        except Exception: pass
+
+
+def fetch_provider_mail_all_folders(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None):
+    """Fetch relevant provider mail from Inbox and Junk, with per-folder counts."""
+    inbox = account.get("imap_mailbox", "INBOX")
+    junk = discover_junk_mailbox(account)
+    folders = [("Inbox", inbox)]
+    if junk and junk.lower() != inbox.lower():
+        folders.append(("Thư rác", junk))
+    mails, statistics = [], []
+    for label, mailbox in folders:
+        folder_account = dict(account, imap_mailbox=mailbox)
+        before = len(mails)
+        def folder_progress(current, position, total):
+            if progress_callback:
+                progress_callback(mails + current, position, total, label)
+        try:
+            found = fetch_provider_mail(
+                folder_account, limit, unread_only, date_from, date_to,
+                folder_progress if progress_callback else None,
+            )
+            for mail in found:
+                mail.source_mailbox = mailbox
+            mails.extend(found)
+            statistics.append({"folder": label, "mailbox": mailbox, "matched": len(mails) - before, "status": "Thành công"})
+        except Exception as exc:
+            statistics.append({"folder": label, "mailbox": mailbox, "matched": 0, "status": f"Lỗi: {exc}"})
+            if label == "Inbox":
+                raise
+    return mails, statistics
+
+
 def load_mail_cache(account_name):
     """Load cached messages for one mailbox. Invalid entries are ignored."""
     result = []
@@ -595,26 +656,42 @@ def sync_sent_reply_status(account, mails, date_from=None, date_to=None):
         except Exception: pass
 
 
-def mark_mails_seen(account, uids):
-    """Mark the supplied IMAP UIDs as read and return a per-call summary."""
-    clean_uids = [str(uid).strip() for uid in uids if str(uid).strip()]
-    if not clean_uids:
-        return {"success": True, "marked": 0, "error": ""}
+def mark_mails_seen(account, mails_or_uids):
+    """Mark messages Seen in their source mailbox; plain UIDs use Inbox."""
+    grouped = {}
+    skipped = 0
+    for value in mails_or_uids:
+        uid = str(getattr(value, "uid", value)).strip()
+        mailbox = getattr(value, "source_mailbox", "") or account.get("imap_mailbox", "INBOX")
+        if uid.isascii() and uid.isdigit():
+            grouped.setdefault(mailbox, []).append(uid)
+        else:
+            skipped += 1
+    if not grouped:
+        return {"success": skipped == 0, "marked": 0, "skipped": skipped,
+                "error": "Cache không có UID IMAP hợp lệ" if skipped else ""}
     host = account.get("imap_host") or account.get("host")
     if not host or not account.get("username") or not account.get("password"):
         return {"success": False, "marked": 0, "error": "Tài khoản thiếu cấu hình IMAP"}
     conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)))
+    marked = 0
     try:
         conn.login(account["username"], account["password"])
-        status, _ = conn.select(account.get("imap_mailbox", "INBOX"), readonly=False)
-        if status != "OK":
-            return {"success": False, "marked": 0, "error": "Không mở được INBOX để cập nhật"}
-        status, _ = conn.uid("store", ",".join(clean_uids), "+FLAGS.SILENT", "(\\Seen)")
-        if status != "OK":
-            return {"success": False, "marked": 0, "error": "IMAP không chấp nhận lệnh Seen"}
-        return {"success": True, "marked": len(clean_uids), "error": ""}
+        for mailbox, clean_uids in grouped.items():
+            status, _ = conn.select(mailbox, readonly=False)
+            if status != "OK":
+                return {"success": False, "marked": marked, "skipped": skipped,
+                        "error": f"Không mở được {mailbox} để cập nhật"}
+            for offset in range(0, len(clean_uids), 100):
+                batch = clean_uids[offset:offset + 100]
+                status, _ = conn.uid("store", ",".join(batch), "+FLAGS.SILENT", "(\\Seen)")
+                if status != "OK":
+                    return {"success": False, "marked": marked, "skipped": skipped,
+                            "error": f"IMAP không chấp nhận lệnh Seen tại {mailbox}"}
+                marked += len(batch)
+        return {"success": True, "marked": marked, "skipped": skipped, "error": ""}
     except Exception as exc:
-        return {"success": False, "marked": 0, "error": str(exc)}
+        return {"success": False, "marked": marked, "skipped": skipped, "error": str(exc)}
     finally:
         try: conn.logout()
         except Exception: pass

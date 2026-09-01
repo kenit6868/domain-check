@@ -82,6 +82,7 @@ app_datas = [
     ("link_status.py",      "."),
     ("domain_check.py",     "."),
     ("provider_replies.py", "."),
+    ("mail_statistics.py", "."),
     ("pages",               "pages"),
     ("config.example.ini",  "."),
 ]

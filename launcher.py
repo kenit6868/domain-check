@@ -16,6 +16,14 @@ def _open_browser():
 
 
 if __name__ == "__main__":
+    if "--mail-statistics-job" in sys.argv:
+        job_index = sys.argv.index("--mail-statistics-job")
+        if job_index + 1 >= len(sys.argv):
+            raise SystemExit("Thiếu đường dẫn job thống kê email")
+        from mail_statistics import run_statistics_job
+        run_statistics_job(sys.argv[job_index + 1])
+        raise SystemExit(0)
+
     # Process con dành cho Domain Worker. Phải xử lý trước khi khởi động
     # Streamlit để bản PyInstaller có thể tự chạy worker bằng chính file .exe.
     if "--worker-job" in sys.argv:

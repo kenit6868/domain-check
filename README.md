@@ -82,6 +82,22 @@ Các trang (xem sidebar bên trái):
 - **Cloaking Review** — hàng đợi bền vững để xem evidence của từng domain, xem
   trước đúng draft/email nhận rồi gửi SMTP trực tiếp; không hiển thị case không
   có email nhận và không tạo worker job gửi
+- **Thống kê email** — chọn ngày (mặc định hôm nay) và đếm toàn bộ thư nhận, đã
+  gửi và thư rác của từng tài khoản IMAP. Công cụ dùng `INTERNALDATE`, đổi sang múi giờ địa
+  phương rồi mới lọc ngày; chỉ đọc khi bấm **Kiểm tra** và không đổi cờ đã đọc.
+  Tài khoản chỉ cấu hình SMTP, không có `imap_host`, vẫn hiện trong bảng với trạng
+  thái **Không có trong IMAP** và không bị thử kết nối.
+  KPI và bảng chi tiết có thêm **Tổng nhận + rác** = Mail nhận + Thư rác.
+  Nút Kiểm tra chạy bằng job nền bền vững: có thể chuyển menu/F5 trong lúc chạy;
+  khi quay lại, trang đọc trạng thái và kết quả đã cache sau khi hoàn tất.
+- **Phản hồi NCC** — khi đồng bộ sẽ đọc cả Inbox và thư mục có cờ IMAP `\\Junk`
+  (fallback theo tên Junk/Spam), gộp các phản hồi tìm được và hiển thị tổng số
+  thư Inbox/Thư rác theo đúng bộ đếm ngày địa phương của menu Thống kê email;
+  không tính thư Đã gửi. Nút **Seen all** nhóm UID theo mailbox nguồn để cập
+  nhật đúng cả Inbox và Thư rác.
+  Sau mỗi lần **Kiểm tra**, kết quả được lưu theo ngày vào
+  `data/mail_statistics_cache.json` và tự hiện lại khi mở trang; nút **Xóa cache
+  ngày đã chọn** chỉ xóa ngày đang chọn. Cache không chứa password hay body thư.
 
 Trong khu vực **Browser Blocking** của **Check Domain** và **Quick Report** có
 thêm nút mở form báo cáo của **Chống Lừa Đảo** và **Cốc Cốc Safe**. Các nút chỉ

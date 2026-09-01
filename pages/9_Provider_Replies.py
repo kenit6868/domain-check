@@ -2,15 +2,22 @@
 
 import os
 import sys
+import importlib
 from datetime import date, datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 import streamlit as st
 import phishing_toolkit as pt
+import mail_statistics
+if getattr(mail_statistics, "MODULE_VERSION", 0) < 5:
+    mail_statistics = importlib.reload(mail_statistics)
+import provider_replies
+if getattr(provider_replies, "MODULE_VERSION", 0) < 2:
+    provider_replies = importlib.reload(provider_replies)
 from provider_replies import (
     ACTION_REQUIRED_TYPES, build_reply, build_reply_vi, capture_dom_link_evidence, clear_mail_cache, download_evidence_image,
-    extract_reply_context, fetch_provider_mail,
+    extract_reply_context, fetch_provider_mail_all_folders,
     instructed_reply_address, is_delivery_failure, load_mail_cache, mark_mails_seen,
     load_reply_log, needs_reply, provider_message_vi, received_datetime, record_reply_sent,
     reply_log_key, save_mail_cache, save_uploaded_evidence, sync_sent_reply_status,
@@ -52,6 +59,7 @@ if st.session_state.pop("provider_reply_sent_notice", None):
 if st.session_state.get("provider_cache_account") != account_name:
     st.session_state.provider_cache_account = account_name
     st.session_state.provider_mails = load_mail_cache(account_name)
+    st.session_state.provider_folder_statistics = []
     st.session_state.show_action_required = False
 
 d1, d2 = st.columns(2)
@@ -85,6 +93,7 @@ with clear_col:
     if st.button("Clear cache", help="Xóa cache email của hộp thư đang chọn"):
         clear_mail_cache(account_name)
         st.session_state.provider_mails = []
+        st.session_state.provider_folder_statistics = []
         st.session_state.show_action_required = False
         st.rerun()
 with cache_col:
@@ -92,22 +101,37 @@ with cache_col:
     st.caption(f"Cache hiện có: {cached_count} email. Cache được giữ khi F5 và không chứa mật khẩu.")
 
 with sync_col:
-    sync_clicked = st.button("Đồng bộ Inbox theo ngày", type="primary", disabled=date_from > date_to or bool(limit_error))
+    sync_clicked = st.button("Đồng bộ Inbox + Thư rác", type="primary", disabled=date_from > date_to or bool(limit_error))
 if sync_clicked:
     try:
         progress_bar = st.progress(0, text="Đang chuẩn bị đọc inbox...")
-        def show_progress(current, position, total):
+        def show_progress(current, position, total, folder):
             percent = int(position * 100 / total) if total else 100
             visible = [mail for mail in current if mail_is_in_selected_dates(mail)]
             progress_bar.progress(
                 percent,
-                text=f"Đang quét Inbox {position}/{total} — tìm thấy {len(visible)} email đúng ngày đã chọn",
+                text=f"Đang quét {folder} {position}/{total} — tìm thấy {len(visible)} email đúng ngày đã chọn",
             )
         with st.spinner("Đang đồng bộ và lọc email theo ngày server..."):
-            st.session_state.provider_mails = fetch_provider_mail(
+            st.session_state.provider_mails, _ = fetch_provider_mail_all_folders(
                 account, limit, unread_only, date_from=date_from, date_to=date_to,
                 progress_callback=show_progress,
             )
+            try:
+                incoming_counts = mail_statistics.count_account_incoming(
+                    account, date_from, date_to, _local_tz,
+                )
+                st.session_state.provider_folder_statistics = [
+                    {"folder": "Inbox", "mailbox": incoming_counts["inbox_mailbox"],
+                     "matched": incoming_counts["received"], "status": "Thành công"},
+                    {"folder": "Thư rác", "mailbox": incoming_counts["junk_mailbox"],
+                     "matched": incoming_counts["junk"], "status": "Thành công"},
+                ]
+            except Exception as stats_exc:
+                st.session_state.provider_folder_statistics = [{
+                    "folder": "Inbox + Thư rác", "mailbox": "—", "matched": 0,
+                    "status": f"Không thống kê được: {stats_exc}",
+                }]
             save_mail_cache(account_name, st.session_state.provider_mails)
             sent_sync = sync_sent_reply_status(
                 account, st.session_state.provider_mails,
@@ -120,7 +144,15 @@ if sync_clicked:
         st.success(f"Đã đồng bộ {len(synced_for_day)} email đúng ngày đã chọn{sent_note}.")
         if not sent_sync.get("success"):
             st.warning(f"Không đối soát được thư mục Đã gửi: {sent_sync.get('error')}")
-    except Exception as exc: st.error(f"Không đọc được inbox: {exc}")
+    except Exception as exc: st.error(f"Không đọc được Inbox/Thư rác: {exc}")
+
+folder_statistics = st.session_state.get("provider_folder_statistics", [])
+if folder_statistics:
+    st.subheader("Thống kê đồng bộ theo thư mục")
+    st.dataframe(pd.DataFrame([{
+        "Loại": row["folder"], "Thư mục IMAP": row["mailbox"],
+        "Tổng số email": row["matched"], "Trạng thái": row["status"],
+    } for row in folder_statistics]), width="stretch", hide_index=True)
 
 all_mails = st.session_state.get("provider_mails", [])
 if not all_mails:
@@ -134,20 +166,25 @@ if not all_filtered:
     st.warning("Không có email trong khoảng ngày đã chọn."); st.stop()
 
 st.subheader("1. Tất cả email NCC theo ngày")
-all_table = pd.DataFrame([{"NCC": m.provider_label, "Domain": m.domain or "—", "Phân loại": m.request_label,
+all_table = pd.DataFrame([{"Thư mục": "Thư rác" if m.source_mailbox != account.get("imap_mailbox", "INBOX") else "Inbox", "NCC": m.provider_label, "Domain": m.domain or "—", "Phân loại": m.request_label,
     "Cách phản hồi": {"email": "Email", "portal": "Portal", "no_reply": "Không reply", "manual": "Thủ công"}.get(m.channel, m.channel),
     "Ticket": m.ticket or "—", "Tiêu đề": m.subject, "Ngày": display_received_date(m)} for m in all_filtered])
 st.dataframe(all_table, width="stretch", hide_index=True)
 
 seen_col, count_col = st.columns([1, 4])
 with seen_col:
-    if st.button(f"Seen all ({len(all_filtered)})", type="secondary", help="Đánh dấu đã đọc toàn bộ danh sách email phía trên"):
-        result = mark_mails_seen(account, [m.uid for m in all_filtered])
+    if st.button(f"Seen all ({len(all_filtered)})", type="secondary", help="Đánh dấu đã đọc đúng thư mục nguồn cho email trong Inbox và Thư rác"):
+        result = mark_mails_seen(account, all_filtered)
         if result["success"]:
             st.success(f"Đã đánh dấu Seen {result['marked']} email.")
+            if result.get("skipped"):
+                st.warning(f"Đã bỏ qua {result['skipped']} email có UID cache không hợp lệ; hãy Clear cache và đồng bộ lại nếu cần.")
             if unread_only:
-                seen_ids = {m.uid for m in all_filtered}
-                st.session_state.provider_mails = [m for m in st.session_state.provider_mails if m.uid not in seen_ids]
+                seen_keys = {(m.source_mailbox, m.uid) for m in all_filtered}
+                st.session_state.provider_mails = [
+                    m for m in st.session_state.provider_mails
+                    if (m.source_mailbox, m.uid) not in seen_keys
+                ]
                 save_mail_cache(account_name, st.session_state.provider_mails)
                 st.rerun()
         else:

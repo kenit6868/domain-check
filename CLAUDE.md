@@ -514,6 +514,50 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
 chỉ bằng cách đọc file này, không cần đọc lại toàn bộ source. Giữ phần cập nhật ngắn gọn — mô tả cái
 gì đã đổi và vì sao nó quan trọng về mặt kiến trúc, không phải diff từng dòng.
 
+## Thống kê email theo ngày địa phương
+
+- Kiểm tra từ UI tạo job không chứa credential tại `data/mail_statistics_jobs/`
+  và chạy bằng process riêng. Worker tự nạp account từ cấu hình theo username,
+  ghi `status.json` nguyên tử và chỉ publish cache ngày sau khi hoàn tất. Bản
+  frozen đi qua cờ launcher `--mail-statistics-job`.
+
+Trang Phản hồi NCC dùng `fetch_provider_mail_all_folders()` để quét Inbox và
+Junk/Spam. Junk ưu tiên `imap_junk_mailbox`, sau đó cờ IMAP `\\Junk`, cuối cùng
+fallback tên thư mục phổ biến. Mỗi mail lưu `source_mailbox` trong cache; lỗi
+Junk được cô lập khỏi danh sách Inbox. Bảng số lượng gọi
+`mail_statistics.count_account_incoming()` để dùng cùng phép lọc `INTERNALDATE`
+theo ngày địa phương với trang Thống kê email và không SELECT thư mục Sent.
+Page kiểm tra `mail_statistics.MODULE_VERSION` và tự reload khi Streamlit còn giữ
+module cũ. `mark_mails_seen()` nhận message, nhóm theo `source_mailbox` rồi mới
+STORE `\\Seen`, vì UID chỉ duy nhất trong từng mailbox.
+UID lấy từ cache phải là chuỗi ASCII chỉ gồm chữ số; giá trị lỗi bị bỏ qua và
+STORE được chia batch tối đa 100 UID để tránh lệnh IMAP quá dài.
+Page kiểm tra cả `provider_replies.MODULE_VERSION` trước các `from import` để
+hot reload của Streamlit không giữ hàm Seen cũ.
+
+- `mail_statistics.py` đếm toàn bộ UID trong Inbox và thư mục có cờ IMAP
+  `\\Sent`/`\\Junk`; chỉ fetch `INTERNALDATE`, không tải body và luôn select
+  readonly. Tên mailbox luôn được quote trước `EXAMINE` để hỗ trợ đường dẫn Gmail
+  có khoảng trắng như `[Gmail]/Sent Mail`.
+- IMAP `SEARCH` lấy dư một ngày ở mỗi phía, sau đó đổi `INTERNALDATE` sang múi
+  giờ địa phương của máy chạy app để lọc chính xác ngày được chọn.
+- `FETCH (INTERNALDATE)` phải nhận cả response item dạng `bytes` (metadata-only
+  phổ biến trên server thật) lẫn `tuple` (khi có literal); không được giả định
+  chỉ tuple vì sẽ làm mọi mailbox bị đếm thành 0.
+- `pages/11_Mail_Statistics.py` không tự kết nối khi render; chỉ đọc IMAP sau nút
+  **Kiểm tra**, mặc định ngày hôm nay và cô lập lỗi theo từng account. Trang liệt
+  kê mọi SMTP account nhưng chỉ gọi IMAP khi có `imap_host`; account SMTP-only
+  được đánh dấu `not_configured`/“Không có trong IMAP”, không dùng SMTP `host`
+  làm fallback IMAP. Kết quả trong `st.session_state` có schema version để bản
+  hot-reload không hiển thị record cũ thiếu `status` thành “Thành công”.
+- Cache bền vững `data/mail_statistics_cache.json` có schema riêng và khóa theo
+  ngày địa phương. Sau mỗi check, chỉ lưu account/count/status/error đã sanitize;
+  không lưu host, password hay body. UI tự nạp cache theo ngày và nút xóa chỉ
+  loại entry của ngày đang chọn bằng ghi JSON atomic.
+- Page so `EXPECTED_MAIL_STATISTICS_MODULE_VERSION` với `MODULE_VERSION` của core
+  và `importlib.reload()` khi lệch, vì Streamlit có thể hot-reload page nhưng giữ
+  module local cũ trong process; thiếu API cache không được làm page crash.
+
 ## Cập nhật chất lượng email draft (T1-T8, từ phân tích 2.357 reports thực tế → 0.2% thành công)
 
 Toàn bộ thay đổi dưới đây được thực hiện sau khi phân tích 35 ngày gửi report thực tế và phát hiện

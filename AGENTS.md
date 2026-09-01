@@ -17,6 +17,8 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
   domain thường; job lưu tại `data/worker_jobs/`.
 - `provider_replies.py`: đọc IMAP, phân loại phản hồi NCC, tạo reply theo
   thread và xử lý evidence.
+- `mail_statistics.py`, `pages/11_Mail_Statistics.py`: đếm Inbox/Sent/Junk chỉ đọc
+  theo ngày địa phương từ IMAP `INTERNALDATE` và trang thống kê theo tài khoản.
 - `link_status.py`, `domain_utils.py`: tiện ích kiểm tra link/domain.
 - `cloaking_detector.py`, `cloaking_ui.py`: detector HTTP đa profile, xác minh
   Playwright thụ động, manifest/ảnh bằng chứng và UI dùng chung.
@@ -186,6 +188,24 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-01 — Thống kê email chạy nền qua menu: nút Kiểm tra tạo job bền vững
+  không chứa credential, process riêng tiếp tục khi chuyển trang/F5, ghi trạng
+  thái nguyên tử và cache kết quả để tự nạp khi quay lại; hỗ trợ launcher frozen;
+  file chính: `mail_statistics.py`, `pages/11_Mail_Statistics.py`, `launcher.py`,
+  test statistics/UI; đã kiểm tra: focused/full unittest, compileall, spec;
+  tài liệu: `README.md`, `CLAUDE.md`, `03_Technical_Guide.md`, file này.
+
+- 2026-09-01 — Phản hồi NCC đọc thêm Thư rác: đồng bộ quét Inbox và mailbox
+  `\\Junk`/Junk/Spam, lưu nguồn mailbox trên từng email, hiển thị thống kê theo
+  thư mục bằng cùng bộ đếm ngày địa phương của Thống kê email, loại trừ Sent và
+  cô lập lỗi Junk khỏi Inbox; page tự reload module thống kê cũ và Seen all nhóm
+  UID theo mailbox; file chính: `provider_replies.py`, `mail_statistics.py`,
+  UID cache không phải số ASCII bị bỏ qua và STORE Seen chia batch 100;
+  page có version handshake cho cả module provider để tránh gọi hàm Seen cũ;
+  `pages/9_Provider_Replies.py`, test provider; đã kiểm tra: test tập trung,
+  full unittest và compileall; tài liệu: `README.md`, `CLAUDE.md`,
+  `03_Technical_Guide.md`, file này; lưu ý: chỉ mock IMAP, không đọc mail thật.
+
 Phần này là bản ghi ngắn gọn để một phiên Codex sau có thể hiểu trạng thái dự
 án mà không phải đọc lại toàn bộ source. Sau mỗi thay đổi có ý nghĩa, thêm hoặc
 cập nhật một mục theo mẫu:
@@ -199,6 +219,21 @@ Giữ tối đa khoảng 10 mục gần nhất. Khi mục cũ trở thành kiế
 nội dung quan trọng vào “Bản đồ dự án”, “Quy ước phát triển” hoặc tài liệu phù
 hợp rồi bỏ mục cũ. Không ghi secret, dữ liệu case, email thật hoặc URL nghi ngờ
 vào phần này.
+
+- 2026-09-01 — Thêm thống kê email theo ngày địa phương: menu mới chỉ đọc IMAP
+  sau khi người dùng bấm Kiểm tra, đếm toàn bộ Inbox/Sent/Junk bằng `INTERNALDATE`,
+  tự nhận diện thư mục `\\Sent`/`\\Junk`, quote tên mailbox Gmail có khoảng trắng,
+  cô lập lỗi từng tài khoản, đánh dấu account thiếu `imap_host` là “Không có trong
+  IMAP” mà không kết nối nhầm SMTP host, nhận cả FETCH metadata dạng bytes/tuple,
+  loại session result cũ khác schema, hiển thị tổng nhận + thư rác và mặc định hôm nay;
+  cache kết quả đã sanitize theo ngày tại `data/mail_statistics_cache.json`, tự
+  nạp khi mở trang, cho xóa riêng ngày đang chọn bằng ghi atomic và tự reload core
+  khi module version cũ còn bị giữ trong process Streamlit;
+  file chính: `mail_statistics.py`, `pages/11_Mail_Statistics.py`,
+  `streamlit_app.py`, `PhishingTool.spec`, test core/AppTest/navigation; đã kiểm
+  tra: test tập trung, full unittest, compileall và py_compile spec; tài liệu:
+  `README.md`, `CLAUDE.md`, `03_Technical_Guide.md`, file này; lưu ý: chỉ mock
+  IMAP, không đọc hộp thư thật và không ghi credential.
 
 - 2026-08-29 — Hoàn thiện detector cloaking theo path/profile/vantage: `/vi-vn/`
   404 không còn tạo false positive; tách verdict nội dung khỏi cloaking; HTTP có

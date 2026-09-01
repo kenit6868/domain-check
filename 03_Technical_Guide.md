@@ -288,6 +288,31 @@ thời được mở kết nối mới và retry tối đa một lần với cù
 thực `535`, sender hoặc recipient không retry. Không kiểm tra thay đổi này bằng
 SMTP thật trong test tự động; dùng mock để tránh gửi báo cáo ngoài ý muốn.
 
+## Thống kê số lượng email theo ngày
+
+Menu **Thống kê email** chỉ kết nối IMAP sau khi người vận hành chọn ngày và bấm
+**Kiểm tra**. Mặc định là ngày hiện tại của máy chạy ứng dụng. Với từng tài khoản,
+tool mở Inbox cùng thư mục có cờ `\\Sent` và `\\Junk` ở chế độ chỉ đọc, tìm UID trong khoảng
+ngày mở rộng rồi lấy `INTERNALDATE` để đổi sang múi giờ địa phương và lọc chính
+xác. Kết quả gồm tổng thư nhận, tổng thư gửi, tổng thư rác và chi tiết từng
+account; tên mailbox được quote để hỗ trợ đường dẫn Gmail có khoảng trắng. Lỗi một
+account không làm mất số liệu account khác. Luồng này không tải body, không đổi
+cờ `Seen`, không gửi email và không lưu credential vào cache/log.
+Response `FETCH (INTERNALDATE)` được đọc ở cả dạng bytes metadata-only và tuple;
+kết quả UI cũ khác schema bị bỏ qua sau hot reload để tránh số 0/trạng thái sai.
+Account chỉ có cấu hình SMTP và không khai báo `imap_host` vẫn được liệt kê nhưng
+hiển thị **Không có trong IMAP**; tool không thử kết nối IMAP bằng SMTP `host`.
+Kiểm tra chạy trong tiến trình nền nên có thể chuyển menu hoặc F5. Khi quay lại,
+trạng thái job được đọc từ disk và kết quả hoàn tất được nạp từ cache ngày.
+
+Tại **Phản hồi NCC**, thao tác đồng bộ đọc cả Inbox và Junk/Spam trong cùng
+khoảng ngày. Bảng thống kê theo thư mục dùng cùng phép đếm ngày địa phương với
+menu Thống kê email, cho biết tổng Inbox và Thư rác; thư Đã gửi bị loại trừ.
+Kết quả mỗi lần check được ghi atomic vào `data/mail_statistics_cache.json`, tách
+theo ngày địa phương và tự nạp lại khi mở trang. Nút **Xóa cache ngày đã chọn**
+không ảnh hưởng ngày khác. Cache chỉ có account/count/status/error, không có
+credential hoặc nội dung email.
+
 Chạy script Python Playwright dưới đây để tự động hóa việc chụp ảnh toàn trang, trích xuất HTML nguồn, HAR log mạng và tính mã băm SHA256 để gửi báo cáo lạm dụng:
 
 ```python

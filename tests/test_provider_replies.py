@@ -138,6 +138,76 @@ Cloudflare Trust & Safety"""
         self.assertEqual(delimiter, ".")
         self.assertEqual(mailbox, "Sent")
 
+    def test_fetch_provider_mail_all_folders_includes_junk_and_statistics(self):
+        inbox_mail = self.make_mail("abuse@dynadot.com", "Inbox response", "Please provide the full URL")
+        junk_mail = self.make_mail("abuse@cloudflare.com", "Junk response", "Please provide additional evidence")
+        account = {"username": "reporter@example.com", "imap_mailbox": "INBOX"}
+        with (
+            patch.object(pr, "discover_junk_mailbox", return_value="Junk Email"),
+            patch.object(pr, "fetch_provider_mail", side_effect=[[inbox_mail], [junk_mail]]) as fetch,
+        ):
+            mails, statistics = pr.fetch_provider_mail_all_folders(account)
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual([mail.source_mailbox for mail in mails], ["INBOX", "Junk Email"])
+        self.assertEqual([(row["folder"], row["matched"]) for row in statistics], [("Inbox", 1), ("Thư rác", 1)])
+
+    def test_fetch_provider_mail_all_folders_keeps_inbox_when_junk_fails(self):
+        inbox_mail = self.make_mail("abuse@dynadot.com", "Inbox response", "Please provide the full URL")
+        account = {"username": "reporter@example.com", "imap_mailbox": "INBOX"}
+        with (
+            patch.object(pr, "discover_junk_mailbox", return_value="Spam"),
+            patch.object(pr, "fetch_provider_mail", side_effect=[[inbox_mail], RuntimeError("denied")]),
+        ):
+            mails, statistics = pr.fetch_provider_mail_all_folders(account)
+        self.assertEqual(mails, [inbox_mail])
+        self.assertEqual(statistics[1]["matched"], 0)
+        self.assertIn("denied", statistics[1]["status"])
+
+    def test_mark_seen_groups_same_uid_by_source_mailbox(self):
+        inbox_mail = self.make_mail("abuse@dynadot.com", "Inbox", "Please provide the full URL")
+        junk_mail = self.make_mail("abuse@cloudflare.com", "Junk", "Please provide additional evidence")
+        inbox_mail.uid = junk_mail.uid = "7"
+        inbox_mail.source_mailbox = "INBOX"
+        junk_mail.source_mailbox = "Junk"
+
+        class SeenImap:
+            def __init__(self): self.selected = []; self.stored = []
+            def login(self, *_): return "OK", []
+            def select(self, mailbox, readonly=False): self.selected.append((mailbox, readonly)); return "OK", []
+            def uid(self, command, *args): self.stored.append((command, args)); return "OK", []
+            def logout(self): return "OK", []
+
+        fake = SeenImap()
+        account = {"imap_host": "mail.example.test", "username": "reporter@example.com", "password": "secret"}
+        with patch.object(pr.imaplib, "IMAP4_SSL", return_value=fake):
+            result = pr.mark_mails_seen(account, [inbox_mail, junk_mail])
+        self.assertTrue(result["success"])
+        self.assertEqual(result["marked"], 2)
+        self.assertEqual(fake.selected, [("INBOX", False), ("Junk", False)])
+        self.assertEqual([call[1][0] for call in fake.stored], ["7", "7"])
+
+    def test_mark_seen_skips_non_numeric_cached_uid_before_imap_command(self):
+        valid = self.make_mail("abuse@dynadot.com", "Valid", "Please provide the full URL")
+        invalid = self.make_mail("abuse@cloudflare.com", "Invalid", "Please provide additional evidence")
+        valid.uid = "954"
+        invalid.uid = "954©"
+
+        class SeenImap:
+            def login(self, *_): return "OK", []
+            def select(self, *_args, **_kwargs): return "OK", []
+            def uid(self, command, *args):
+                self.command = (command, args)
+                return "OK", []
+            def logout(self): return "OK", []
+
+        fake = SeenImap()
+        account = {"imap_host": "mail.example.test", "username": "reporter@example.com", "password": "secret"}
+        with patch.object(pr.imaplib, "IMAP4_SSL", return_value=fake):
+            result = pr.mark_mails_seen(account, [valid, invalid])
+        self.assertTrue(result["success"])
+        self.assertEqual((result["marked"], result["skipped"]), (1, 1))
+        self.assertEqual(fake.command[1][0], "954")
+
     def test_acknowledgement_with_quoted_screenshot_text_is_not_actionable(self):
         body = """Thank you. We received your report.
 Below is the report we received:
