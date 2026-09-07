@@ -34,6 +34,27 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   chụp lại bằng chứng trước khi duyệt/gửi. Email chỉ đính kèm tối đa hai ảnh tự
   động đại diện cho cặp profile khác biệt mạnh nhất; ảnh quan sát còn lại chỉ lưu
   nội bộ trong evidence.
+- Browser evidence dùng chung phải phân biệt URL người dùng yêu cầu, landing URL,
+  redirect HTTP và destination đọc từ DOM. Phase capture thụ động không click,
+  type hay submit và chỉ được gắn nhãn `dom_observed`; không gọi href là redirect
+  đã xác minh. Mỗi evidence set gồm PNG + manifest có SHA-256, không lưu
+  credential, và không chấp nhận terminal page làm evidence nội dung.
+- Provider Replies dùng Browser Evidence chung làm lựa chọn ưu tiên và giữ
+  evidence set theo mail trong session state. Chỉ attachment PNG + manifest còn
+  đúng hash mới được coi là browser evidence hợp lệ; upload/URLScan legacy có thể
+  tồn tại làm fallback trong giai đoạn chuyển đổi nhưng không được trộn với
+  manifest của capture khác.
+- Check Domain chỉ mở gửi email sau khi Browser Evidence có đúng PNG + manifest
+  hợp lệ; cùng artifact đã preview phải đi qua cả gửi đơn và gửi tất cả. Gate
+  trước SMTP chặn thiếu Subject/recipient/full Reported URL, placeholder,
+  `NOT flagged` và attachment không tồn tại. URLScan có thể còn hiển thị nội bộ
+  trong giai đoạn chuyển đổi nhưng không được chèn vào email.
+- Nội dung web form phải giữ full URL/path, không chèn URLScan/screenshot URLScan
+  và không khẳng định hành vi thu thập OTP/payment nếu không có bằng chứng quan
+  sát tương ứng. Ưu tiên mô tả suspected phishing/impersonation và yêu cầu provider
+  điều tra, xác nhận rồi áp dụng chính sách.
+  Pool GSB và Cloudflare phải tách riêng theo thẩm quyền xử lý, có ít nhất 5 biến
+  thể mỗi nhóm và chọn ổn định theo domain + ngày để rerun không đổi nội dung.
 - Khác biệt giữa URL gốc và một path probe như `/vi-vn/` chỉ là khám phá đường
   dẫn, không được cộng điểm cloaking. Phân loại nội dung nhạy cảm phải tách khỏi
   verdict cloaking.

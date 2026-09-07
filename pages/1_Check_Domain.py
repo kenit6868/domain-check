@@ -13,6 +13,7 @@ import pandas as pd
 import streamlit as st
 
 import phishing_toolkit as pt
+import browser_evidence
 from cloaking_ui import render_cloaking_result
 from community_report_ui import render_community_report_buttons
 from email_send_ui import render_send_email_ui, render_send_all_ui
@@ -53,6 +54,7 @@ if go:
         cfg = pt.load_config()
         with st.spinner(f"Đang kiểm tra {target}..."):
             result = pt.run_check(target, submit_vt, cfg)
+        st.session_state.pop("check_domain_browser_evidence", None)
         st.session_state["check_domain_result"] = result
         st.session_state["check_domain_cfg"] = cfg
 
@@ -74,6 +76,9 @@ if "check_domain_result" in st.session_state:
     domain_age_days = result.get("domain_age_days")
     mx_records = result.get("mx_records", {})
     urlscan_auto = result.get("urlscan", {})
+    target_url = result.get("target_url") or cloaking.get("target_url") or f"https://{domain}/"
+    browser_capture = st.session_state.get("check_domain_browser_evidence") or {}
+    browser_attachments = browser_evidence.evidence_attachment_paths(browser_capture)
 
     st.success(f"Đã kiểm tra xong: {domain}")
 
@@ -308,10 +313,61 @@ if "check_domain_result" in st.session_state:
         with open(draft_path, encoding="utf-8") as f:
             content = f.read()
         st.code(content, language=None)
-        render_send_email_ui(draft_path, cfg, key_prefix=f"check_{key_prefix_extra}")
+        render_send_email_ui(
+            draft_path, cfg, key_prefix=f"check_{key_prefix_extra}",
+            target_url=target_url, attachments=browser_attachments,
+            require_browser_evidence=True,
+        )
 
     # ── Section chính ─────────────────────────────────────────────────────────
     st.divider()
+
+    with st.expander("Bằng chứng trình duyệt", expanded=not bool(browser_attachments)):
+        st.caption(
+            "Bắt buộc trước khi gửi email từ Check Domain. Công cụ mở trang và đọc DOM, "
+            "không click, nhập liệu hoặc submit. Ảnh thể hiện URL nguồn, landing URL, "
+            "redirect HTTP và destination của control Đăng ký/Đăng nhập nếu tìm thấy."
+        )
+        if st.button(
+            "Tạo ảnh Browser Evidence", key=f"browser_evidence_{domain}",
+            type="primary", icon=":material/photo_camera:",
+        ):
+            with st.spinner("Đang mở trình duyệt và chụp evidence thụ động..."):
+                captured = browser_evidence.capture_passive_browser_evidence(
+                    target_url,
+                    pt._runtime_path(os.path.join("evidence", "browser")),
+                    profile_name="check_domain_desktop",
+                    headless=False,
+                )
+            if captured.get("success"):
+                updated = pt.append_browser_evidence_to_drafts(
+                    result.get("drafts") or [], captured,
+                )
+                if len(updated) == len(result.get("drafts") or []):
+                    result["browser_evidence"] = captured
+                    st.session_state["check_domain_browser_evidence"] = captured
+                    st.session_state["check_domain_result"] = result
+                    st.rerun()
+                else:
+                    st.error("Không thể gắn Browser Evidence vào toàn bộ draft.")
+            else:
+                st.error(captured.get("error") or "Không tạo được Browser Evidence.")
+        if browser_capture:
+            if browser_attachments:
+                st.image(browser_capture["screenshot_path"], caption="Ảnh sẽ được đính kèm email", width=620)
+                with st.container(border=True):
+                    st.write(f"**Requested URL:** `{browser_capture.get('requested_url', '')}`")
+                    st.write(f"**Landing URL:** `{browser_capture.get('landing_url', '')}`")
+                    st.write(
+                        "**DOM destination:** `"
+                        + str(browser_capture.get("resolved_destination") or "Không tìm thấy")
+                        + "`"
+                    )
+                    st.caption("Evidence: dom_observed · Navigation verified: Không · Attachment: PNG + manifest JSON")
+            else:
+                st.error("Evidence đã thay đổi hoặc không còn hợp lệ. Hãy chụp lại trước khi gửi.")
+        else:
+            st.warning("Chưa có Browser Evidence; các nút gửi email bên dưới sẽ bị khóa.")
 
     # ── A3: URLScan.io ────────────────────────────────────────────────────────
     # Auto-scan đã chạy song song trong run_check() — hiển thị kết quả ngay.
@@ -338,8 +394,8 @@ if "check_domain_result" in st.session_state:
             if brands:
                 st.markdown(f"**Brands detected:** {', '.join(brands)}")
             if screenshot_url:
-                st.image(screenshot_url, caption="Screenshot từ URLScan.io (tự động)", use_container_width=True)
-            st.caption("✅ Bằng chứng URLScan đã được tự động gắn vào tất cả draft. Link screenshot đã thay thế placeholder trong email.")
+                st.image(screenshot_url, caption="Screenshot từ URLScan.io (tham khảo nội bộ)", width="stretch")
+            st.caption("URLScan chỉ để tham khảo nội bộ; kết quả này không được chèn vào email.")
             evidence_text = (
                 f"Evidence (URLScan.io):\n"
                 f"- Screenshot: {screenshot_url}\n"
@@ -350,7 +406,7 @@ if "check_domain_result" in st.session_state:
             st.code(evidence_text, language=None)
         elif _auto_has_url and not _auto_done:
             # Timeout nhưng đã có screenshot URL (PNG khả năng vẫn render được)
-            st.warning("⏳ URLScan chưa hoàn thành verdict trong thời gian cho phép — screenshot URL đã được gắn vào draft, verdict có thể xem sau.")
+            st.warning("⏳ URLScan chưa hoàn thành verdict; dữ liệu chỉ dùng tham khảo nội bộ.")
             st.code(f"Screenshot: {urlscan_auto['screenshot_url']}\nFull report: {urlscan_auto.get('result_url','')}", language=None)
         elif _auto_error:
             if "urlscan_api_key" not in cfg or not cfg.get("urlscan_api_key"):
@@ -374,8 +430,6 @@ if "check_domain_result" in st.session_state:
                         st.error(retry_res["error"])
                     else:
                         st.session_state[f"{urlscan_key}_result"] = retry_res
-                        if retry_res.get("screenshot_url"):
-                            pt.append_urlscan_evidence_to_drafts(result.get("drafts", []), retry_res)
                         st.rerun()
             with col_us2:
                 pending_data = st.session_state.get(urlscan_key)
@@ -438,13 +492,16 @@ if "check_domain_result" in st.session_state:
     if all_drafts:
         st.subheader("🚀 Gửi tất cả báo cáo cùng lúc")
         st.caption("Gửi đồng loạt tất cả draft có địa chỉ email hợp lệ. Draft dạng web form (CA report, Google...) sẽ được bỏ qua tự động.")
-        render_send_all_ui(all_drafts, cfg, key_prefix="check_all")
+        render_send_all_ui(
+            all_drafts, cfg, key_prefix="check_all", target_url=target_url,
+            attachments=browser_attachments, require_browser_evidence=True,
+        )
         st.divider()
 
     # 1. Browser blocking ─────────────────────────────────────────────────────
     with st.expander("1️⃣  Browser Blocking — GSB / SmartScreen / Netcraft / OpenPhish", expanded=True):
         st.caption("Gửi song song, không thay thế báo registrar. Có hiệu quả nhanh: trình duyệt hiện màn cảnh báo đỏ trước khi người dùng vào site.")
-        gsb_text = pt.generate_safebrowsing_report_text(domain, cfg)
+        gsb_text = pt.generate_safebrowsing_report_text(domain, cfg, target_url)
         domain_url = result.get("target_url") or f"https://{domain}"
         bl1, bl2, bl3 = st.columns(3)
         bl1.link_button("🔗 Google Safe Browsing", f"https://safebrowsing.google.com/safebrowsing/report_phish/?url={domain_url}", width="stretch")
@@ -471,7 +528,10 @@ if "check_domain_result" in st.session_state:
                 st.link_button("🔗 Mở form Cloudflare Abuse", pt.CDN_ABUSE_CONTACTS["cloudflare"]["report_url"])
                 st.caption(f"_{pt.CDN_ABUSE_CONTACTS['cloudflare']['note']}_")
                 st.caption("Nội dung mô tả mẫu Cloudflare — hover vào khung để copy:")
-                st.code(pt.generate_cloudflare_report_text(domain, cfg), language=None)
+                st.code(
+                    pt.generate_cloudflare_report_text(domain, cfg, target_url),
+                    language=None,
+                )
             for name in cdn_detected:
                 info = pt.CDN_ABUSE_CONTACTS.get(name)
                 if info:

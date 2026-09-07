@@ -21,7 +21,10 @@ import streamlit as st
 import phishing_toolkit as pt
 
 
-def render_send_all_ui(draft_paths: list, cfg: dict, key_prefix: str):
+def render_send_all_ui(
+    draft_paths: list, cfg: dict, key_prefix: str, *, target_url: str = "",
+    attachments: list[str] | None = None, require_browser_evidence: bool = False,
+):
     """Render nút "Gửi tất cả drafts" — gửi đồng loạt tất cả file draft có địa chỉ email hợp lệ.
 
     Hiển thị bảng tóm tắt kết quả per-draft per-account sau khi gửi.
@@ -43,11 +46,17 @@ def render_send_all_ui(draft_paths: list, cfg: dict, key_prefix: str):
     for p in draft_paths:
         if p and os.path.isfile(p):
             parsed = pt.parse_draft_email(p)
-            if parsed["to"]:
+            quality_errors = pt.validate_report_delivery(
+                parsed, target_url=target_url, attachments=attachments,
+                require_browser_evidence=require_browser_evidence,
+            )
+            if parsed["to"] and not quality_errors:
                 if "_vncert_report.txt" in os.path.basename(p):
                     vncert_entry = (p, parsed)
                 else:
                     sendable.append((p, parsed))
+            elif parsed["to"]:
+                st.error(f"`{os.path.basename(p)}` bị chặn: " + "; ".join(quality_errors))
 
     if not sendable and not vncert_entry:
         st.info("Không có draft nào có địa chỉ email hợp lệ để gửi tự động.")
@@ -82,7 +91,10 @@ def render_send_all_ui(draft_paths: list, cfg: dict, key_prefix: str):
         with st.spinner(f"Đang gửi {len(final_list)} draft qua {n_accounts} tài khoản..."):
             for p, parsed in final_list:
                 filename = os.path.basename(p)
-                bulk = pt.send_report_email_bulk(parsed["to"], parsed["subject"], parsed["body"], cfg)
+                bulk = pt.send_report_email_bulk(
+                    parsed["to"], parsed["subject"], parsed["body"], cfg,
+                    attachments=attachments,
+                )
                 for r in bulk:
                     all_results.append({
                         "draft": filename,
@@ -136,7 +148,10 @@ def render_send_all_ui(draft_paths: list, cfg: dict, key_prefix: str):
         st.dataframe(df, width="stretch", hide_index=True)
 
 
-def render_send_email_ui(path: str, cfg: dict, key_prefix: str):
+def render_send_email_ui(
+    path: str, cfg: dict, key_prefix: str, *, target_url: str = "",
+    attachments: list[str] | None = None, require_browser_evidence: bool = False,
+):
     """Render khối "Gửi báo cáo qua email thật" cho 1 file draft tại `path`.
 
     `key_prefix` phải khác nhau giữa các nơi gọi (vd "check"/"drafts") để key của checkbox/nút
@@ -152,6 +167,14 @@ def render_send_email_ui(path: str, cfg: dict, key_prefix: str):
             "Xem nội dung draft ở trên hoặc mục \"Khuyến nghị kênh báo cáo\" để lấy đúng link/kênh "
             "report thủ công."
         )
+        return
+
+    quality_errors = pt.validate_report_delivery(
+        parsed, target_url=target_url, attachments=attachments,
+        require_browser_evidence=require_browser_evidence,
+    )
+    if quality_errors:
+        st.error("Chưa thể gửi: " + "; ".join(quality_errors) + ".")
         return
 
     accounts = cfg.get("smtp_accounts", [])
@@ -197,12 +220,15 @@ def render_send_email_ui(path: str, cfg: dict, key_prefix: str):
     if st.button(btn_label, key=f"{key_prefix}_send_{filename}", type="primary"):
         with st.spinner("Đang gửi..."):
             if is_bulk:
-                results = pt.send_report_email_bulk(parsed["to"], parsed["subject"], parsed["body"], cfg)
+                results = pt.send_report_email_bulk(
+                    parsed["to"], parsed["subject"], parsed["body"], cfg,
+                    attachments=attachments,
+                )
             else:
                 r = pt.send_report_email_single(
                     parsed["to"], parsed["subject"],
                     pt.personalize_email_body(parsed["body"], cfg, chosen_account),
-                    chosen_account, chosen_proxy
+                    chosen_account, chosen_proxy, attachments=attachments,
                 )
                 results = [r]
 

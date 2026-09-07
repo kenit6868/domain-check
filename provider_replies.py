@@ -10,6 +10,7 @@ import os
 import re
 import smtplib
 import requests
+import browser_evidence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header
@@ -17,7 +18,7 @@ from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr, parsedate_to_datetime
 from html import unescape
 
-MODULE_VERSION = 3
+MODULE_VERSION = 4
 
 # Proxy support — tái dùng từ phishing_toolkit để tránh duplicate code
 try:
@@ -890,7 +891,7 @@ def save_uploaded_evidence(filename, content, domain="evidence"):
     return path
 
 
-def capture_dom_link_evidence(target_url, domain="evidence"):
+def _capture_dom_link_evidence_legacy(target_url, domain="evidence"):
     """Capture a browser screenshot with a highlighted Register/Login DOM link.
 
     The page is inspected without clicking the element or submitting any form.
@@ -1003,6 +1004,50 @@ def capture_dom_link_evidence(target_url, domain="evidence"):
         if browser:
             try: browser.close()
             except Exception: pass
+
+
+def capture_dom_link_evidence(target_url, domain="evidence"):
+    """Create Provider Replies evidence through the shared passive core.
+
+    The compatibility fields (``path``, ``href``, ``label`` and ``html``) keep
+    existing callers stable while the complete result exposes the manifest,
+    landing URL and server-side redirect chain. No DOM control is clicked.
+    """
+    result = browser_evidence.capture_passive_browser_evidence(
+        target_url,
+        EVIDENCE_DIR,
+        profile_name="provider_reply_desktop",
+        headless=False,
+    )
+    if not result.get("success"):
+        return {
+            **result,
+            "path": "", "href": "", "label": "", "html": "",
+        }
+    validation = browser_evidence.validate_evidence_artifacts(result)
+    if not validation.get("valid"):
+        return {
+            **result,
+            "success": False,
+            "error": "; ".join(validation.get("errors") or ["Evidence không hợp lệ"]),
+            "path": "", "href": "", "label": "", "html": "",
+        }
+    manifest = validation["manifest"]
+    control = manifest.get("control") or {}
+    return {
+        **result,
+        "path": result.get("screenshot_path", ""),
+        "href": control.get("resolved_destination", ""),
+        "label": control.get("label", ""),
+        "html": control.get("dom_element", ""),
+        "manifest_path": result.get("manifest_path", ""),
+        "http_redirect_chain": (manifest.get("http") or {}).get("redirect_chain") or [],
+    }
+
+
+def browser_evidence_attachment_paths(result: dict | None) -> list[str]:
+    """Return the exact validated artifacts previewed for a provider reply."""
+    return browser_evidence.evidence_attachment_paths(result)
 
 
 def _parse_imap_list_line(raw_line):

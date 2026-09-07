@@ -24,6 +24,7 @@ from community_report_ui import render_community_report_buttons
 
 _MAX_CHECK_WORKERS = 1
 _FILTER_CACHE_PATH = pt._runtime_path("quick_report_filter_cache.json")
+_QUICK_REPORT_RUNTIME_VERSION = 2
 
 
 def _render_copy_domain_button(displayed_url: str) -> None:
@@ -184,7 +185,7 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
     has_cdn = cf or bool(cdn_detected)
     registrar = result.get("registrar") or ""
     original_url = result.get("_original_url", f"https://{domain}")
-    gsb_text = pt.generate_safebrowsing_report_text(domain, cfg)
+    gsb_text = pt.generate_safebrowsing_report_text(domain, cfg, original_url)
 
     # Chỉ hiện khi có web form
     r_lower = registrar.lower()
@@ -291,7 +292,7 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                     st.caption(", ".join(cdn_names))
                     if cf:
                         info_cf = pt.CDN_ABUSE_CONTACTS["cloudflare"]
-                        cf_text = pt.generate_cloudflare_report_text(domain, cfg)
+                        cf_text = pt.generate_cloudflare_report_text(domain, cfg, original_url)
                         st.link_button("↗ Cloudflare Abuse", info_cf["report_url"],
                                        type="primary")
                         st.code(cf_text, language=None)
@@ -307,7 +308,7 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                     st.link_button(f"↗ Form {registrar[:18]}", webform_url_r, type="primary")
                     draft_text = pt.get_webform_draft_text(
                         domain=domain, registrar=registrar, webform_url=webform_url_r,
-                        cfg=cfg, target_url=original_url, urlscan=result.get("urlscan"),
+                        cfg=cfg, target_url=original_url,
                     )
                     st.code(draft_text, language=None)
 
@@ -414,6 +415,11 @@ with st.form("quick_report_form"):
 
 cache = _quick_report_cache()
 filter_cache = _quick_report_filter_cache()
+if st.session_state.get("quick_report_runtime_version") != _QUICK_REPORT_RUNTIME_VERSION:
+    for stale_future in cache.get("pending", {}).values():
+        stale_future.cancel()
+    cache.clear()
+    st.session_state["quick_report_runtime_version"] = _QUICK_REPORT_RUNTIME_VERSION
 cache_col, cache_info_col = st.columns([1, 4])
 if cache_col.button(
     "🗑️ Xóa cache",

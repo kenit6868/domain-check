@@ -22,6 +22,8 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
 - `link_status.py`, `domain_utils.py`: tiện ích kiểm tra link/domain.
 - `cloaking_detector.py`, `cloaking_ui.py`: detector HTTP đa profile, xác minh
   Playwright thụ động, manifest/ảnh bằng chứng và UI dùng chung.
+- `browser_evidence.py`: lõi Browser Evidence capture Playwright thụ động, ghi
+  PNG + manifest/hash; Provider Replies là consumer đầu tiên từ Phase 2.
 - `cloaking_review_queue.py`, `cloaking_review_sender.py`,
   `pages/10_Cloaking_Review.py`: queue JSON/ledger bền vững, lớp preview + gửi
   SMTP trực tiếp và trang duyệt riêng cho case cloaking do worker cách ly.
@@ -187,6 +189,60 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-09-08 — Làm sạch nội dung web form: GSB/Cloudflare/registrar dùng đúng
+  full URL/path, không chèn URLScan hoặc screenshot URLScan và không tự khẳng
+  định hành vi lấy OTP/payment khi chưa có quan sát; GSB và Cloudflare có pool
+  riêng 5 biến thể, chọn ổn định theo domain + ngày và nhắm đúng browser warning
+  so với infrastructure/origin handling; giữ wording điều tra/xác nhận trước khi
+  áp dụng policy; file chính: `phishing_toolkit.py`,
+  `pages/1_Check_Domain.py`, `pages/7_Quick_Report.py`, test webform; đã kiểm tra:
+  5 test tập trung, 196/196 full unittest, compileall, pip check, spec và diff
+  check; tài liệu: `README.md`, `03_Technical_Guide.md`,
+  file này và skill dự án; lưu ý: không submit web form/API hoặc gửi email thật.
+
+- 2026-09-08 — Khôi phục nguyên trạng Quick Report sau đánh giá Phase 4: sửa
+  `run_cdn_check()` còn tham chiếu nhầm biến `target_url` chưa khai báo khiến mọi
+  card chỉ báo “Không thể check đầy đủ”; tự invalidate cache runtime lỗi một lần
+  sau hot reload; page
+  tiếp tục là quick-link web form/API, giữ đầy đủ GSB, SmartScreen, Netcraft,
+  Cloudflare/CDN, registrar, TLD registry, Chống Lừa Đảo, Cốc Cốc và URLScan như
+  trước; không thêm Browser Evidence, không bắt ảnh/upload và không khóa action;
+  file `pages/7_Quick_Report.py` cùng UI form dùng chung đã được đối chiếu khớp
+  phiên bản trước thay đổi; thêm regression test bắt pipeline phải trả đủ routing
+  field CDN/registrar/registry mà không NameError; đã kiểm tra: 6 test tập trung,
+  194/194 full unittest,
+  compileall, pip check, spec và diff check; tài liệu: file này; lưu ý: không gọi
+  report/API thật.
+
+- 2026-09-08 — Browser Evidence Phase 3 cho Check Domain: thêm capture/preview
+  bền qua rerun, chèn evidence tiếng Anh vào mọi draft và truyền đúng PNG +
+  manifest cho gửi đơn/gửi tất cả; quality gate chặn thiếu Subject/recipient/full
+  URL, placeholder, `NOT flagged`, khối URLScan cũ và attachment lỗi; URLScan chỉ còn hiển thị nội
+  bộ, không chèn vào email; file chính: `browser_evidence.py`,
+  `phishing_toolkit.py`, `email_send_ui.py`, `pages/1_Check_Domain.py`, test core/UI;
+  đã kiểm tra: focused/full unittest, AppTest, compileall, pip check và spec;
+  tài liệu: `README.md`, `03_Technical_Guide.md`, file này và skill dự án; lưu ý:
+  không mở URL thật hoặc gửi SMTP thật.
+
+- 2026-09-08 — Browser Evidence Phase 2 cho Provider Replies: thay capture DOM
+  của page bằng lõi dùng chung, panel ảnh có redirect HTTP, UI giữ evidence qua
+  rerun và preview requested/landing/destination; reply đúng thread đính kèm
+  PNG + manifest chỉ khi hash còn hợp lệ, upload/URLScan vẫn là fallback tạm;
+  file chính: `browser_evidence.py`, `provider_replies.py`,
+  `pages/9_Provider_Replies.py`, test provider/UI; đã kiểm tra: focused/full
+  unittest, AppTest, compileall và pip check; tài liệu: `README.md`,
+  `03_Technical_Guide.md`, file này và skill dự án; lưu ý: chỉ mock SMTP/browser,
+  không mở URL hoặc đọc/gửi email thật.
+
+- 2026-09-08 — Browser Evidence Phase 1: thêm lõi capture Playwright chỉ đọc,
+  ghi requested/landing URL, redirect HTTP, DOM control/destination vào PNG và
+  manifest có SHA-256; loại terminal page, che credential và không tuyên bố
+  redirect đã xác minh; chưa đổi page, URLScan hoặc luồng gửi; file chính:
+  `browser_evidence.py`, `tests/test_browser_evidence.py`; đã kiểm tra: test tập
+  trung, full unittest, compileall và pip check; tài liệu: `README.md`,
+  `03_Technical_Guide.md`, file này và skill dự án; lưu ý: test dùng browser giả,
+  không mở URL thật và không gửi email.
 
 - 2026-09-01 — Thống kê email chạy nền qua menu: nút Kiểm tra tạo job bền vững
   không chứa credential, process riêng tiếp tục khi chuyển trang/F5, ghi trạng
@@ -369,7 +425,7 @@ vào phần này.
 
 Nhóm `link_status` đã thống nhất Cloudflare warning/HTTP 403 là `BLOCKED`, không
 phải `LIVE` hay `DIE`; mock response không iterable được xử lý an toàn. Toàn bộ
-test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 157 test.
+test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 196 test.
 Detector cloaking có test thuần cho scoring/profile/path/vantage, fake browser
 cho Playwright và mock attachment worker; không dùng URL nghi ngờ hay SMTP thật
 trong test.

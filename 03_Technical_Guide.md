@@ -278,6 +278,45 @@ hiện bằng chứng. Hệ thống chọn tối đa hai ảnh của cặp profi
 nhất (title/nội dung/redirect/keyword), rồi đính kèm cặp ảnh cùng manifest sau khi
 người vận hành phê duyệt. Không đính kèm toàn bộ ảnh quan sát vào email.
 
+#### Browser Evidence dùng chung — Phase 1
+
+`browser_evidence.py` là lõi capture thụ động cho lộ trình thay thế URLScan.
+Module ghi một PNG và manifest JSON theo cùng evidence set. Panel trên ảnh và
+manifest phân biệt rõ `requested_url`, `landing_url`, redirect HTTP do máy chủ
+trả về, profile trình duyệt, control DOM được chọn và destination đã resolve.
+Ảnh được khóa bằng SHA-256; validator từ chối file rỗng, sai định dạng, quá 10 MB
+hoặc đã thay đổi sau khi tạo manifest. Credential trong URL/error/DOM được che
+trước khi lưu.
+
+Lõi chỉ tạo evidence loại `dom_observed` và luôn đặt
+`navigation_verified=false`: không click, type, submit hay tuyên bố đã xác minh
+redirect từ control. Terminal page của trình duyệt/DNS/provider không được ghi
+thành evidence nội dung.
+
+Từ Phase 2, Provider Replies gọi lõi này thay vì tự triển khai capture DOM. UI
+giữ nguyên evidence set qua rerun và chỉ coi ảnh sẵn sàng khi PNG/manifest còn
+đúng hash. Reply gửi đúng thread đính kèm cả PNG lẫn manifest; upload thủ công và
+URLScan vẫn là fallback tạm thời. Việc chuyển các consumer khác và gỡ URLScan
+thuộc các phase sau.
+
+Từ Phase 3, Check Domain yêu cầu Browser Evidence hợp lệ trước mọi thao tác gửi
+email. Cùng evidence set được chèn vào draft bằng formatter tiếng Anh và đính
+kèm dưới dạng PNG + manifest. Gate trước SMTP kiểm tra Subject, recipient, full
+Reported URL, placeholder, chuỗi `NOT flagged`, mọi khối URLScan còn sót, sự
+tồn tại của attachment và đúng một ảnh + một manifest. URLScan vẫn có
+thể chạy để người vận hành xem trong
+UI nhưng không được đưa vào nội dung hoặc attachment gửi ra ngoài.
+
+Text web form là luồng riêng với email draft. `get_webform_draft_text()` không
+đưa URLScan/result screenshot vào mẫu kể cả caller cũ còn truyền dữ liệu này.
+Mẫu GSB và Cloudflare nhận full URL/path, mô tả suspected phishing/brand
+impersonation và yêu cầu điều tra; không tự tạo tuyên bố về OTP/payment collection
+nếu pipeline không có bằng chứng trực tiếp cho hành vi đó.
+Hai generator giữ pool 5 biến thể riêng và tiếp tục dùng `_draft_rng(domain +
+UTC date)`: cùng domain trong ngày không đổi text khi Streamlit rerun, còn domain
+hoặc ngày khác có thể đổi biến thể. Mọi biến thể GSB nhắm tới browser warning;
+mọi biến thể Cloudflare nhắm tới service/origin-provider abuse handling.
+
 #### Vận chuyển SMTP cho evidence
 
 Mỗi SMTP account giữ port và chế độ bảo mật riêng. Port 465 dùng implicit TLS;

@@ -101,6 +101,75 @@ Cloudflare Trust & Safety"""
             sent_message = smtp.send_message.call_args.args[0]
             self.assertEqual(len(list(sent_message.iter_attachments())), 1)
 
+    def test_shared_browser_capture_keeps_compatibility_fields(self):
+        captured = {
+            "success": True,
+            "screenshot_path": "C:/evidence/proof.png",
+            "manifest_path": "C:/evidence/proof.json",
+            "requested_url": "https://source.test/",
+            "landing_url": "https://landing.test/",
+            "resolved_destination": "https://target.test/register",
+        }
+        manifest = {
+            "control": {
+                "label": "Register", "resolved_destination": "https://target.test/register",
+                "dom_element": '<a href="https://target.test/register">Register</a>',
+            },
+            "http": {"redirect_chain": [{"status": 302}]},
+        }
+        with patch.object(
+            pr.browser_evidence, "capture_passive_browser_evidence", return_value=captured,
+        ) as capture, patch.object(
+            pr.browser_evidence, "validate_evidence_artifacts",
+            return_value={"valid": True, "errors": [], "manifest": manifest},
+        ):
+            result = pr.capture_dom_link_evidence("https://source.test/", "source.test")
+        self.assertTrue(result["success"])
+        self.assertEqual(captured["screenshot_path"], result["path"])
+        self.assertEqual("https://target.test/register", result["href"])
+        self.assertEqual("Register", result["label"])
+        self.assertEqual([{"status": 302}], result["http_redirect_chain"])
+        self.assertFalse(capture.call_args.kwargs["headless"])
+
+    def test_browser_evidence_attachments_require_valid_hash_pair(self):
+        result = {
+            "success": True, "screenshot_path": "proof.png", "manifest_path": "proof.json",
+        }
+        with patch.object(
+            pr.browser_evidence, "validate_evidence_artifacts",
+            return_value={"valid": True, "errors": [], "manifest": {}},
+        ):
+            self.assertEqual(
+                [os.path.abspath("proof.png"), os.path.abspath("proof.json")],
+                pr.browser_evidence_attachment_paths(result),
+            )
+        with patch.object(
+            pr.browser_evidence, "validate_evidence_artifacts",
+            return_value={"valid": False, "errors": ["hash mismatch"], "manifest": {}},
+        ):
+            self.assertEqual([], pr.browser_evidence_attachment_paths(result))
+
+    def test_provider_reply_can_attach_browser_png_and_manifest(self):
+        mail = self.make_mail("abuse@spaceship.com", "Please provide screenshot", "Please provide a screenshot.")
+        with tempfile.TemporaryDirectory() as folder:
+            image_path = os.path.join(folder, "evidence.png")
+            manifest_path = os.path.join(folder, "evidence.json")
+            with open(image_path, "wb") as handle: handle.write(b"fake-png-data")
+            with open(manifest_path, "w", encoding="utf-8") as handle: handle.write("{}")
+            smtp = MagicMock()
+            with patch.object(pr.smtplib, "SMTP_SSL", return_value=smtp), patch.object(pr, "_append_sent_copy", return_value=""):
+                result = pr.send_threaded_reply(
+                    {"host": "mail.example.com", "port": 465, "ssl": True, "username": "reporter@example.com", "password": "secret"},
+                    mail, "Re: screenshot", "Attached.", attachments=[image_path, manifest_path],
+                )
+            self.assertTrue(result["success"])
+            attachments = list(smtp.send_message.call_args.args[0].iter_attachments())
+            self.assertEqual(2, len(attachments))
+            self.assertEqual(
+                {"evidence.png", "evidence.json"},
+                {attachment.get_filename() for attachment in attachments},
+            )
+
     def test_bounce_is_not_treated_as_provider_request(self):
         mail = self.make_mail(
             "MAILER-DAEMON@mail.example.com", "Undelivered Mail Returned to Sender",

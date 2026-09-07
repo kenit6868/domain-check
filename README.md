@@ -118,6 +118,7 @@ thu thập bằng chứng, báo cáo theo đúng thứ tự ưu tiên, tới the
 ```
 phishing_toolkit.py       - Tool chính (check / related / brandscan)
 cloaking_detector.py      - Detector HTTP đa profile + xác minh Playwright thụ động
+browser_evidence.py       - Lõi Phase 1 chụp evidence trình duyệt thụ động (PNG + manifest)
 cloaking_ui.py            - Khối hiển thị kết quả cloaking dùng chung cho Streamlit
 cloaking_review_queue.py  - Hàng đợi review cloaking bền vững giữa các worker job
 cloaking_review_sender.py - Chuẩn bị preview và gửi trực tiếp case Cloaking Review
@@ -130,6 +131,42 @@ plan_phishing_takedown.md - Quy trình làm việc chi tiết
 case_log.csv               - Tự sinh ra sau khi chạy check lần đầu
 reports/                   - Tự sinh ra, chứa email báo cáo đã điền sẵn
 ```
+
+### Browser Evidence — Phase 1
+
+Lõi `browser_evidence.py` đã sẵn sàng cho các phase tích hợp sau. Hàm capture chỉ
+mở trang và đọc DOM, tuyệt đối không click, nhập liệu hoặc submit form. Mỗi lần
+capture hợp lệ tạo một ảnh PNG có panel kỹ thuật và một manifest JSON chứa URL
+được yêu cầu, landing URL, redirect HTTP, profile, control DOM, destination đã
+resolve và SHA-256 của ảnh. Loại evidence hiện tại là `dom_observed`; chưa được
+diễn giải thành redirect đã xác minh. Trang lỗi trình duyệt/DNS và cảnh báo
+phishing của provider bị loại khỏi evidence nội dung.
+
+Phase 2 đã chuyển **Phản hồi NCC** sang lõi này. Nút tạo ảnh DOM vẫn mở Chrome
+có giao diện để người vận hành xử lý challenge nếu cần, nhưng capture không
+click hoặc submit. Page giữ evidence trong session qua rerun, hiển thị thumbnail,
+requested URL, landing URL, DOM destination và số redirect HTTP; khi gửi reply,
+ảnh PNG và manifest đã kiểm tra hash được đính kèm đúng theo preview. Upload thủ
+công và URLScan vẫn được giữ làm fallback tạm thời trong phase chuyển đổi.
+
+Các phase tiếp theo mới lần lượt chuyển Check Domain, Quick Report, Domain
+Worker và Cloaking Review sang lõi dùng chung, sau đó mới gỡ URLScan hoàn toàn.
+
+Từ Phase 3, **Check Domain** bắt buộc tạo Browser Evidence trước khi cho gửi
+email. Capture hợp lệ được chèn thành khối kỹ thuật tiếng Anh vào mọi draft và
+PNG + manifest được truyền cho cả gửi một draft lẫn gửi tất cả. Quality gate
+chặn draft thiếu Subject, recipient, sai full Reported URL, còn placeholder,
+chứa `NOT flagged`, còn bất kỳ khối URLScan cũ nào hoặc thiếu cặp
+attachment. URLScan vẫn hiển thị để tham khảo nội bộ nhưng không còn
+được tự động hoặc thủ công chèn vào email.
+
+Các nội dung dùng để dán vào **web form** (GSB, Cloudflare và registrar) luôn
+ghi đúng full URL/path. Mẫu không chèn URLScan hoặc screenshot URLScan và không
+tự khẳng định đã lấy OTP/thông tin thanh toán khi chưa có quan sát chứng minh;
+thay vào đó yêu cầu nhà cung cấp điều tra và áp dụng chính sách nếu xác nhận.
+GSB và Cloudflare có hai pool riêng, mỗi pool 5 biến thể: GSB yêu cầu cảnh báo/
+chặn ở Safe Browsing, còn Cloudflare yêu cầu xử lý dịch vụ liên quan hoặc chuyển
+tiếp tới origin hosting provider. Biến thể được chọn ổn định theo domain + ngày.
 
 ## Lưu ý cho Windows
 

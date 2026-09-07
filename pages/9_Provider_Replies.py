@@ -13,10 +13,10 @@ import mail_statistics
 if getattr(mail_statistics, "MODULE_VERSION", 0) < 5:
     mail_statistics = importlib.reload(mail_statistics)
 import provider_replies
-if getattr(provider_replies, "MODULE_VERSION", 0) < 3:
+if getattr(provider_replies, "MODULE_VERSION", 0) < 4:
     provider_replies = importlib.reload(provider_replies)
 from provider_replies import (
-    ACTION_REQUIRED_TYPES, build_reply, build_reply_vi, capture_dom_link_evidence, clear_mail_cache, download_evidence_image,
+    ACTION_REQUIRED_TYPES, browser_evidence_attachment_paths, build_reply, build_reply_vi, capture_dom_link_evidence, clear_mail_cache, download_evidence_image,
     extract_reply_context, fetch_provider_mail_all_folders,
     instructed_reply_address, is_delivery_failure, load_mail_cache, mark_mails_seen,
     load_reply_log, needs_reply, provider_message_vi, received_datetime, record_reply_sent,
@@ -331,6 +331,7 @@ with right:
     official_url = st.text_input("Website chính thức", key=f"{key}_official")
     evidence = st.text_area("Thông tin/bằng chứng bổ sung đã xác minh", height=120, key=f"{key}_evidence")
     attachment_key = f"{key}_screenshot_path"
+    browser_evidence_key = f"{key}_browser_evidence"
     requires_redirect_evidence = mail.provider == "cloudflare" and mail.request_type in ("clarification", "technical_evidence")
     if mail.request_type == "screenshot" or requires_redirect_evidence:
         st.markdown("**Ảnh chụp bằng chứng**")
@@ -347,6 +348,8 @@ with right:
                 dom_capture = capture_dom_link_evidence(reported_url, mail.domain or reported_url)
             if dom_capture["success"]:
                 st.session_state[attachment_key] = dom_capture["path"]
+                st.session_state[browser_evidence_key] = dom_capture
+                st.session_state.pop(f"{key}_urlscan_result", None)
                 if dom_capture.get("href"):
                     st.session_state[detected_redirect_key] = dom_capture["href"]
                 if dom_capture.get("label"):
@@ -366,6 +369,7 @@ with right:
                 st.session_state[attachment_key] = save_uploaded_evidence(
                     uploaded_image.name, uploaded_image.getvalue(), mail.domain or reported_url,
                 )
+                st.session_state.pop(browser_evidence_key, None)
                 st.success("Đã lưu ảnh để đính kèm vào email phản hồi.")
             except Exception as exc:
                 st.error(f"Không lưu được ảnh: {exc}")
@@ -377,21 +381,47 @@ with right:
                 if scan.get("screenshot_url"):
                     try:
                         st.session_state[attachment_key] = download_evidence_image(scan["screenshot_url"], mail.domain or reported_url)
+                        st.session_state.pop(browser_evidence_key, None)
                         st.session_state[f"{key}_urlscan_result"] = scan.get("result_url", "")
                     except Exception as exc:
                         st.error(f"Tải ảnh thất bại: {exc}")
                 else:
                     st.error(f"URLScan chưa tạo được ảnh: {scan.get('error') or scan.get('warning') or 'Không rõ lỗi'}")
         screenshot_path = st.session_state.get(attachment_key, "")
+        browser_capture = st.session_state.get(browser_evidence_key) or {}
+        browser_attachments = browser_evidence_attachment_paths(browser_capture)
         if screenshot_path and os.path.isfile(screenshot_path):
-            st.image(screenshot_path, caption="Ảnh sẽ được đính kèm email", use_container_width=True)
-            st.caption(f"File: {screenshot_path}")
+            st.image(screenshot_path, caption="Ảnh sẽ được đính kèm email", width=520)
+            if browser_capture:
+                if browser_attachments:
+                    st.success("Ảnh và manifest đã được kiểm tra hash, sẵn sàng đính kèm.")
+                    evidence_meta = st.container(border=True)
+                    evidence_meta.caption("Browser evidence chỉ đọc — không click hoặc submit")
+                    evidence_meta.write(f"**Requested URL:** `{browser_capture.get('requested_url', '')}`")
+                    evidence_meta.write(f"**Landing URL:** `{browser_capture.get('landing_url', '')}`")
+                    evidence_meta.write(
+                        "**DOM destination:** `"
+                        + str(browser_capture.get("resolved_destination") or "Không tìm thấy")
+                        + "`"
+                    )
+                    hops = browser_capture.get("http_redirect_chain") or []
+                    evidence_meta.caption(
+                        f"Server-side redirect: {len(hops)} hop · Loại: dom_observed · Navigation verified: Không"
+                    )
+                else:
+                    st.error("Browser evidence đã thay đổi hoặc không còn hợp lệ. Hãy chụp lại trước khi gửi.")
             result_url = st.session_state.get(f"{key}_urlscan_result", "")
             if result_url: st.link_button("Mở báo cáo URLScan", result_url)
     else:
         screenshot_path = st.session_state.get(attachment_key, "")
+        browser_capture = st.session_state.get(browser_evidence_key) or {}
+        browser_attachments = browser_evidence_attachment_paths(browser_capture)
+    has_legacy_screenshot = bool(
+        screenshot_path and os.path.isfile(screenshot_path) and not browser_capture
+    )
+    has_valid_screenshot = bool(browser_attachments or has_legacy_screenshot)
     details = {"reported_url": reported_url, "button_label": button_label, "redirect_url": redirect_url, "official_url": official_url, "evidence": evidence,
-               "screenshot_attached": bool(screenshot_path and os.path.isfile(screenshot_path)),
+               "screenshot_attached": has_valid_screenshot,
                "urlscan_result": st.session_state.get(f"{key}_urlscan_result", ""),
                "contact_name": cfg.get("contact_name", ""), "contact_email": cfg.get("contact_email", "")}
     default_subject, default_body, warnings = build_reply(mail, details)
@@ -421,7 +451,7 @@ with right:
         )
     legal_ok = True
     if mail.risk == "approval_required": legal_ok = st.checkbox("Người có thẩm quyền đã duyệt nội dung pháp lý/định danh", key=f"{key}_legal")
-    screenshot_ok = (mail.request_type != "screenshot" and not requires_redirect_evidence) or bool(screenshot_path and os.path.isfile(screenshot_path))
+    screenshot_ok = (mail.request_type != "screenshot" and not requires_redirect_evidence) or has_valid_screenshot
     redirect_ok = not requires_redirect_evidence or bool(redirect_url)
     can_send = reviewed and resend_ok and legal_ok and screenshot_ok and redirect_ok and mail.channel == "email" and bool(mail.reply_to) and "[PLEASE" not in body
     if not can_send:
@@ -435,7 +465,9 @@ with right:
         if "[PLEASE" in body: blocked_reasons.append("draft còn placeholder cần điền")
         st.caption("Chưa thể gửi: " + "; ".join(blocked_reasons) + ".")
     if st.button("Gửi phản hồi đúng thread", type="primary", disabled=not can_send, key=f"{key}_send"):
-        attachments = [screenshot_path] if screenshot_path and os.path.isfile(screenshot_path) else []
+        attachments = browser_attachments or (
+            [screenshot_path] if has_legacy_screenshot else []
+        )
         proxies = cfg.get("smtp_proxies", [])
         proxy_str = proxies[0] if proxies else None
         with st.spinner("Đang gửi phản hồi và lưu bản sao vào thư mục Đã gửi..."):

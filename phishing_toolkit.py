@@ -49,6 +49,7 @@ from email.utils import formatdate, make_msgid
 from urllib.parse import urlparse
 
 import cloaking_detector
+import browser_evidence
 
 try:
     import whois
@@ -580,7 +581,7 @@ def get_webform_draft_text(
     vt_link: str = "",
     urlscan: dict | None = None,
 ) -> str:
-    """Generate concise evidence text for registrar/hosting abuse web forms."""
+    """Generate concise web-form text; URLScan is intentionally never included."""
     from datetime import datetime, timezone as _tz
 
     brand = cfg.get("brand_name") or "[BRAND]"
@@ -600,13 +601,6 @@ def get_webform_draft_text(
         f"Phishing URL: {t_url}\n"
         f"VirusTotal:   {vt}\n"
     )
-
-    if urlscan and not urlscan.get("error"):
-        if urlscan.get("result_url"):
-            evidence_lines += f"URLScan:      {urlscan['result_url']}\n"
-
-        if urlscan.get("screenshot_url"):
-            evidence_lines += f"Screenshot:   {urlscan['screenshot_url']}\n"
 
     evidence_lines += (
         f"Detected:     {detected_date}\n\n"
@@ -1289,7 +1283,9 @@ def check_safebrowsing(url: str, api_key: str):
         return {"error": str(e)}
 
 
-def generate_safebrowsing_report_text(domain: str, cfg: dict) -> str:
+def generate_safebrowsing_report_text(
+    domain: str, cfg: dict, target_url: str = "",
+) -> str:
     """Sinh sẵn 1 đoạn mô tả ngắn để copy-paste vào ô mô tả của form report thủ công tại
     https://safebrowsing.google.com/safebrowsing/report_phish/ (Google không có API submit report,
     chỉ có API tra cứu qua check_safebrowsing() ở trên).
@@ -1300,39 +1296,35 @@ def generate_safebrowsing_report_text(domain: str, cfg: dict) -> str:
     email_send_ui.py. Chỉ trả về string để cmd_check/pages/1_Check_Domain.py tự hiển thị bằng
     st.code()/print() cho người dùng copy.
     """
+    reported_url = target_url or f"https://{domain}"
     rng = _draft_rng(domain)
     brand = cfg.get("brand_name") or "our brand"
     variants = [
-        f"""The domain {domain} is actively impersonating {brand} by cloning its official login page to steal user credentials, harvest OTP tokens, and collect payment details. This is an active phishing site targeting {brand} users. Please immediately flag and block this URL to protect users.""",
-
-        f"""This site ({domain}) is an active phishing page impersonating {brand}. It clones the official login interface to steal user credentials, harvest OTP codes, and collect payment information from victims. Immediate blocking is requested to prevent further user harm.""",
-
-        f"""{domain} is an active phishing domain targeting {brand} users. The site replicates {brand}'s official authentication portal and is used to steal login credentials, harvest OTP tokens, and collect sensitive payment information. Please immediately add this URL to Safe Browsing protections and block access for users.""",
-
-        f"""We are reporting {domain} as an active phishing site impersonating {brand}. The page fraudulently replicates the official website and authentication interface to steal user credentials, harvest OTP tokens, and collect financial information from victims. Immediate blocking is requested to protect users from this phishing threat.""",
-
-        f"""This phishing URL ({domain}) fraudulently impersonates {brand}'s official website and login portal. It is designed to steal user credentials, harvest OTP tokens, and collect payment details from victims. Please immediately flag and block this URL to prevent users from being exposed to the phishing site."""
+        f"The reported URL {reported_url} is a suspected phishing page impersonating {brand}. It presents deceptive brand and login-related content designed to induce users to enter account credentials or personal information. Please investigate this specific URL and add it to Google Safe Browsing protections if confirmed.",
+        f"We are reporting {reported_url} for suspected phishing and unauthorized impersonation of {brand}. The page may deceive visitors into submitting login credentials or other sensitive user information. Please review the URL and show an appropriate Safe Browsing warning if the violation is confirmed.",
+        f"The URL {reported_url} appears to misuse the identity of {brand} in a deceptive page intended to obtain user credentials or personal data. Please investigate and block this phishing URL through Google Safe Browsing if confirmed.",
+        f"Please review {reported_url} as a suspected phishing URL targeting users of {brand}. Its branding and login-related presentation may mislead visitors into entering sensitive account information. We request Safe Browsing protection for this exact URL if your review confirms the abuse.",
+        f"This report concerns {reported_url}, which appears to impersonate {brand} and solicit credentials or personal information through deceptive content. Please verify the page and add a browser phishing warning under Google Safe Browsing policy if confirmed.",
     ]
     return _pick(rng, variants)
 
 
-def generate_cloudflare_report_text(domain: str, cfg: dict) -> str:
+def generate_cloudflare_report_text(
+    domain: str, cfg: dict, target_url: str = "",
+) -> str:
     """Sinh sẵn nội dung mô tả để copy-paste vào form report Cloudflare tại
     https://abuse.cloudflare.com/ (mục Phishing & Malware) — tương tự
     generate_safebrowsing_report_text(), không ghi file, chỉ trả về string.
     """
+    reported_url = target_url or f"https://{domain}"
     rng = _draft_rng(domain + "_cf")  # seed khác GSB để variant không trùng
     brand = cfg.get("brand_name") or "our brand"
     variants = [
-        f"""The domain {domain} is actively impersonating {brand} by cloning its official website and login interface to steal user credentials, harvest OTP tokens, and collect payment details. This is an active phishing site targeting {brand} users. Please investigate this domain and take immediate action under Cloudflare's abuse policies to protect users.""",
-
-        f"""{domain} is an active phishing site impersonating {brand}'s official website. It copies the official login interface and is used to steal user credentials, harvest OTP codes, and collect payment information from victims. Please investigate the reported URL and take immediate action to prevent further user harm.""",
-
-        f"""We are reporting {domain} as an active phishing domain impersonating {brand}. The website fraudulently replicates {brand}'s official website and authentication interface to steal login credentials, harvest OTP tokens, and collect sensitive payment information. Please investigate this phishing activity and take appropriate action under Cloudflare's abuse policies.""",
-
-        f"""This domain ({domain}) is impersonating {brand} without authorization and is being used as an active phishing website. It clones {brand}'s official login portal to steal user credentials, harvest OTP tokens, and collect payment details from victims. Immediate investigation and appropriate action are requested to protect users.""",
-
-        f"""The website at {domain} is a fraudulent copy of {brand}'s official website and login portal. It is being used to steal user credentials, harvest OTP tokens, and collect payment information through an impersonated authentication interface. Please investigate this active phishing site and take appropriate action under your abuse policies."""
+        f"The reported URL {reported_url} is a suspected phishing page impersonating {brand}. Its deceptive brand and login-related content may induce users to submit credentials or personal information. Please investigate the use of Cloudflare services and take appropriate action or forward this report to the responsible hosting provider if confirmed.",
+        f"We are reporting {reported_url} for suspected phishing and unauthorized impersonation of {brand}. The page appears designed to obtain sensitive user information through deceptive content. Please review the associated Cloudflare service and apply the appropriate abuse response, including notifying the origin host where applicable.",
+        f"The specific URL {reported_url} appears to misuse the identity of {brand} to solicit account credentials or personal data. Please investigate this phishing report under Cloudflare's abuse policies and coordinate with the responsible hosting provider if the content is confirmed.",
+        f"Please investigate {reported_url}, a suspected phishing page targeting users of {brand}. The page's branding and login-related presentation may deceive visitors into entering sensitive information. We request appropriate action concerning the Cloudflare services involved and referral to the origin provider when necessary.",
+        f"This abuse report concerns {reported_url}, which appears to impersonate {brand} and solicit user credentials or personal information. Please verify the reported content and take the action available to Cloudflare, or transmit the report to the relevant hosting provider, if confirmed.",
     ]
     return _pick(rng, variants)
 
@@ -3061,6 +3053,39 @@ def parse_draft_email(path: str) -> dict:
     return {"to": to, "subject": subject, "body": body}
 
 
+def validate_report_delivery(
+    parsed: dict, *, target_url: str = "", attachments: list[str] | None = None,
+    require_browser_evidence: bool = False,
+) -> list[str]:
+    """Return user-facing quality errors that must block an external send."""
+    errors = []
+    subject = str((parsed or {}).get("subject") or "").strip()
+    recipient = str((parsed or {}).get("to") or "").strip()
+    body = str((parsed or {}).get("body") or "")
+    if not recipient:
+        errors.append("Draft không có email nhận hợp lệ")
+    if not subject:
+        errors.append("Draft không có Subject")
+    if target_url and f"Reported URL: {target_url}" not in body:
+        errors.append("Draft không chứa đúng full Reported URL")
+    if "--- Evidence: URLScan.io" in body:
+        errors.append("Draft còn khối URLScan chỉ dành cho kiểm tra nội bộ")
+    if re.search(r"(?i)\bNOT\s+flagged\b", body):
+        errors.append("Draft chứa verdict URLScan 'NOT flagged'")
+    if re.search(r"(?i)\[(?:PLEASE|ATTACH|ĐÍNH KÈM|TRA ABUSE|KHÔNG CÓ)", body):
+        errors.append("Draft còn placeholder cần xử lý")
+    attachment_paths = [os.path.abspath(str(path)) for path in attachments or []]
+    missing = [path for path in attachment_paths if not os.path.isfile(path)]
+    if missing:
+        errors.append("Có attachment không còn tồn tại")
+    if require_browser_evidence:
+        manifests = [path for path in attachment_paths if path.lower().endswith(".json")]
+        images = [path for path in attachment_paths if path.lower().endswith((".png", ".jpg", ".jpeg"))]
+        if len(manifests) != 1 or len(images) != 1:
+            errors.append("Browser Evidence phải có đúng một ảnh và một manifest")
+    return errors
+
+
 def _normalize_to_addresses(to: str) -> str:
     """Chuẩn hóa trường To: về dạng 'addr1, addr2' thuần túy.
 
@@ -3316,6 +3341,34 @@ def append_cloaking_evidence_to_drafts(
             ).rstrip()
             with open(path, "w", encoding="utf-8") as file:
                 file.write(content + "\n\n" + evidence_block + "\n")
+            updated.append(path)
+        except OSError:
+            continue
+    return updated
+
+
+def append_browser_evidence_to_drafts(drafts: list, evidence_result: dict) -> list:
+    """Insert one validated, factual browser evidence block into each draft."""
+    block = browser_evidence.format_email_evidence_block(evidence_result)
+    if not block:
+        return []
+    updated = []
+    for path in drafts or []:
+        try:
+            with open(path, encoding="utf-8") as file:
+                content = file.read()
+            content = re.sub(
+                r"\n*--- Technical Evidence: Read-only Browser Inspection ---.*?"
+                r"--- End of Browser Evidence ---\n*",
+                "\n", content, flags=re.DOTALL,
+            ).rstrip()
+            content = re.sub(
+                r"\n*--- Evidence: URLScan\.io(?: Analysis| \(kết quả đang xử lý\))? ---.*?"
+                r"--- End URLScan Evidence ---\n*",
+                "\n", content, flags=re.DOTALL,
+            ).rstrip()
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(content + "\n\n" + block + "\n")
             updated.append(path)
         except OSError:
             continue
@@ -3799,9 +3852,8 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
             urlscan_data = {"error": str(e)}
         finally:
             _urlscan_executor.shutdown(wait=False)
-        # Gắn result evidence kể cả khi URLScan không chụp được ảnh; URL ảnh 404 không được đưa vào draft.
-        if urlscan_data.get("result_url"):
-            append_urlscan_evidence_to_drafts(drafts, urlscan_data)
+        # Phase 3: URLScan chỉ còn là dữ liệu tham khảo nội bộ trên UI. Không
+        # chèn verdict/link/screenshot URLScan vào email gửi ra ngoài.
     else:
         _urlscan_executor.shutdown(wait=False)
 
