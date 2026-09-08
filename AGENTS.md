@@ -22,11 +22,15 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
 - `link_status.py`, `domain_utils.py`: tiện ích kiểm tra link/domain.
 - `cloaking_detector.py`, `cloaking_ui.py`: detector HTTP đa profile, xác minh
   Playwright thụ động, manifest/ảnh bằng chứng và UI dùng chung.
-- `browser_evidence.py`: lõi Browser Evidence capture Playwright thụ động, ghi
-  PNG + manifest/hash; Provider Replies là consumer đầu tiên từ Phase 2.
+- `browser_evidence.py`: lõi Browser Evidence capture Playwright không tương tác
+  (passive, DOM destination và verified navigation tùy chọn) cho report thường, ghi PNG + manifest/hash;
+  ưu tiên DOM destination nguồn–đích cho domain thường rồi fallback passive; detector
+  cloaking vẫn giữ Playwright thụ động đa profile.
 - `cloaking_review_queue.py`, `cloaking_review_sender.py`,
   `pages/10_Cloaking_Review.py`: queue JSON/ledger bền vững, lớp preview + gửi
   SMTP trực tiếp và trang duyệt riêng cho case cloaking do worker cách ly.
+- `pages/12_Domain_Evidence_Review.py`: page review riêng cho domain thường thiếu
+  Browser Evidence, đọc preflight v4 theo ngày/full URL và gửi ảnh thủ công trực tiếp.
 - `tests/`: bộ kiểm thử `unittest`.
 - `README.md`: hướng dẫn người dùng; `CLAUDE.md`: ghi chú triển khai;
   `03_Technical_Guide.md` và `plan_phishing_takedown.md`: playbook vận hành.
@@ -97,6 +101,16 @@ Không tự khởi động Streamlit nếu người dùng chưa yêu cầu. Buil
   khỏi batch tự động. Check Domain và danh sách này nhận 1–3 ảnh PNG/JPEG thủ
   công, preview ngay, tạo manifest hash không qua nút lưu; gửi lỗi giữ evidence
   để retry. Đây là evidence report thường, không thay quy tắc 2–4 ảnh cloaking.
+- Verified navigation là lớp opt-in riêng cho report thường: chỉ click anchor
+  HTTP(S) hoặc button `data-href` không submit có nhãn Register/Login trong
+  browser cô lập, chụp đúng ảnh trước/sau và ghi URL cuối + redirect 3xx vào
+  manifest. Không nhập credential, type, submit hoặc tải file; không có URL mới
+  hay gặp terminal page thì fail closed sang evidence thụ động/thủ công. Không
+  dùng lớp này cho detector cloaking. Check Domain cho phép chọn chế độ này trong
+  expander Browser Evidence, preview đúng hai ảnh và URL trước/sau click; cùng
+  artifact đã preview được truyền cho cả gửi đơn và gửi tất cả. Widget/state phải
+  giữ evidence qua rerun; nếu verified thất bại, vẫn dùng được Passive DOM hoặc
+  uploader thủ công 1–3 ảnh mà không cần nút lưu trung gian.
 - Cloaking Review tạo draft preview và gửi đồng bộ, trực tiếp bằng SMTP helper;
   không tạo worker job hoặc launch process. Nội dung đã preview phải chính là
   nội dung gửi. Lock ngắn theo queue ID chỉ ngăn hai phiên gửi cùng case và không
@@ -194,6 +208,78 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-09-08 — Domain Worker evidence capture: precheck v4 thử mở destination HTTP(S)
+  từ control Register/Login trong DOM để chụp ảnh nguồn + đích; nếu không có URL tĩnh
+  hoặc mở đích lỗi thì fallback capture thụ động, còn terminal browser/DNS source không
+  bị đưa vào manual review. Thêm `pages/12_Domain_Evidence_Review.py` để gộp case
+  thiếu ảnh theo full URL/ngày, upload 1–3 ảnh preview ngay và gửi trực tiếp khi worker
+  vẫn chạy; gửi thành công đánh dấu các bản ghi trùng ở job khác để không tái xuất hiện;
+  file chính: `domain_worker.py`, `browser_evidence.py`,
+  `pages/6_Domain_Worker.py`, `pages/12_Domain_Evidence_Review.py`,
+  `streamlit_app.py`, test worker/UI; đã kiểm tra: regression focused, AppTest,
+  229/229 full unittest, compileall, pip check và diff check; tài liệu: `README.md`,
+  `03_Technical_Guide.md`, file này và skill dự án; lưu ý: không mở URL thật hoặc
+  gửi SMTP thật.
+
+- 2026-09-08 — Phân loại ba case Browser Evidence: formatter dùng riêng nội dung
+  cho control có HTTP(S) destination, control không có URL tĩnh và trang không có
+  control auth; capture đếm aggregate field password/OTP/payment/identity đang hiển
+  thị mà không đọc value, chỉ đưa claim “capable of collecting” khi có field thật;
+  UI Check Domain hiển thị case và các indicator đã quan sát, Domain Worker dùng
+  cùng lõi; file chính: `browser_evidence.py`, `pages/1_Check_Domain.py`, test
+  evidence/worker/AppTest; đã kiểm tra: test tập trung, full unittest, compileall,
+  pip check và diff check; tài liệu: `README.md`, `03_Technical_Guide.md`, file
+  này và skill dự án; lưu ý: browser giả/mock, không mở URL nghi ngờ hoặc gửi SMTP.
+
+- 2026-09-08 — Tối ưu nội dung Browser Evidence gửi nhà cung cấp: thay raw block
+  “Technical Evidence” bằng phần tố cáo tiếng Anh “Observed Phishing Behavior
+  and Supporting Evidence”, nêu control, `href`, bước tái hiện, URL đích/quan hệ
+  cần điều tra, attachment và yêu cầu xử lý; phân biệt rõ inspect DOM thụ động với
+  mở URL trực tiếp, không tự claim click/credential/OTP/payment; block được chèn
+  trước chữ ký và áp dụng qua lõi chung cho Check Domain/Domain Worker; file chính:
+  `browser_evidence.py`, `phishing_toolkit.py`, test evidence/worker; đã kiểm tra:
+  test tập trung, full unittest, compileall, pip check và diff check; tài liệu:
+  `README.md`, `03_Technical_Guide.md`, file này và skill dự án; lưu ý: không mở
+  URL nghi ngờ hoặc gửi SMTP thật.
+
+- 2026-09-08 — Browser Evidence Phase 2.1 bỏ click thật tại Check Domain: chế độ
+  opt-in đổi thành “Mở URL từ DOM”, chụp trang nguồn rồi mở resolved href trong
+  tab mới cùng BrowserContext/referrer để chụp trang đích; manifest/email ghi rõ
+  không click, state khóa theo full URL và gate chặn evidence của URL/path khác;
+  cập nhật draft theo bước đọc/stage toàn bộ để lỗi draft không gây cập nhật một
+  phần; file chính: `browser_evidence.py`, `phishing_toolkit.py`,
+  `pages/1_Check_Domain.py`, test core/AppTest; đã kiểm tra: test tập trung,
+  full unittest, compileall, pip check và diff check; tài liệu: `README.md`,
+  `03_Technical_Guide.md`, file này và skill dự án; lưu ý: chỉ browser giả/mock,
+  không mở URL nghi ngờ hoặc gửi SMTP thật.
+
+- 2026-09-08 — Browser Evidence Phase 2 tích hợp Check Domain với verified navigation
+  opt-in: expander có lựa chọn Passive DOM/Verified click, tự chụp hai ảnh trước/sau
+  control Register/Login an toàn, preview URL trước click/DOM href/URL cuối/redirect
+  chain và truyền đúng artifact đã preview cho gửi đơn lẫn gửi tất cả; lỗi fallback
+  sang capture thụ động hoặc upload 1–3 ảnh ngay, không có bước lưu riêng. Detector
+  cloaking và Domain Worker vẫn thụ động; file chính: `pages/1_Check_Domain.py`,
+  `browser_evidence.py`, `phishing_toolkit.py`,
+  `tests/test_check_domain_browser_evidence.py`; đã kiểm tra: 7 test page,
+  218/218 full unittest, compileall, pip check và AppTest mocked; tài liệu:
+  `README.md`, `03_Technical_Guide.md`, file này và skill dự án; lưu ý: chỉ dùng
+  browser giả, không mở URL nghi ngờ và không gửi SMTP thật; cơ chế click này đã
+  được thay bằng mở URL từ DOM ở Phase 2.1 bên trên.
+
+- 2026-09-08 — Browser Evidence Phase 1 mở rộng với verified navigation tùy chọn
+  cho report phishing thường: tự chọn anchor HTTP(S)/button `data-href` Register/
+  Login an toàn, chụp `source_before_click` và `destination_after_click`, hỗ trợ
+  same-tab/popup, ghi URL cuối + redirect 3xx BrowserContext, tiêu đề/DOM control
+  và SHA-256 vào manifest; từ chối control submit/javascript, URL không đổi và
+  terminal page, dọn artifact khi lỗi. Detector cloaking và Domain Worker vẫn
+  thụ động; Check Domain tích hợp opt-in ở Phase 2; file chính:
+  `browser_evidence.py`, `phishing_toolkit.py`,
+  `tests/test_browser_evidence.py`, `tests/test_check_domain_browser_evidence.py`;
+  đã kiểm tra: 15 test Browser Evidence, 217/217 full unittest, compileall,
+  pip check; tài liệu:
+  `README.md`, `03_Technical_Guide.md`, file này và skill dự án; lưu ý: chỉ dùng
+  browser giả, không mở URL nghi ngờ và không gửi SMTP thật.
 
 - 2026-09-08 — Browser Evidence Phase 4 cho Check Domain/Domain Worker: fallback
   upload 1–3 ảnh PNG/JPEG tạo manifest hash, preview không nút lưu; worker
@@ -460,7 +546,7 @@ vào phần này.
 
 Nhóm `link_status` đã thống nhất Cloudflare warning/HTTP 403 là `BLOCKED`, không
 phải `LIVE` hay `DIE`; mock response không iterable được xử lý an toàn. Toàn bộ
-test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 212 test.
+test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 229 test.
 Detector cloaking có test thuần cho scoring/profile/path/vantage, fake browser
 cho Playwright và mock attachment worker; không dùng URL nghi ngờ hay SMTP thật
 trong test.

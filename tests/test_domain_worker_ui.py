@@ -1,4 +1,5 @@
 import json
+import base64
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,10 +9,14 @@ from streamlit.testing.v1 import AppTest
 
 import cloaking_review_queue as review_queue
 import domain_worker
+import browser_evidence
 import phishing_toolkit as pt
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PNG_1X1 = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
 
 
 class DomainWorkerUiTests(unittest.TestCase):
@@ -73,6 +78,134 @@ class DomainWorkerUiTests(unittest.TestCase):
             ))
             self.assertIn("Gửi mail domain này", [button.label for button in app.button])
             send.assert_not_called()
+
+    def test_dedicated_evidence_review_page_lists_daily_case_without_sending(self):
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            runtime = Path(runtime_dir)
+            worker_dir = runtime / "worker_jobs"
+            job_dir = worker_dir / "evidence-review-page"
+            job_dir.mkdir(parents=True)
+            target = "https://manual-page.example/path"
+            (job_dir / "job.json").write_text(json.dumps({
+                "job_id": "evidence-review-page", "domains": [target],
+                "allowed_accounts": ["sender@example.org"],
+            }), encoding="utf-8")
+            (job_dir / "preflight.json").write_text(json.dumps({
+                "version": 4, "complete": False, "ready": [],
+                "evidence_review": [{
+                    "target_url": target, "domain": "manual-page.example",
+                    "recipients": [{"channel": "registrar", "email": "abuse@example.org"}],
+                    "browser_evidence_error": "automatic capture unavailable",
+                }],
+            }), encoding="utf-8")
+            with (
+                patch.object(domain_worker, "WORKER_DIR", str(worker_dir)),
+                patch.object(pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+            ):
+                app = AppTest.from_file(
+                    str(ROOT / "streamlit_app.py"), default_timeout=10,
+                ).run()
+                app = app.switch_page("pages/12_Domain_Evidence_Review.py").run()
+            self.assertEqual([], list(app.exception))
+            self.assertGreaterEqual(len(app.dataframe), 1)
+            self.assertTrue(any("Danh sách hôm nay" in caption.value for caption in app.caption))
+
+    def test_dedicated_evidence_review_upload_sends_directly_without_new_job(self):
+        with tempfile.TemporaryDirectory() as runtime_dir, tempfile.TemporaryDirectory() as evidence_dir:
+            runtime = Path(runtime_dir)
+            worker_dir = runtime / "worker_jobs"
+            job_dir = worker_dir / "evidence-review-send"
+            job_dir.mkdir(parents=True)
+            target = "https://manual-send-page.example/path"
+            (job_dir / "job.json").write_text(json.dumps({
+                "job_id": "evidence-review-send", "domains": [target],
+                "allowed_accounts": ["sender@example.org"],
+            }), encoding="utf-8")
+            (job_dir / "preflight.json").write_text(json.dumps({
+                "version": 4, "complete": True, "ready": [],
+                "evidence_review": [{
+                    "target_url": target, "domain": "manual-send-page.example",
+                    "recipients": [{"channel": "registrar", "email": "abuse@example.org"}],
+                    "browser_evidence_error": "automatic capture unavailable",
+                }],
+            }), encoding="utf-8")
+            uploaded_evidence = {
+                "success": True,
+                "evidence_type": "manual_upload",
+                "requested_url": target,
+                "screenshot_paths": [],
+                "manifest_path": "",
+            }
+            send_result = {
+                "target_url": target, "domain": "manual-send-page.example",
+                "success": True, "sent_ok": 1, "sent_failed": 0,
+                "already_sent": 0, "sent_to": [],
+            }
+            with (
+                patch.object(domain_worker, "WORKER_DIR", str(worker_dir)),
+                patch.object(pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(
+                    browser_evidence, "create_manual_browser_evidence",
+                    return_value=uploaded_evidence,
+                ) as create_evidence,
+                patch.object(
+                    domain_worker, "send_manual_evidence_item",
+                    return_value=send_result,
+                ) as send_manual,
+            ):
+                app = AppTest.from_file(
+                    str(ROOT / "streamlit_app.py"), default_timeout=10,
+                )
+                app.session_state["domain_evidence_review_active_target"] = target
+                app = app.run().switch_page(
+                    "pages/12_Domain_Evidence_Review.py",
+                ).run()
+                uploader = next(
+                    item for item in app.file_uploader
+                    if item.label == "Ảnh bằng chứng thủ công (1–3 ảnh PNG/JPEG)"
+                )
+                app = uploader.set_value([
+                    ("source.png", PNG_1X1, "image/png"),
+                    ("broken.png", b"not-an-image", "image/png"),
+                ]).run()
+                confirmation = next(
+                    item for item in app.checkbox
+                    if item.label.startswith("Tôi đã kiểm tra đúng URL")
+                )
+                app = confirmation.check().run()
+                mixed_send = next(
+                    item for item in app.button if item.label == "Gửi mail domain này"
+                )
+                self.assertTrue(mixed_send.disabled)
+                uploader = next(
+                    item for item in app.file_uploader
+                    if item.label == "Ảnh bằng chứng thủ công (1–3 ảnh PNG/JPEG)"
+                )
+                app = uploader.set_value([
+                    ("source.png", PNG_1X1, "image/png"),
+                ]).run()
+                confirmation = next(
+                    item for item in app.checkbox
+                    if item.label.startswith("Tôi đã kiểm tra đúng URL")
+                )
+                app = confirmation.check().run()
+                send_button = next(
+                    item for item in app.button if item.label == "Gửi mail domain này"
+                )
+                self.assertFalse(send_button.disabled)
+                app = send_button.click().run()
+            self.assertEqual([], list(app.exception))
+            create_evidence.assert_called_once()
+            send_manual.assert_called_once_with(
+                str(job_dir), target, uploaded_evidence, ["sender@example.org"],
+            )
+            self.assertTrue(any(
+                "Đã gửi email thành công" in success.value for success in app.success
+            ))
 
     def test_v3_precheck_renders_normal_and_early_cloaking_counts(self):
         with (

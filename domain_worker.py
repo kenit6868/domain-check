@@ -14,6 +14,7 @@ import traceback
 import uuid
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
+from urllib.parse import urlsplit
 
 import phishing_toolkit as pt
 import browser_evidence
@@ -731,10 +732,299 @@ def _precheck_cloaking(target: str, cfg: dict) -> dict:
 
 
 def _capture_worker_browser_evidence(target: str) -> dict:
-    return browser_evidence.capture_passive_browser_evidence(
-        target, pt._runtime_path(os.path.join("evidence", "browser")),
-        profile_name="domain_worker_desktop", headless=True,
+    """Capture the strongest safe evidence available for a normal report.
+
+    Domain Worker first tries the same no-click DOM-destination capture used by
+    Check Domain.  If the page has no static HTTP(S) Register/Login target (or
+    the destination cannot be opened), it falls back to one passive source-page
+    capture.  A terminal source page is returned as terminal state so the
+    caller can continue with a normal draft instead of asking the operator for
+    a screenshot of a browser/DNS error page.
+    """
+    evidence_root = pt._runtime_path(os.path.join("evidence", "browser"))
+
+    def _attempt_summary(value) -> dict:
+        value = value if isinstance(value, dict) else {}
+        return {
+            "success": bool(value.get("success")),
+            "terminal": bool(value.get("terminal")),
+            "terminal_stage": str(value.get("terminal_stage") or ""),
+            "evidence_type": str(value.get("evidence_type") or ""),
+            "error": browser_evidence.redact_text(value.get("error", ""))[:500],
+        }
+
+    def _has_valid_artifacts(value) -> bool:
+        try:
+            return bool(browser_evidence.evidence_attachment_paths(value))
+        except (OSError, ValueError, TypeError):
+            return False
+
+    try:
+        dom_result = browser_evidence.capture_dom_destination_evidence(
+            target, evidence_root,
+            profile_name="domain_worker_dom_destination", headless=True,
+        )
+    except Exception as exc:
+        dom_result = {
+            "success": False, "terminal": False, "error": browser_evidence.redact_text(exc),
+        }
+    if _has_valid_artifacts(dom_result):
+        result = dict(dom_result)
+        result["capture_strategy"] = "dom_destination"
+        result["fallback_reason"] = ""
+        result["dom_destination_attempt"] = _attempt_summary(dom_result)
+        return result
+
+    try:
+        passive_result = browser_evidence.capture_passive_browser_evidence(
+            target, evidence_root,
+            profile_name="domain_worker_passive", headless=True,
+        )
+    except Exception as exc:
+        passive_result = {
+            "success": False, "terminal": False, "error": browser_evidence.redact_text(exc),
+        }
+    if _has_valid_artifacts(passive_result):
+        result = dict(passive_result)
+        result["capture_strategy"] = "passive_fallback"
+        result["fallback_reason"] = _attempt_summary(dom_result)["error"] or "DOM destination was not available"
+        result["dom_destination_attempt"] = _attempt_summary(dom_result)
+        return result
+
+    # A terminal page is not content evidence and must not be sent to manual
+    # review.  Prefer the passive terminal result because it represents the
+    # source page the normal report was requested for.
+    if isinstance(passive_result, dict) and passive_result.get("terminal"):
+        result = dict(passive_result)
+    elif isinstance(dom_result, dict) and dom_result.get("terminal"):
+        result = dict(dom_result)
+    else:
+        result = dict(passive_result if isinstance(passive_result, dict) else dom_result)
+    result["capture_strategy"] = "terminal" if result.get("terminal") else "failed"
+    result["dom_destination_attempt"] = _attempt_summary(dom_result)
+    result["passive_attempt"] = _attempt_summary(passive_result)
+    return result
+
+
+def _canonical_evidence_target(value: str) -> str:
+    """Normalize a full URL for daily manual-evidence deduplication."""
+    try:
+        parsed = urlsplit(str(value or "").strip())
+        if not parsed.scheme or not parsed.netloc:
+            return str(value or "").strip().lower()
+        return "|".join((
+            parsed.scheme.lower(), parsed.netloc.lower(), parsed.path or "/", parsed.query,
+        ))
+    except (TypeError, ValueError):
+        return str(value or "").strip().lower()
+
+
+def _local_day_from_timestamp(value, local_tz=None) -> str:
+    local_tz = local_tz or datetime.now().astimezone().tzinfo
+    try:
+        observed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+        return observed.astimezone(local_tz).date().isoformat()
+    except (TypeError, ValueError):
+        return ""
+
+
+def _evidence_item_has_recipient(item: dict) -> bool:
+    prepared = item.get("prepared") if isinstance(item.get("prepared"), dict) else item
+    return any(
+        str(recipient.get("email") or "").strip()
+        for recipient in (prepared.get("recipients") or [])
+        if isinstance(recipient, dict)
     )
+
+
+def list_evidence_review_items(
+    review_day: str | None = None, *, root: str | None = None,
+) -> list[dict]:
+    """List today's normal-report cases that still need browser evidence.
+
+    Records are read from every primary worker job, not only the latest job.
+    The latest occurrence of a canonical full URL wins: a newer ready record
+    suppresses an older pending manual-evidence record, while duplicate pending
+    records collapse to one item.  Returned ``job_dir`` metadata is transient
+    UI routing state and is never written back to ``preflight.json``.
+    """
+    local_tz = datetime.now().astimezone().tzinfo
+    day = str(review_day or datetime.now(local_tz).date().isoformat())
+    root = os.path.abspath(root or WORKER_DIR)
+    if not os.path.isdir(root):
+        return []
+    latest: dict[str, tuple[tuple[float, float], str, dict | None]] = {}
+    for name in os.listdir(root):
+        job_dir = os.path.join(root, name)
+        if not os.path.isdir(job_dir) or is_cloaking_review_job_dir(job_dir):
+            continue
+        job = _read_json(os.path.join(job_dir, "job.json"), {})
+        if not isinstance(job, dict):
+            job = {}
+        preflight_path = os.path.join(job_dir, "preflight.json")
+        preflight = _read_json(preflight_path, {})
+        try:
+            preflight_version = int(preflight.get("version", 0) or 0) if isinstance(preflight, dict) else 0
+        except (TypeError, ValueError):
+            preflight_version = 0
+        if not isinstance(preflight, dict) or preflight_version < 4:
+            continue
+        try:
+            preflight_mtime = os.path.getmtime(preflight_path)
+        except OSError:
+            preflight_mtime = 0.0
+        job_created = _local_day_from_timestamp(job.get("created_at"), local_tz)
+        try:
+            job_time = datetime.fromisoformat(
+                str(job.get("created_at", "")).replace("Z", "+00:00"),
+            ).timestamp()
+        except (TypeError, ValueError, OSError):
+            job_time = 0.0
+        review_mtime_day = datetime.fromtimestamp(preflight_mtime, local_tz).date().isoformat() if preflight_mtime else ""
+        default_item_day = review_mtime_day or job_created
+        if default_item_day != day and not any(
+            str(item.get("review_day") or "") == day
+            for item in (preflight.get("evidence_review") or [])
+            if isinstance(item, dict)
+        ):
+            continue
+
+        def record(target: str, kind: str, item: dict | None = None) -> None:
+            target = str(target or "").strip()
+            if not target:
+                return
+            key = _canonical_evidence_target(target)
+            candidate_day = str((item or {}).get("review_day") or default_item_day)
+            if candidate_day != day:
+                return
+            sort_key = (preflight_mtime, job_time)
+            current = latest.get(key)
+            if current and current[0] > sort_key:
+                return
+            latest[key] = (sort_key, kind, item)
+
+        for item in (preflight.get("ready") or []):
+            if isinstance(item, dict):
+                record(item.get("target_url"), "ready", item)
+        completed = preflight.get("manual_evidence_completed") or {}
+        completed_keys = {
+            _canonical_evidence_target(key)
+            for key in completed
+            if str(key or "").strip()
+        } if isinstance(completed, dict) else set()
+        for item in (preflight.get("evidence_review") or []):
+            if not isinstance(item, dict) or not _evidence_item_has_recipient(item):
+                continue
+            target = str(item.get("target_url") or "").strip()
+            if target and (
+                target in completed
+                or _canonical_evidence_target(target) in completed_keys
+            ):
+                continue
+            enriched = dict(item)
+            enriched["job_dir"] = job_dir
+            enriched["source_job_id"] = str(job.get("job_id") or name)
+            enriched["allowed_accounts"] = list(job.get("allowed_accounts") or [])
+            enriched["review_day"] = str(item.get("review_day") or default_item_day)
+            record(target, "review", enriched)
+
+    result = [value[2] for value in latest.values() if value[1] == "review" and value[2]]
+    return sorted(
+        result,
+        key=lambda item: (
+            str(item.get("domain") or "").lower(),
+            str(item.get("target_url") or "").lower(),
+        ),
+    )
+
+
+def _mark_manual_evidence_completed_for_duplicates(
+    target_url: str, result: dict, *, source_job_dir: str = "",
+) -> None:
+    """Hide same-day duplicate pending records after one URL is sent.
+
+    The review page intentionally deduplicates by canonical full URL, but two
+    browser sessions can still hold stale rows from older jobs.  Marking those
+    records completed keeps a successful send from resurfacing when the newer
+    row is removed.  Errors here are best-effort housekeeping and never undo a
+    successful SMTP delivery.
+    """
+    target_key = _canonical_evidence_target(target_url)
+    if not target_key:
+        return
+    source_job_dir = os.path.abspath(source_job_dir) if source_job_dir else ""
+    root = os.path.abspath(WORKER_DIR)
+    if not os.path.isdir(root):
+        return
+    if source_job_dir:
+        try:
+            if os.path.normcase(os.path.commonpath([root, source_job_dir])) != os.path.normcase(root):
+                # Unit callers may keep an isolated temporary job outside the
+                # configured runtime tree; never scan or mutate real runtime
+                # jobs in that case.
+                return
+        except ValueError:
+            return
+    try:
+        job_names = os.listdir(root)
+    except OSError:
+        return
+    completion = {
+        "finished_at": _now(),
+        "status": result.get("skipped") or "sent",
+        "sent_ok": int(result.get("sent_ok", 0) or 0),
+        "sent_failed": int(result.get("sent_failed", 0) or 0),
+        "canonical_target": target_key,
+    }
+    for name in job_names:
+        job_dir = os.path.join(root, name)
+        if (
+            not os.path.isdir(job_dir)
+            or is_cloaking_review_job_dir(job_dir)
+            or os.path.abspath(job_dir) == source_job_dir
+        ):
+            continue
+        preflight_path = os.path.join(job_dir, "preflight.json")
+        try:
+            with _exclusive_file_lock(preflight_path):
+                preflight = _read_json(preflight_path, {})
+                if not isinstance(preflight, dict):
+                    continue
+                try:
+                    version = int(preflight.get("version", 0) or 0)
+                except (TypeError, ValueError):
+                    version = 0
+                if version < 4:
+                    continue
+                pending = preflight.get("evidence_review") or []
+                matching = [
+                    item for item in pending
+                    if isinstance(item, dict)
+                    and _canonical_evidence_target(item.get("target_url")) == target_key
+                ]
+                if not matching:
+                    continue
+                completed = preflight.get("manual_evidence_completed")
+                if not isinstance(completed, dict):
+                    completed = {}
+                # Preserve the original spelling/path as the lookup key while
+                # also recording canonical_target for future migrations.
+                for item in matching:
+                    original_target = str(item.get("target_url") or target_url)
+                    completed[original_target] = dict(completion)
+                preflight["manual_evidence_completed"] = completed
+                preflight["evidence_review"] = [
+                    item for item in pending
+                    if not (
+                        isinstance(item, dict)
+                        and _canonical_evidence_target(item.get("target_url")) == target_key
+                    )
+                ]
+                _atomic_json(preflight_path, preflight)
+        except (OSError, ValueError, TypeError, TimeoutError):
+            continue
 
 
 def _write_preflight(
@@ -759,6 +1049,11 @@ def _write_preflight(
     with _exclusive_file_lock(path):
         existing = _read_json(path, {})
         completed = dict(existing.get("manual_evidence_completed") or {})
+        completed_keys = {
+            _canonical_evidence_target(key)
+            for key in completed
+            if str(key or "").strip()
+        }
         existing_by_target = {
             str(item.get("target_url")): item
             for item in (existing.get("evidence_review") or [])
@@ -767,7 +1062,10 @@ def _write_preflight(
         if version >= 4:
             merged_review = []
             for item in payload["evidence_review"]:
-                if str(item.get("target_url")) in completed:
+                item_target = str(item.get("target_url") or "")
+                if item_target in completed or (
+                    item_target and _canonical_evidence_target(item_target) in completed_keys
+                ):
                     continue
                 previous = existing_by_target.get(str(item.get("target_url")), {})
                 merged = dict(item)
@@ -1037,6 +1335,10 @@ def send_manual_evidence_item(
                 for item in current_items
             ]
         _atomic_json(preflight_path, preflight)
+    if terminal:
+        _mark_manual_evidence_completed_for_duplicates(
+            target_url, result, source_job_dir=job_dir,
+        )
     _append_event(events_path, {"type": "manual_evidence_send_finished", **result})
     return result
 
@@ -1322,12 +1624,36 @@ def run_job(job_path: str):
                             _append_event(events_path, {
                                 "type": "browser_evidence_captured", "target_url": target,
                                 "domain": target_domain,
+                                "capture_strategy": capture.get("capture_strategy", ""),
+                            })
+                        elif capture.get("terminal") and capture.get("terminal_stage") == "source":
+                            # Browser/DNS/provider warning pages are not content
+                            # evidence. Keep the normal report sendable and do
+                            # not ask the operator to upload a screenshot of the
+                            # terminal page.
+                            prepared["require_browser_evidence"] = False
+                            prepared["browser_evidence_terminal"] = True
+                            prepared["browser_evidence_error"] = capture.get("error", "")
+                            ready.append(prepared)
+                            _append_event(events_path, {
+                                "type": "browser_evidence_terminal", "target_url": target,
+                                "domain": target_domain,
+                                "terminal_stage": capture.get("terminal_stage", "source"),
                             })
                         else:
                             evidence_review_items.append({
                                 **prepared,
                                 "browser_evidence_error": capture.get("error") or "Automatic capture failed",
                                 "browser_evidence_terminal": bool(capture.get("terminal")),
+                                "capture_strategy": capture.get("capture_strategy", "failed"),
+                                "dom_destination_attempt": capture.get("dom_destination_attempt") or {},
+                                "passive_attempt": capture.get("passive_attempt") or {},
+                                # Persist the operator's local review day so a
+                                # stale pending case cannot reappear merely
+                                # because a long-running job touched its JSON
+                                # after midnight. Legacy records without this
+                                # field still fall back to file mtime when read.
+                                "review_day": datetime.now().astimezone().date().isoformat(),
                             })
                             _append_event(events_path, {
                                 "type": "browser_evidence_manual_required",

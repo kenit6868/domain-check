@@ -280,48 +280,102 @@ người vận hành phê duyệt. Không đính kèm toàn bộ ảnh quan sát
 
 #### Browser Evidence dùng chung — Phase 1
 
-`browser_evidence.py` là lõi capture thụ động cho lộ trình thay thế URLScan.
-Module ghi một PNG và manifest JSON theo cùng evidence set. Panel trên ảnh và
-manifest phân biệt rõ `requested_url`, `landing_url`, redirect HTTP do máy chủ
-trả về, profile trình duyệt, control DOM được chọn và destination đã resolve.
-Ảnh được khóa bằng SHA-256; validator từ chối file rỗng, sai định dạng, quá 10 MB
-hoặc đã thay đổi sau khi tạo manifest. Credential trong URL/error/DOM được che
-trước khi lưu.
+`browser_evidence.py` là lõi capture cho lộ trình thay thế URLScan. Chế độ mặc
+định là thụ động: module ghi một PNG và manifest JSON theo cùng evidence set,
+phân biệt rõ `requested_url`, `landing_url`, redirect HTTP do máy chủ trả về,
+profile trình duyệt, control DOM được chọn và destination đã resolve. Ảnh được
+khóa bằng SHA-256; validator từ chối file rỗng, sai định dạng, quá 10 MB hoặc đã
+thay đổi sau khi tạo manifest. Credential trong URL/error/DOM được che trước khi
+lưu.
 
-Lõi chỉ tạo evidence loại `dom_observed` và luôn đặt
+Evidence thụ động luôn có loại `dom_observed` và
 `navigation_verified=false`: không click, type, submit hay tuyên bố đã xác minh
 redirect từ control. Terminal page của trình duyệt/DNS/provider không được ghi
 thành evidence nội dung.
 
+Phase 2.1 bổ sung `capture_dom_destination_evidence()` ở chế độ **opt-in**
+cho report phishing thường, không dùng cho detector cloaking. Hàm tìm control
+Register/Login đang hiển thị, chỉ chấp nhận anchor HTTP(S) hoặc button có
+`data-href` không submit, chụp `source_before_open`, rồi mở resolved URL trong
+tab mới cùng BrowserContext và referrer trang nguồn để chụp
+`destination_after_open`. Manifest dùng `evidence_type=dom_destination_opened`,
+`navigation_verified=false`, `destination_opened=true`, lưu URL cuối, redirect
+3xx, tiêu đề hai trang, DOM element và SHA-256 của đúng hai ảnh. Không click,
+nhập dữ liệu, dùng credential, submit form hoặc tải file. Không có control an
+toàn, DOM URL trùng trang nguồn hoặc đích là terminal thì capture thất
+bại và không để lại artifact; caller phải fallback sang capture thụ động/upload.
+
 Từ Phase 2, Provider Replies gọi lõi này thay vì tự triển khai capture DOM. UI
 giữ nguyên evidence set qua rerun và chỉ coi ảnh sẵn sàng khi PNG/manifest còn
 đúng hash. Reply gửi đúng thread đính kèm cả PNG lẫn manifest; upload thủ công và
-URLScan vẫn là fallback tạm thời. Việc chuyển các consumer khác và gỡ URLScan
-thuộc các phase sau.
+URLScan vẫn là fallback tạm thời.
 
-Từ Phase 3, Check Domain yêu cầu Browser Evidence hợp lệ trước mọi thao tác gửi
-email. Cùng evidence set được chèn vào draft bằng formatter tiếng Anh và đính
-kèm dưới dạng PNG + manifest. Gate trước SMTP kiểm tra Subject, recipient, full
-Reported URL, placeholder, chuỗi `NOT flagged`, mọi khối URLScan còn sót, sự
-tồn tại của attachment và đúng một ảnh + một manifest. URLScan vẫn có
-thể chạy để người vận hành xem trong
-UI nhưng không được đưa vào nội dung hoặc attachment gửi ra ngoài.
+#### Check Domain — Phase 2.1 mở URL từ DOM
 
-Nếu capture tự động thất bại, Check Domain nhận 1–3 ảnh PNG/JPEG thủ công, hiện
-thumbnail và commit ngay thành evidence set gồm các ảnh + một manifest SHA-256;
-không có nút lưu riêng. Quality gate xác thực toàn bộ hash trước SMTP.
+Check Domain yêu cầu Browser Evidence hợp lệ trước mọi thao tác gửi email. UI có
+hai lựa chọn trong expander Bằng chứng trình duyệt: `Passive DOM` (mặc định, không
+click) và `Mở URL từ DOM` (opt-in). Chế độ này gọi
+`capture_dom_destination_evidence()` với browser cô lập, chụp trang nguồn rồi
+mở anchor/data-href Register/Login trong tab mới cùng context và referrer; preview
+requested URL, DOM href, URL đích cuối và redirect chain trước khi gửi. Không
+click, nhập dữ liệu, submit form hay tải file.
 
-Domain Worker preflight schema v4 chạy capture Browser Evidence sau lookup email
-và detector cloaking. Domain thường chỉ vào `ready` khi evidence hợp lệ; lỗi
-capture vào `evidence_review`, tách khỏi gửi batch. UI xử lý từng full URL, cho
-upload 1–3 ảnh và gửi trực tiếp sau xác nhận. Kết quả SMTP được ghi ngay; lỗi gửi
-giữ evidence để retry. Nút gửi không bị khóa khi worker còn chạy: case đã tách
-được claim theo full URL, dùng lock liên tiến trình và không ghi đè preflight của
-worker. Nếu lần check đầy đủ phát hiện cloaking, case chuyển sang Cloaking Review
-thay vì gửi report thường.
+Cùng evidence set sau preview được chèn bằng formatter tiếng Anh vào mọi draft và
+truyền nguyên artifact cho cả gửi một draft lẫn gửi tất cả. Gate trước SMTP kiểm
+tra Subject, recipient, full Reported URL, placeholder, chuỗi `NOT flagged`, mọi
+khối URLScan còn sót, sự tồn tại của attachment và 1–3 ảnh + một manifest;
+DOM destination phải có đúng hai ảnh và manifest phải khớp full Reported URL
+hiện tại. URLScan chỉ có thể hiển thị nội bộ,
+không được đưa vào nội dung hoặc attachment gửi ra ngoài.
 
-Text web form là luồng riêng với email draft. `get_webform_draft_text()` không
-đưa URLScan/result screenshot vào mẫu kể cả caller cũ còn truyền dữ liệu này.
+Formatter gửi nhà cung cấp phải biến telemetry thành một lập luận abuse dễ xử
+lý: `Observed Phishing Behavior and Supporting Evidence`, control nhìn thấy,
+resolved `href`, các bước tái hiện, URL đích cuối nếu đã mở, mô tả attachment và
+yêu cầu điều tra/áp dụng chính sách. Không gửi raw log `Technical Evidence` làm
+phần trình bày chính. Khối evidence được đặt trước chữ ký; manifest JSON chỉ là
+attachment kiểm chứng hash. Capture thụ động dùng “inspect the link target” và
+ghi rõ chưa click; DOM-open ghi rõ URL được mở trực tiếp trong tab cô lập. Không
+tự thêm claim credential/OTP/payment nếu chưa có quan sát.
+
+Case selector dùng `classify_evidence_case()`:
+
+- `control_with_destination`: nêu label, resolved `href`, bước tái hiện và URL đích.
+- `control_without_destination`: nêu control nhưng nói rõ không có HTTP(S) URL tĩnh;
+  yêu cầu provider kiểm tra runtime/JavaScript, không tạo URL giả.
+- `page_without_auth_control`: vẫn trình bày suspected phishing/unauthorized brand
+  impersonation theo screenshot và yêu cầu đối chiếu branding/runtime behavior.
+
+DOM capture chỉ lưu số lượng aggregate của field đang hiển thị, tuyệt đối không
+lưu value: password, OTP, payment và identity/contact. Chỉ khi count lớn hơn 0,
+formatter mới thêm “capable of collecting …” tương ứng. Đây là bằng chứng về giao
+diện thu thập dữ liệu, không phải khẳng định đã có nạn nhân hoặc dữ liệu đã bị gửi.
+
+Nếu DOM capture không tìm thấy control an toàn, DOM URL trùng nguồn hoặc gặp trang
+terminal, UI fail closed và giữ nguyên fallback `Passive DOM`/upload. Check Domain
+nhận 1–3 ảnh PNG/JPEG thủ công, hiện thumbnail và commit ngay thành evidence set
+gồm ảnh + manifest SHA-256; không có nút lưu riêng. Quality gate xác thực toàn bộ
+hash trước SMTP. Domain Worker cho domain thường cũng dùng cùng chiến lược: thử mở
+destination HTTP(S) từ DOM để chụp nguồn/đích rồi mới fallback capture thụ động; detector
+cloaking vẫn giữ Playwright đa profile thụ động riêng.
+
+Domain Worker preflight schema v4 chạy lookup email và detector cloaking song song, sau đó
+capture Browser Evidence cho domain thường có email. Capture ưu tiên
+`capture_dom_destination_evidence()` (hai ảnh `source_before_open` và
+`destination_after_open` trong tab mới cùng context/referrer). Khi control không có URL tĩnh
+hoặc destination không mở được, worker dùng `capture_passive_browser_evidence()` để giữ
+ảnh trang nguồn. Chỉ khi cả hai capture không tạo được artifact hợp lệ mới ghi vào
+`evidence_review`.
+
+Page **Domain Evidence Review** đọc tất cả preflight v4 của các job chính, lọc theo ngày địa
+phương và dedupe theo full URL chuẩn hóa; case chỉ xuất hiện một lần dù bị check ở nhiều job.
+Operator chọn case, xem thumbnail và upload 1–3 ảnh thủ công rồi gửi trực tiếp bằng SMTP helper.
+Không tạo review job mới; thao tác vẫn chạy độc lập khi worker đang prechecking/running/waiting.
+Evidence đã gửi lỗi được giữ để retry, còn case gửi hoàn tất bị loại khỏi danh sách.
+Khi một URL đã gửi thành công, các bản ghi chờ trùng URL trong job khác cũng được đánh dấu
+hoàn tất để không xuất hiện lại sau khi bản ghi mới nhất bị loại.
+
+Nếu capture trả về terminal source (trình duyệt/DNS/provider warning), worker không đưa ảnh lỗi
+vào manual review và vẫn cho draft thường tiếp tục; trạng thái terminal không tự khẳng định domain đã bị thu hồi.
 Mẫu GSB và Cloudflare nhận full URL/path, mô tả suspected phishing/brand
 impersonation và yêu cầu điều tra; không tự tạo tuyên bố về OTP/payment collection
 nếu pipeline không có bằng chứng trực tiếp cho hành vi đó.

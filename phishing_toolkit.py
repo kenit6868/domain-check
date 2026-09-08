@@ -42,6 +42,7 @@ import ssl
 import subprocess
 import sys
 import time
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -3084,11 +3085,17 @@ def validate_report_delivery(
         images = [path for path in attachment_paths if path.lower().endswith((".png", ".jpg", ".jpeg"))]
         if len(manifests) != 1 or not 1 <= len(images) <= 3:
             errors.append("Browser Evidence phải có từ 1 đến 3 ảnh và đúng một manifest")
-        elif not browser_evidence.validate_evidence_artifacts({
-            "success": True, "screenshot_paths": images,
-            "screenshot_path": images[0], "manifest_path": manifests[0],
-        })["valid"]:
-            errors.append("Browser Evidence hoặc hash manifest không hợp lệ")
+        else:
+            validation = browser_evidence.validate_evidence_artifacts({
+                "success": True, "screenshot_paths": images,
+                "screenshot_path": images[0], "manifest_path": manifests[0],
+            })
+            if not validation["valid"]:
+                errors.append("Browser Evidence hoặc hash manifest không hợp lệ")
+            elif target_url and not browser_evidence.evidence_url_matches(
+                target_url, (validation.get("manifest") or {}).get("requested_url", ""),
+            ):
+                errors.append("Browser Evidence không thuộc đúng full Reported URL hiện tại")
     return errors
 
 
@@ -3354,11 +3361,11 @@ def append_cloaking_evidence_to_drafts(
 
 
 def append_browser_evidence_to_drafts(drafts: list, evidence_result: dict) -> list:
-    """Insert one validated, factual browser evidence block into each draft."""
+    """Insert one evidence block into every draft as one staged operation."""
     block = browser_evidence.format_email_evidence_block(evidence_result)
     if not block:
         return []
-    updated = []
+    staged_content = {}
     for path in drafts or []:
         try:
             with open(path, encoding="utf-8") as file:
@@ -3369,16 +3376,54 @@ def append_browser_evidence_to_drafts(drafts: list, evidence_result: dict) -> li
                 "\n", content, flags=re.DOTALL,
             ).rstrip()
             content = re.sub(
+                r"\n*--- Observed Phishing Behavior and Supporting Evidence ---.*?"
+                r"--- End of Supporting Evidence ---\n*",
+                "\n", content, flags=re.DOTALL,
+            ).rstrip()
+            content = re.sub(
+                r"\n*--- Technical Evidence: DOM Destination Opened ---.*?"
+                r"--- End of DOM Destination Evidence ---\n*",
+                "\n", content, flags=re.DOTALL,
+            ).rstrip()
+            content = re.sub(
+                r"\n*--- Technical Evidence: Verified Browser Navigation ---.*?"
+                r"--- End of Verified Browser Evidence ---\n*",
+                "\n", content, flags=re.DOTALL,
+            ).rstrip()
+            content = re.sub(
                 r"\n*--- Evidence: URLScan\.io(?: Analysis| \(kết quả đang xử lý\))? ---.*?"
                 r"--- End URLScan Evidence ---\n*",
                 "\n", content, flags=re.DOTALL,
             ).rstrip()
-            with open(path, "w", encoding="utf-8") as file:
-                file.write(content + "\n\n" + block + "\n")
-            updated.append(path)
+            signature = re.search(r"(?im)^\s*(?:Kind regards|Regards),?\s*$", content)
+            if signature:
+                prefix = content[:signature.start()].rstrip()
+                suffix = content[signature.start():].lstrip()
+                staged_content[path] = prefix + "\n\n" + block + "\n\n" + suffix + "\n"
+            else:
+                staged_content[path] = content + "\n\n" + block + "\n"
         except OSError:
-            continue
-    return updated
+            return []
+    temp_paths = {}
+    try:
+        for path, content in staged_content.items():
+            temp_path = f"{path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+            with open(temp_path, "w", encoding="utf-8") as file:
+                file.write(content)
+                file.flush()
+                os.fsync(file.fileno())
+            temp_paths[path] = temp_path
+        for path, temp_path in temp_paths.items():
+            os.replace(temp_path, path)
+        return list(staged_content)
+    except OSError:
+        return []
+    finally:
+        for temp_path in temp_paths.values():
+            try:
+                os.remove(temp_path)
+            except FileNotFoundError:
+                pass
 
 
 def remove_cloaking_evidence_from_drafts(drafts: list) -> list:

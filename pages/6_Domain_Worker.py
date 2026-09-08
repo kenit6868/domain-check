@@ -35,6 +35,18 @@ def _review_page_link(label: str) -> None:
         st.caption(f"👁️ {label} — chọn trang Cloaking Review trong menu bên trái.")
 
 
+def _evidence_review_page_link(label: str) -> None:
+    """Link to the dedicated manual-evidence page without hard-failing AppTest."""
+    try:
+        st.page_link(
+            "pages/12_Domain_Evidence_Review.py",
+            label=label,
+            icon=":material/photo_library:",
+        )
+    except KeyError:
+        st.caption(f"{label} — chọn trang Evidence Review trong menu bên trái.")
+
+
 def _review_item_has_sendable_recipient(item: dict) -> bool:
     """Keep the page compatible with a queue module cached before this helper existed."""
     detector = getattr(review_queue, "has_sendable_recipient", None)
@@ -341,6 +353,18 @@ if pending_review_count:
     _review_page_link(f"Mở Cloaking Review ({pending_review_count})")
 else:
     st.caption("Hôm nay không có domain cloaking có email nhận đang chờ duyệt.")
+try:
+    pending_evidence_review_count = len(domain_worker.list_evidence_review_items())
+except (OSError, ValueError, TypeError):
+    pending_evidence_review_count = 0
+if pending_evidence_review_count:
+    st.warning(
+        f"Hôm nay có **{pending_evidence_review_count}** domain thường chưa có ảnh evidence. "
+        "Các case này đã được tách khỏi luồng worker và có thể xử lý độc lập."
+    )
+    _evidence_review_page_link(
+        f"Mở Domain Evidence Review ({pending_evidence_review_count})",
+    )
 cached_sends = {
     (domain, account)
     for domain, accounts in _sent_domain_accounts_today().items()

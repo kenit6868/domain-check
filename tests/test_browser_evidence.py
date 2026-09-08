@@ -31,16 +31,108 @@ class _FakePage:
             handle.write(b"\x89PNG\r\n\x1a\nphase-one-image")
 
 
-class _FakeContext:
+class _FakeResponse:
+    def __init__(self, status, url, headers=None):
+        self.status = status
+        self.url = url
+        self.headers = headers or {}
+
+
+class _FakeLocator:
     def __init__(self, page):
         self.page = page
+
+    def nth(self, index):
+        self.page.locator_index = index
+        return self
+
+    def click(self, **kwargs):
+        self.page.clicked = True
+        if self.page.popup is not None:
+            self.page.emit("popup", self.page.popup)
+        else:
+            self.page.current_snapshot = self.page.after_snapshot
+            self.page.url = self.page.final_url
+            for response in self.page.after_responses:
+                self.page.emit("response", response)
+
+
+class _VerifiedFakePage:
+    def __init__(self, before_snapshot, after_snapshot, final_url, *, popup=None, after_responses=None):
+        self.current_snapshot = dict(before_snapshot)
+        self.before_snapshot = dict(before_snapshot)
+        self.after_snapshot = dict(after_snapshot)
+        self.final_url = final_url
+        self.popup = popup
+        self.after_responses = list(after_responses or [])
+        self.url = before_snapshot.get("landingUrl", "https://source.test/path")
+        self.handlers = {}
+        self.clicked = False
+        self.locator_index = None
+        self.goto_calls = []
+
+    def goto(self, url, **kwargs):
+        self.goto_calls.append((url, kwargs))
+        self.url = self.before_snapshot.get("landingUrl", url)
+
+    def wait_for_load_state(self, *args, **kwargs):
+        return None
+
+    def wait_for_timeout(self, *args, **kwargs):
+        return None
+
+    def evaluate(self, script, args=None):
+        if "candidateIndex" in script:
+            return dict(self.current_snapshot)
+        if "visibleText" in script and "document.body" in script:
+            return {
+                "title": self.current_snapshot.get("title", ""),
+                "visibleText": self.current_snapshot.get("visibleText", ""),
+            }
+        return None
+
+    def title(self):
+        return self.current_snapshot.get("title", "")
+
+    def locator(self, selector):
+        return _FakeLocator(self)
+
+    def on(self, event, callback):
+        self.handlers.setdefault(event, []).append(callback)
+
+    def emit(self, event, value):
+        for callback in self.handlers.get(event, []):
+            callback(value)
+
+    def screenshot(self, path, **kwargs):
+        marker = b"after" if self.clicked else b"before"
+        with open(path, "wb") as handle:
+            handle.write(b"\x89PNG\r\n\x1a\nverified-" + marker)
+
+
+class _FakeContext:
+    def __init__(self, page, destination_page=None):
+        self.page = page
+        self.destination_page = destination_page
+        self.new_page_count = 0
         self.closed = False
+        self.handlers = {}
 
     def new_page(self):
+        self.new_page_count += 1
+        if self.new_page_count > 1 and self.destination_page is not None:
+            return self.destination_page
         return self.page
 
     def close(self):
         self.closed = True
+
+    def on(self, event, callback):
+        self.handlers.setdefault(event, []).append(callback)
+
+    def emit(self, event, value):
+        for callback in self.handlers.get(event, []):
+            callback(value)
 
 
 class _FakeBrowser:
@@ -85,6 +177,22 @@ def _fake_playwright(snapshot):
     return page, context, browser, chromium, lambda: _FakePlaywrightContext(chromium)
 
 
+def _fake_verified_playwright(before_snapshot, after_snapshot, final_url, *, popup=False):
+    popup_page = _VerifiedFakePage(
+        {**after_snapshot, "landingUrl": final_url}, after_snapshot, final_url,
+    )
+    page = _VerifiedFakePage(
+        before_snapshot, after_snapshot, final_url, popup=popup_page,
+        after_responses=[_FakeResponse(
+            302, "https://source.test/register", {"location": final_url},
+        )],
+    )
+    context = _FakeContext(page, popup_page)
+    browser = _FakeBrowser(context)
+    chromium = _FakeChromium(browser)
+    return page, popup_page, context, browser, chromium, lambda: _FakePlaywrightContext(chromium)
+
+
 class BrowserEvidenceTests(unittest.TestCase):
     def test_redacts_credentials_and_secret_query_values(self):
         value = be.redact_url(
@@ -95,6 +203,7 @@ class BrowserEvidenceTests(unittest.TestCase):
         self.assertNotIn("abc", value)
         self.assertIn("token=%5BREDACTED%5D", value)
         self.assertIn("view=mobile", value)
+        self.assertNotIn("#proof", value)
 
     def test_http_probe_preserves_complete_server_redirect_chain(self):
         first = Mock(status_code=301, url="https://a.test/start", headers={"Location": "/next"})
@@ -150,6 +259,166 @@ class BrowserEvidenceTests(unittest.TestCase):
             self.assertTrue(context.closed)
             self.assertTrue(browser.closed)
 
+    def test_verified_navigation_captures_source_and_destination_with_manifest(self):
+        before = {
+            "title": "Source page", "visibleText": "Register now",
+            "landingUrl": "https://source.test/path", "controlFound": True,
+            "safeNavigation": True, "candidateIndex": 1,
+            "controlLabel": "Register", "rawHref": "/register",
+            "resolvedHref": "https://target.test/register",
+            "tagName": "A", "type": "", "domElement": '<a href="/register">Register</a>',
+        }
+        after = {
+            "title": "Destination page", "visibleText": "Fraud landing",
+            "landingUrl": "https://target.test/register", "controlFound": False,
+        }
+        page, destination_page, context, browser, chromium, factory = _fake_verified_playwright(
+            before, after, "https://target.test/register",
+        )
+        http = {
+            "success": True, "requested_url": "https://source.test/path",
+            "final_url": "https://source.test/path", "final_status": 200,
+            "redirect_chain": [], "error": "",
+        }
+        with tempfile.TemporaryDirectory() as folder, patch(
+            "playwright.sync_api.sync_playwright", factory,
+        ):
+            result = be.capture_verified_navigation_evidence(
+                "https://source.test/path", folder, profile_name="worker_desktop",
+                http_probe=lambda *_a, **_kw: http,
+            )
+            self.assertTrue(result["success"], result.get("error"))
+            self.assertFalse(result["navigation_verified"])
+            self.assertTrue(result["destination_opened"])
+            self.assertEqual("dom_destination_opened", result["evidence_type"])
+            self.assertEqual("https://target.test/register", result["final_url"])
+            self.assertEqual(2, len(result["screenshot_paths"]))
+            self.assertEqual(3, len(be.evidence_attachment_paths(result)))
+            validation = be.validate_evidence_artifacts(result)
+            self.assertTrue(validation["valid"], validation["errors"])
+            manifest = validation["manifest"]
+            self.assertFalse(manifest["navigation_verified"])
+            self.assertTrue(manifest["destination_opened"])
+            self.assertEqual("new_tab_direct", manifest["navigation"]["mode"])
+            self.assertEqual("https://target.test/register", manifest["final_url"])
+            self.assertEqual("source_before_open", manifest["screenshots"][0]["role"])
+            self.assertEqual("destination_after_open", manifest["screenshots"][1]["role"])
+            self.assertFalse(page.clicked)
+            self.assertEqual("https://target.test/register", destination_page.goto_calls[0][0])
+            self.assertEqual("https://source.test/path", destination_page.goto_calls[0][1]["referer"])
+            self.assertTrue(chromium.launch_options["headless"])
+            self.assertFalse(browser.context.options["accept_downloads"])
+            self.assertTrue(context.closed)
+            self.assertTrue(browser.closed)
+            block = be.format_email_evidence_block(result)
+            self.assertIn("Observed Phishing Behavior and Supporting Evidence", block)
+            self.assertNotIn("Technical Evidence", block)
+            self.assertIn('href="https://target.test/register"', block)
+            self.assertIn("Final destination observed: https://target.test/register", block)
+            self.assertIn("source page as the referrer", block)
+
+    def test_verified_navigation_captures_popup_destination(self):
+        before = {
+            "title": "Source page", "visibleText": "Login",
+            "landingUrl": "https://source.test/login", "controlFound": True,
+            "safeNavigation": True, "candidateIndex": 0,
+            "controlLabel": "Login", "rawHref": "https://target.test/login",
+            "resolvedHref": "https://target.test/login",
+            "tagName": "A", "type": "", "domElement": '<a href="https://target.test/login">Login</a>',
+        }
+        after = {
+            "title": "Popup destination", "visibleText": "Destination",
+            "landingUrl": "https://target.test/login", "controlFound": False,
+        }
+        page, popup, _context, _browser, _chromium, factory = _fake_verified_playwright(
+            before, after, "https://target.test/login", popup=True,
+        )
+        with tempfile.TemporaryDirectory() as folder, patch(
+            "playwright.sync_api.sync_playwright", factory,
+        ):
+            result = be.capture_verified_navigation_evidence(
+                "https://source.test/login", folder,
+                http_probe=lambda *_a, **_kw: {"success": True, "redirect_chain": []},
+            )
+        self.assertTrue(result["success"], result.get("error"))
+        self.assertEqual("new_tab_direct", result["navigation"]["mode"])
+        self.assertEqual("https://target.test/login", result["final_url"])
+        self.assertIsNotNone(popup)
+
+    def test_verified_navigation_falls_back_when_control_is_not_safe(self):
+        before = {
+            "title": "Source page", "visibleText": "Register",
+            "landingUrl": "https://source.test/path", "controlFound": True,
+            "safeNavigation": False, "candidateIndex": 0,
+            "controlLabel": "Register", "rawHref": "javascript:go()",
+            "resolvedHref": "javascript:go()", "tagName": "BUTTON", "type": "submit",
+            "domElement": '<button type="submit">Register</button>',
+        }
+        _page, _popup, _context, _browser, _chromium, factory = _fake_verified_playwright(
+            before, before, "https://target.test/register",
+        )
+        with tempfile.TemporaryDirectory() as folder, patch(
+            "playwright.sync_api.sync_playwright", factory,
+        ):
+            result = be.capture_verified_navigation_evidence(
+                "https://source.test/path", folder,
+                http_probe=lambda *_a, **_kw: {"success": True, "redirect_chain": []},
+            )
+            self.assertFalse(result["success"])
+            self.assertFalse(result["navigation_verified"])
+            self.assertIn("data-href an toàn để mở", result["error"])
+            self.assertEqual([], os.listdir(folder))
+
+    def test_verified_navigation_rejects_no_url_change_and_terminal_destination(self):
+        before = {
+            "title": "Source page", "visibleText": "Register",
+            "landingUrl": "https://source.test/path", "controlFound": True,
+            "safeNavigation": True, "candidateIndex": 0,
+            "controlLabel": "Register", "rawHref": "/register",
+            "resolvedHref": "https://source.test/path", "tagName": "A", "type": "",
+            "domElement": '<a href="/path">Register</a>',
+        }
+        _page, _popup, _context, _browser, _chromium, factory = _fake_verified_playwright(
+            before, before, "https://source.test/path",
+        )
+        with tempfile.TemporaryDirectory() as folder, patch(
+            "playwright.sync_api.sync_playwright", factory,
+        ):
+            be_result = be.capture_verified_navigation_evidence(
+                "https://source.test/path", folder,
+                http_probe=lambda *_a, **_kw: {"success": True, "redirect_chain": []},
+            )
+            self.assertFalse(be_result["success"])
+            self.assertIn("khác trang nguồn", be_result["error"])
+            self.assertEqual([], os.listdir(folder))
+
+        terminal = {
+            **before,
+            "landingUrl": "https://target.test/error",
+            "rawHref": "https://target.test/error",
+            "resolvedHref": "https://target.test/error",
+            "title": "This site can’t be reached",
+            "visibleText": "DNS_PROBE_FINISHED_NXDOMAIN",
+        }
+        terminal_source = {
+            **before,
+            "rawHref": "https://target.test/error",
+            "resolvedHref": "https://target.test/error",
+        }
+        _page, _popup, _context, _browser, _chromium, factory = _fake_verified_playwright(
+            terminal_source, terminal, "https://target.test/error",
+        )
+        with tempfile.TemporaryDirectory() as folder, patch(
+            "playwright.sync_api.sync_playwright", factory,
+        ):
+            be_result = be.capture_verified_navigation_evidence(
+                "https://source.test/path", folder,
+                http_probe=lambda *_a, **_kw: {"success": True, "redirect_chain": []},
+            )
+            self.assertFalse(be_result["success"])
+            self.assertTrue(be_result["terminal"])
+            self.assertEqual([], os.listdir(folder))
+
     def test_redirect_chain_text_is_explicitly_server_side(self):
         text = be.format_http_redirect_chain({
             "success": True, "final_url": "https://b.test/end", "final_status": 200,
@@ -184,6 +453,7 @@ class BrowserEvidenceTests(unittest.TestCase):
             "title": "Public page", "visibleText": "Ordinary content",
             "landingUrl": "https://plain.test/", "controlFound": False,
             "controlLabel": "", "rawHref": "", "resolvedHref": "", "domElement": "",
+            "pageSignals": {"passwordInputs": 1, "identityInputs": 2},
         }
         _page, _context, _browser, _chromium, factory = _fake_playwright(snapshot)
         with tempfile.TemporaryDirectory() as folder, patch(
@@ -197,6 +467,39 @@ class BrowserEvidenceTests(unittest.TestCase):
             self.assertFalse(result["control_found"])
             with open(result["manifest_path"], encoding="utf-8") as handle:
                 self.assertFalse(json.load(handle)["control"]["found"])
+            block = be.format_email_evidence_block(result)
+            self.assertIn("No visible Register/Login control", block)
+            self.assertIn("1 visible password field", block)
+            self.assertIn("2 visible identity/contact field", block)
+            self.assertNotIn("href=", block)
+
+    def test_visible_control_without_destination_has_dedicated_factual_report(self):
+        snapshot = {
+            "title": "Impersonated login", "visibleText": "ĐĂNG NHẬP",
+            "landingUrl": "https://plain.test/login", "controlFound": True,
+            "controlLabel": "ĐĂNG NHẬP", "rawHref": "", "resolvedHref": "",
+            "domElement": '<button type="button">ĐĂNG NHẬP</button>',
+            "pageSignals": {"passwordInputs": 1, "otpInputs": 1},
+        }
+        _page, _context, _browser, _chromium, factory = _fake_playwright(snapshot)
+        with tempfile.TemporaryDirectory() as folder, patch(
+            "playwright.sync_api.sync_playwright", factory,
+        ):
+            result = be.capture_passive_browser_evidence(
+                "https://plain.test/login", folder,
+                http_probe=lambda *_a, **_kw: {"success": True, "redirect_chain": []},
+            )
+            block = be.format_email_evidence_block(result)
+            evidence_case = be.classify_evidence_case(
+                be.validate_evidence_artifacts(result)["manifest"],
+            )
+        self.assertTrue(result["success"])
+        self.assertEqual("control_without_destination", evidence_case)
+        self.assertIn('visible "ĐĂNG NHẬP" control', block)
+        self.assertIn("does not expose a usable HTTP(S) destination", block)
+        self.assertIn("1 visible password field", block)
+        self.assertIn("1 visible OTP/verification-code field", block)
+        self.assertNotIn('href=""', block)
 
     def test_profile_path_and_credentials_are_sanitized(self):
         self.assertEqual(".._.._secret", be._safe_component("../../secret", "fallback"))
@@ -206,6 +509,23 @@ class BrowserEvidenceTests(unittest.TestCase):
         self.assertNotIn("alice", redacted)
         self.assertNotIn("hunter2", redacted)
         self.assertNotIn("secret-value", redacted)
+        sanitized = be._sanitize_http_result({
+            "success": True,
+            "requested_url": "https://source.test/?token=secret-value",
+            "final_url": "https://target.test/?api_key=secret-value",
+            "final_status": "200",
+            "redirect_chain": [{
+                "status": "302", "url": "https://source.test/?auth=secret-value",
+                "location": "https://target.test/?password=secret-value",
+            }],
+            "error": "proxy socks5://alice:hunter2@proxy.test failed",
+            "untrusted_extra": "must not persist",
+        })
+        serialized = json.dumps(sanitized)
+        self.assertNotIn("secret-value", serialized)
+        self.assertNotIn("alice", serialized)
+        self.assertNotIn("untrusted_extra", serialized)
+        self.assertEqual(200, sanitized["final_status"])
 
     def test_modified_screenshot_fails_manifest_hash_validation(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -239,6 +559,10 @@ class BrowserEvidenceTests(unittest.TestCase):
                 "requested_url": "https://source.test/path",
                 "landing_url": "https://source.test/path", "profile": {"name": "desktop"},
                 "page": {"title": "Public page"},
+                "page_signals": {
+                    "passwordInputs": 1, "otpInputs": 1,
+                    "paymentInputs": 1, "identityInputs": 1,
+                },
                 "http": {"success": True, "final_url": "https://source.test/path", "final_status": 200, "redirect_chain": []},
                 "control": {"found": True, "label": "Register", "resolved_destination": "https://target.test/register"},
                 "screenshot": {"path": image_path, "size": os.path.getsize(image_path), "sha256": be._sha256(image_path)},
@@ -247,9 +571,13 @@ class BrowserEvidenceTests(unittest.TestCase):
                 json.dump(manifest, handle)
             result = {"success": True, "screenshot_path": image_path, "manifest_path": manifest_path}
             block = be.format_email_evidence_block(result)
-            self.assertIn("DOM destination observed", block)
-            self.assertIn("https://target.test/register", block)
-            self.assertIn("no click or form submission", block)
+            self.assertIn("Observed Phishing Behavior and Supporting Evidence", block)
+            self.assertNotIn("Technical Evidence", block)
+            self.assertIn('href="https://target.test/register"', block)
+            self.assertIn("did not claim that a click or form submission", block)
+            self.assertIn("visible password field", block)
+            self.assertIn("visible OTP/verification-code field", block)
+            self.assertIn("visible payment-related field", block)
             self.assertNotIn("navigation verified", block.lower())
             self.assertEqual([image_path, manifest_path], be.evidence_attachment_paths(result))
 
@@ -268,7 +596,7 @@ class BrowserEvidenceTests(unittest.TestCase):
             self.assertTrue(validation["valid"], validation["errors"])
             self.assertEqual(3, len(validation["manifest"]["screenshots"]))
             self.assertEqual(4, len(be.evidence_attachment_paths(result)))
-            self.assertIn("Operator-supplied", be.format_email_evidence_block(result))
+            self.assertIn("Operator-supplied browser screenshot", be.format_email_evidence_block(result))
 
     def test_manual_upload_rejects_invalid_batch_before_writing(self):
         with tempfile.TemporaryDirectory() as folder:

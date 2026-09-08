@@ -35,10 +35,17 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   động đại diện cho cặp profile khác biệt mạnh nhất; ảnh quan sát còn lại chỉ lưu
   nội bộ trong evidence.
 - Browser evidence dùng chung phải phân biệt URL người dùng yêu cầu, landing URL,
-  redirect HTTP và destination đọc từ DOM. Phase capture thụ động không click,
+  redirect HTTP và destination đọc từ DOM. Capture mặc định thụ động, không click,
   type hay submit và chỉ được gắn nhãn `dom_observed`; không gọi href là redirect
-  đã xác minh. Mỗi evidence set gồm PNG + manifest có SHA-256, không lưu
-  credential, và không chấp nhận terminal page làm evidence nội dung.
+  đã xác minh. Phase 2.1 có `capture_dom_destination_evidence()` opt-in cho report
+  thường: đọc anchor HTTP(S) hoặc button `data-href` không submit có nhãn
+  Register/Login, chụp trang nguồn rồi mở URL đó trong tab mới cùng context và
+  referrer. Manifest `dom_destination_opened` phải ghi `navigation_verified=false`
+  và đúng hai ảnh; không click, nhập credential, submit form hoặc tải file. Không
+  có URL DOM khác trang nguồn hoặc gặp terminal page thì fail
+  closed để caller fallback thụ động/thủ công. Mỗi evidence set gồm PNG + manifest
+  có SHA-256, không lưu credential, và không chấp nhận terminal page làm evidence
+  nội dung.
 - Provider Replies dùng Browser Evidence chung làm lựa chọn ưu tiên và giữ
   evidence set theo mail trong session state. Chỉ attachment PNG + manifest còn
   đúng hash mới được coi là browser evidence hợp lệ; upload/URLScan legacy có thể
@@ -50,6 +57,25 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   trước SMTP chặn thiếu Subject/recipient/full Reported URL, placeholder,
   `NOT flagged` và attachment không tồn tại. URLScan có thể còn hiển thị nội bộ
   trong giai đoạn chuyển đổi nhưng không được chèn vào email.
+- Check Domain có `Passive DOM` mặc định và `Mở URL từ DOM` opt-in. Chế độ DOM
+  chụp trang nguồn, mở URL Register/Login trong tab mới cùng browser context và
+  chụp trang đích; preview URL nguồn, DOM href, URL cuối cùng cùng redirect chain.
+  Không gọi đây là click hoặc redirect đã xác minh. State và widget phải khóa theo
+  full URL qua rerun; quality gate phải chặn manifest của URL/path khác. Capture lỗi
+  fallback sang Passive DOM hoặc uploader thủ công 1–3 ảnh, không có bước lưu riêng.
+  Danh sách attachment đã preview phải được truyền nguyên vẹn cho cả gửi đơn và
+  gửi tất cả; cloaking detector/Domain Worker không dùng chế độ mở DOM này.
+- Email Browser Evidence phải trình bày theo hướng abuse report, không gửi raw
+  telemetry làm nội dung chính: mô tả control, resolved `href`, bước tái hiện,
+  URL đích cuối nếu có, attachment và yêu cầu provider điều tra/xử lý. Đặt khối
+  này trước chữ ký và giữ manifest làm attachment kiểm chứng. Capture thụ động
+  phải nói rõ chỉ inspect markup; DOM-open nói rõ mở URL trực tiếp, không gọi là
+  click. Không tự thêm claim đánh cắp credential/OTP/payment nếu chưa quan sát.
+- Narrative Browser Evidence phải phân ba case: control + HTTP(S) destination;
+  control không có destination tĩnh; và không có control auth. Case 2 không được
+  tạo URL giả, case 3 vẫn report suspected phishing/brand impersonation theo ảnh.
+  Chỉ lưu aggregate count, không lưu value của field; chỉ mô tả khả năng thu thập
+  password/OTP/payment/identity khi DOM có field hiển thị tương ứng.
 - Fallback Browser Evidence thủ công cho report thường validate cả batch trước
   khi ghi, preview ngay và không có nút lưu trung gian. Domain Worker schema v4
   chỉ đưa domain thường vào `ready` khi có evidence; capture lỗi vào
@@ -63,6 +89,14 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   điều tra, xác nhận rồi áp dụng chính sách.
   Pool GSB và Cloudflare phải tách riêng theo thẩm quyền xử lý, có ít nhất 5 biến
   thể mỗi nhóm và chọn ổn định theo domain + ngày để rerun không đổi nội dung.
+- Domain Worker normal-report capture ưu tiên DOM destination: chụp source rồi mở
+  URL HTTP(S) được khai báo trong Register/Login control ở tab mới cùng context/referrer
+  để chụp destination. Không có URL tĩnh hoặc mở đích lỗi thì fallback passive source;
+  chỉ khi cả hai capture không có artifact hợp lệ mới ghi `evidence_review`. Terminal
+  browser/DNS source không phải content evidence và tiếp tục draft thường. Page
+  `Domain Evidence Review` đọc mọi preflight v4 trong ngày, dedupe full URL và gửi
+  trực tiếp sau upload 1–3 ảnh; sau khi gửi thành công phải đánh dấu cả bản ghi trùng
+  ở job khác để không tái xuất hiện; không tạo job review mới.
 - Formatter registrar/registry phải dùng dữ kiện quan sát, không đưa VirusTotal
   không có detection ra ngoài và không tự yêu cầu `serverHold`/`clientHold` như
   kết luận mặc định. Registry chỉ được nói đã báo registrar khi có delivery state

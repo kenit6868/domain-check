@@ -5,6 +5,7 @@ VirusTotal/Safe Browsing ở đây, để kết quả luôn khớp với CLI.
 """
 
 import hashlib
+import json
 import os
 import sys
 
@@ -79,7 +80,13 @@ if "check_domain_result" in st.session_state:
     mx_records = result.get("mx_records", {})
     urlscan_auto = result.get("urlscan", {})
     target_url = result.get("target_url") or cloaking.get("target_url") or f"https://{domain}/"
+    evidence_case_key = hashlib.sha256(target_url.encode("utf-8", "ignore")).hexdigest()[:12]
+    manual_signature_key = f"check_domain_manual_evidence_signature_{evidence_case_key}"
     browser_capture = st.session_state.get("check_domain_browser_evidence") or {}
+    if browser_capture and not browser_evidence.evidence_url_matches(
+        target_url, browser_capture.get("requested_url", ""),
+    ):
+        browser_capture = {}
     browser_attachments = browser_evidence.evidence_attachment_paths(browser_capture)
 
     st.success(f"Đã kiểm tra xong: {domain}")
@@ -326,21 +333,49 @@ if "check_domain_result" in st.session_state:
 
     with st.expander("Bằng chứng trình duyệt", expanded=not bool(browser_attachments)):
         st.caption(
-            "Bắt buộc trước khi gửi email từ Check Domain. Công cụ mở trang và đọc DOM, "
-            "không click, nhập liệu hoặc submit. Ảnh thể hiện URL nguồn, landing URL, "
-            "redirect HTTP và destination của control Đăng ký/Đăng nhập nếu tìm thấy."
+            "Bắt buộc trước khi gửi email từ Check Domain. Chọn capture thụ động để đọc DOM, "
+            "hoặc mở URL được đọc từ control Đăng ký/Đăng nhập trong một tab mới và "
+            "chụp cả trang nguồn lẫn trang đích. Không click, nhập dữ liệu hay submit form."
         )
-        if st.button(
-            "Tạo ảnh Browser Evidence", key=f"browser_evidence_{domain}",
-            type="primary", icon=":material/photo_camera:",
-        ):
-            with st.spinner("Đang mở trình duyệt và chụp evidence thụ động..."):
-                captured = browser_evidence.capture_passive_browser_evidence(
-                    target_url,
-                    pt._runtime_path(os.path.join("evidence", "browser")),
-                    profile_name="check_domain_desktop",
-                    headless=False,
-                )
+        capture_mode = st.segmented_control(
+            "Phương thức capture",
+            ["Passive DOM", "Mở URL từ DOM"],
+            default="Passive DOM",
+            key=f"browser_evidence_mode_{evidence_case_key}",
+            help=(
+                "Chế độ DOM chỉ nhận anchor HTTP(S) hoặc button data-href không submit, "
+                "sau đó mở URL đó trong tab mới cùng browser context."
+            ),
+        ) or "Passive DOM"
+        if capture_mode == "Mở URL từ DOM":
+            st.info(
+                "Công cụ chỉ đọc URL từ control Register/Login, mở URL đó trong tab mới cùng phiên trình duyệt "
+                "và giữ referrer trang nguồn; không thực hiện click hay submit."
+            )
+            capture_label = "Mở URL từ DOM và chụp 2 ảnh"
+            capture_key = f"browser_evidence_dom_open_{evidence_case_key}"
+        else:
+            capture_label = "Tạo ảnh Browser Evidence"
+            # Preserve the pre-Phase-2 widget key for rerun/backward compatibility.
+            capture_key = f"browser_evidence_{evidence_case_key}"
+        if st.button(capture_label, key=capture_key, type="primary", icon=":material/photo_camera:"):
+            evidence_root = pt._runtime_path(os.path.join("evidence", "browser"))
+            if capture_mode == "Mở URL từ DOM":
+                with st.spinner("Đang đọc URL Register/Login và mở trong tab mới..."):
+                    captured = browser_evidence.capture_dom_destination_evidence(
+                        target_url,
+                        evidence_root,
+                        profile_name="check_domain_dom_destination",
+                        headless=False,
+                    )
+            else:
+                with st.spinner("Đang mở trình duyệt và chụp evidence thụ động..."):
+                    captured = browser_evidence.capture_passive_browser_evidence(
+                        target_url,
+                        evidence_root,
+                        profile_name="check_domain_desktop",
+                        headless=False,
+                    )
             if captured.get("success"):
                 updated = pt.append_browser_evidence_to_drafts(
                     result.get("drafts") or [], captured,
@@ -348,6 +383,7 @@ if "check_domain_result" in st.session_state:
                 if len(updated) == len(result.get("drafts") or []):
                     result["browser_evidence"] = captured
                     st.session_state["check_domain_browser_evidence"] = captured
+                    st.session_state.pop(manual_signature_key, None)
                     st.session_state["check_domain_result"] = result
                     st.rerun()
                 else:
@@ -362,7 +398,7 @@ if "check_domain_result" in st.session_state:
             manual_files = st.file_uploader(
                 "Ảnh bằng chứng thủ công (1–3 ảnh)",
                 type=["png", "jpg", "jpeg"], accept_multiple_files=True,
-                key=f"check_domain_manual_browser_{domain}",
+                key=f"check_domain_manual_browser_{evidence_case_key}",
                 help="Mỗi ảnh tối đa 10 MB; nên để thanh địa chỉ và nội dung vi phạm cùng xuất hiện.",
             )
             if manual_files:
@@ -372,7 +408,7 @@ if "check_domain_result" in st.session_state:
                     item.name.encode("utf-8", "ignore") + item.getvalue()
                     for item in manual_files
                 )).hexdigest()
-                if st.session_state.get("check_domain_manual_evidence_signature") != signature:
+                if st.session_state.get(manual_signature_key) != signature:
                     try:
                         captured = browser_evidence.create_manual_browser_evidence(
                             target_url,
@@ -387,28 +423,83 @@ if "check_domain_result" in st.session_state:
                             raise ValueError("Không thể gắn evidence vào toàn bộ draft")
                         result["browser_evidence"] = captured
                         st.session_state["check_domain_browser_evidence"] = captured
-                        st.session_state["check_domain_manual_evidence_signature"] = signature
+                        st.session_state[manual_signature_key] = signature
                         st.session_state["check_domain_result"] = result
                         st.rerun()
                     except (OSError, ValueError) as exc:
                         st.error(f"Ảnh thủ công không hợp lệ: {exc}")
         if browser_capture:
             if browser_attachments:
-                for screenshot_path in (
-                    browser_capture.get("screenshot_paths")
-                    or [browser_capture.get("screenshot_path")]
-                ):
-                    if screenshot_path:
-                        st.image(screenshot_path, caption="Ảnh sẽ được đính kèm email", width=260)
-                with st.container(border=True):
-                    st.write(f"**Requested URL:** `{browser_capture.get('requested_url', '')}`")
-                    st.write(f"**Landing URL:** `{browser_capture.get('landing_url', '')}`")
-                    st.write(
-                        "**DOM destination:** `"
-                        + str(browser_capture.get("resolved_destination") or "Không tìm thấy")
-                        + "`"
+                screenshot_paths = [
+                    path for path in (
+                        browser_capture.get("screenshot_paths")
+                        or [browser_capture.get("screenshot_path")]
+                    ) if path
+                ]
+                image_cols = st.columns(min(2, len(screenshot_paths)))
+                for index, screenshot_path in enumerate(screenshot_paths):
+                    caption = (
+                        "Trang nguồn — sẽ đính kèm email"
+                        if browser_capture.get("evidence_type") == "dom_destination_opened" and index == 0
+                        else "Trang đích — sẽ đính kèm email"
+                        if browser_capture.get("evidence_type") == "dom_destination_opened"
+                        else "Ảnh sẽ được đính kèm email"
                     )
-                    st.caption("Evidence: dom_observed · Navigation verified: Không · Attachment: PNG + manifest JSON")
+                    image_cols[index % len(image_cols)].image(
+                        screenshot_path, caption=caption, width=260,
+                    )
+                with st.container(border=True):
+                    evidence_type = browser_capture.get("evidence_type")
+                    if evidence_type == "dom_destination_opened" and browser_capture.get("destination_opened"):
+                        navigation = browser_capture.get("navigation") or {}
+                        control = browser_capture.get("control") or {}
+                        st.success("Đã mở URL lấy từ DOM trong tab mới và chụp đủ trang nguồn/trang đích.")
+                        st.write(f"**Requested URL:** `{browser_capture.get('requested_url', '')}`")
+                        st.write(f"**URL trang nguồn:** `{navigation.get('source_url') or browser_capture.get('landing_url', '')}`")
+                        st.write(f"**Control phát hiện:** `{control.get('label') or browser_capture.get('control_label', '')}`")
+                        st.write(f"**DOM href:** `{control.get('resolved_destination') or browser_capture.get('resolved_destination', '')}`")
+                        st.write(f"**URL đích cuối:** `{browser_capture.get('final_url', '')}`")
+                        st.write(f"**Cách mở:** `{navigation.get('mode') or 'new_tab_direct'}`")
+                        redirects = navigation.get("redirect_chain") or []
+                        st.write("**Redirect chain sau khi mở URL từ DOM:**")
+                        st.code(
+                            json.dumps(redirects, ensure_ascii=False, indent=2)
+                            if redirects else "Không quan sát thấy HTTP 3xx; URL cuối đã ghi ở trên.",
+                            language=None,
+                        )
+                        st.caption(
+                            "Evidence: dom_destination_opened · Click performed: Không · "
+                            "Attachment: 2 PNG + manifest JSON"
+                        )
+                    else:
+                        st.write(f"**Requested URL:** `{browser_capture.get('requested_url', '')}`")
+                        st.write(f"**Landing URL:** `{browser_capture.get('landing_url', '')}`")
+                        st.write(
+                            "**DOM destination:** `"
+                            + str(browser_capture.get("resolved_destination") or "Không tìm thấy")
+                            + "`"
+                        )
+                        st.caption("Evidence: dom_observed · Navigation verified: Không · Attachment: PNG + manifest JSON")
+                    evidence_case = browser_evidence.classify_evidence_case(browser_capture)
+                    case_labels = {
+                        "control_with_destination": "Có control và URL đích",
+                        "control_without_destination": "Có control nhưng chưa có URL đích tĩnh",
+                        "page_without_auth_control": "Không tìm thấy control Đăng ký/Đăng nhập",
+                        "manual_page_evidence": "Ảnh do người vận hành cung cấp",
+                    }
+                    st.write(f"**Case nội dung email:** {case_labels.get(evidence_case, evidence_case)}")
+                    signals = browser_capture.get("page_signals") or {}
+                    observed = {
+                        "Password": signals.get("passwordInputs", 0),
+                        "OTP/xác minh": signals.get("otpInputs", 0),
+                        "Thanh toán": signals.get("paymentInputs", 0),
+                        "Thông tin định danh/liên hệ": signals.get("identityInputs", 0),
+                    }
+                    observed = {label: count for label, count in observed.items() if count}
+                    if observed:
+                        st.write("**Trường dữ liệu quan sát được:** " + ", ".join(
+                            f"{label}: {count}" for label, count in observed.items()
+                        ))
             else:
                 st.error("Evidence đã thay đổi hoặc không còn hợp lệ. Hãy chụp lại trước khi gửi.")
         else:

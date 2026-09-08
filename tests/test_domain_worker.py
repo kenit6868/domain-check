@@ -180,6 +180,10 @@ class DomainWorkerTests(unittest.TestCase):
             self.assertEqual([], preflight["ready"])
             self.assertEqual(1, len(preflight["evidence_review"]))
             self.assertEqual("capture unavailable", preflight["evidence_review"][0]["browser_evidence_error"])
+            self.assertEqual(
+                datetime.now().astimezone().date().isoformat(),
+                preflight["evidence_review"][0]["review_day"],
+            )
 
     def test_v4_precheck_keeps_valid_browser_evidence_with_ready_domain(self):
         with tempfile.TemporaryDirectory() as job_dir, tempfile.TemporaryDirectory() as evidence_dir:
@@ -215,6 +219,149 @@ class DomainWorkerTests(unittest.TestCase):
             self.assertEqual(1, len(preflight["ready"]))
             self.assertTrue(preflight["ready"][0]["require_browser_evidence"])
             self.assertEqual(evidence["manifest_path"], preflight["ready"][0]["browser_evidence"]["manifest_path"])
+
+    def test_worker_browser_capture_prefers_dom_destination_evidence(self):
+        target = "https://worker-dom.example/login"
+        with tempfile.TemporaryDirectory() as evidence_dir:
+            evidence = browser_evidence.create_manual_browser_evidence(
+                target, [("proof.png", b"\x89PNG\r\n\x1a\nproof")], evidence_dir,
+            )
+            with (
+                patch.object(
+                    browser_evidence, "capture_dom_destination_evidence",
+                    return_value=evidence,
+                ) as dom_capture,
+                patch.object(
+                    browser_evidence, "capture_passive_browser_evidence",
+                ) as passive_capture,
+            ):
+                result = domain_worker._capture_worker_browser_evidence(target)
+            self.assertEqual(result["capture_strategy"], "dom_destination")
+            self.assertEqual(result["dom_destination_attempt"]["evidence_type"], "manual_upload")
+            dom_capture.assert_called_once()
+            passive_capture.assert_not_called()
+
+    def test_worker_browser_capture_falls_back_to_passive_source_evidence(self):
+        target = "https://worker-passive.example/path"
+        with tempfile.TemporaryDirectory() as evidence_dir:
+            evidence = browser_evidence.create_manual_browser_evidence(
+                target, [("source.png", b"\x89PNG\r\n\x1a\nsource")], evidence_dir,
+            )
+            with (
+                patch.object(
+                    browser_evidence, "capture_dom_destination_evidence",
+                    return_value={
+                        "success": False, "terminal": False,
+                        "error": "no static destination",
+                    },
+                ),
+                patch.object(
+                    browser_evidence, "capture_passive_browser_evidence",
+                    return_value=evidence,
+                ) as passive_capture,
+            ):
+                result = domain_worker._capture_worker_browser_evidence(target)
+            self.assertEqual(result["capture_strategy"], "passive_fallback")
+            self.assertEqual(result["fallback_reason"], "no static destination")
+            self.assertEqual(result["screenshot_paths"], evidence["screenshot_paths"])
+            passive_capture.assert_called_once()
+
+    def test_v4_terminal_source_is_ready_without_manual_evidence_review(self):
+        target = "https://terminal-worker.example/path"
+        with tempfile.TemporaryDirectory() as job_dir:
+            job_path = os.path.join(job_dir, "job.json")
+            with open(job_path, "w", encoding="utf-8") as handle:
+                json.dump({
+                    "job_id": "terminal-worker", "domains": [target],
+                    "precheck_only": True, "preflight_version": 4,
+                    "allowed_accounts": ["sender@example.org"],
+                }, handle)
+            with (
+                patch.object(domain_worker.pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                patch.object(domain_worker, "_precheck_report_recipients", return_value=[{
+                    "channel": "registrar", "email": "abuse@example.org",
+                }]),
+                patch.object(domain_worker.pt, "run_cloaking_check", return_value={
+                    "verdict": "NO_SIGNAL", "score": 0, "signals": [],
+                    "coverage": {"multi_vantage_recommended": False},
+                }),
+                patch.object(domain_worker, "_capture_worker_browser_evidence", return_value={
+                    "success": False, "terminal": True, "terminal_stage": "source",
+                    "error": "browser warning page",
+                }),
+            ):
+                domain_worker.run_job(job_path)
+            preflight = json.loads(Path(os.path.join(job_dir, "preflight.json")).read_text(encoding="utf-8"))
+            self.assertEqual([], preflight["evidence_review"])
+            self.assertEqual(1, len(preflight["ready"]))
+            self.assertFalse(preflight["ready"][0]["require_browser_evidence"])
+            self.assertTrue(preflight["ready"][0]["browser_evidence_terminal"])
+
+    def test_manual_evidence_review_items_dedupe_full_url_and_hide_older_day(self):
+        with tempfile.TemporaryDirectory() as worker_root:
+            now = datetime.now(timezone.utc)
+            target = "https://duplicate-worker.example/path"
+
+            def write_job(name, created_at, preflight):
+                folder = Path(worker_root) / name
+                folder.mkdir()
+                (folder / "job.json").write_text(json.dumps({
+                    "job_id": name, "created_at": created_at,
+                    "domains": [target], "allowed_accounts": ["sender@example.org"],
+                }), encoding="utf-8")
+                preflight_path = folder / "preflight.json"
+                preflight_path.write_text(json.dumps(preflight), encoding="utf-8")
+                return preflight_path
+
+            first_path = write_job("first", now.isoformat(), {
+                "version": 4, "complete": True, "ready": [],
+                "evidence_review": [{
+                    "target_url": target, "domain": "duplicate-worker.example",
+                    "review_day": now.astimezone().date().isoformat(),
+                    "recipients": [{"email": "abuse@example.org"}],
+                    "browser_evidence_error": "first attempt",
+                }],
+            })
+            second_path = write_job("second", (now + timedelta(seconds=1)).isoformat(), {
+                "version": 4, "complete": True, "ready": [],
+                "evidence_review": [{
+                    "target_url": target, "domain": "duplicate-worker.example",
+                    "review_day": now.astimezone().date().isoformat(),
+                    "recipients": [{"email": "abuse@example.org"}],
+                    "browser_evidence_error": "latest attempt",
+                }],
+            })
+            stamp = now.timestamp()
+            os.utime(first_path, (stamp, stamp))
+            os.utime(second_path, (stamp + 1, stamp + 1))
+            old_path = write_job("old", (now - timedelta(days=1)).isoformat(), {
+                "version": 4, "complete": True, "ready": [],
+                "evidence_review": [{
+                    "target_url": "https://old-worker.example/path",
+                    "domain": "old-worker.example",
+                    "recipients": [{"email": "abuse@example.org"}],
+                }],
+            })
+            old_stamp = (now - timedelta(days=1)).timestamp()
+            os.utime(old_path, (old_stamp, old_stamp))
+
+            items = domain_worker.list_evidence_review_items(root=worker_root)
+            self.assertEqual(1, len(items))
+            self.assertEqual(target, items[0]["target_url"])
+            self.assertEqual("latest attempt", items[0]["browser_evidence_error"])
+            self.assertEqual("second", items[0]["source_job_id"])
+
+            ready_path = write_job("third-ready", (now + timedelta(seconds=2)).isoformat(), {
+                "version": 4, "complete": True,
+                "ready": [{"target_url": target, "domain": "duplicate-worker.example"}],
+                "evidence_review": [],
+            })
+            ready_stamp = stamp + 2
+            os.utime(ready_path, (ready_stamp, ready_stamp))
+            self.assertEqual([], domain_worker.list_evidence_review_items(root=worker_root))
 
     def test_v4_normal_worker_attaches_manual_evidence_and_sends(self):
         target = "https://target.example/path"
@@ -297,6 +444,51 @@ class DomainWorkerTests(unittest.TestCase):
             state = json.loads(Path(os.path.join(job_dir, "preflight.json")).read_text(encoding="utf-8"))
             self.assertEqual([], state["evidence_review"])
             self.assertIn(target, state["manual_evidence_completed"])
+
+    def test_manual_evidence_send_hides_duplicate_pending_jobs(self):
+        target = "https://duplicate-send.example/path"
+        with tempfile.TemporaryDirectory() as worker_root, tempfile.TemporaryDirectory() as evidence_dir:
+            root = Path(worker_root)
+            current_dir = root / "current"
+            older_dir = root / "older"
+            for folder, job_id in ((current_dir, "current"), (older_dir, "older")):
+                folder.mkdir()
+                (folder / "job.json").write_text(json.dumps({
+                    "job_id": job_id, "domains": [target],
+                    "allowed_accounts": ["sender@example.org"],
+                }), encoding="utf-8")
+                (folder / "preflight.json").write_text(json.dumps({
+                    "version": 4, "complete": True, "ready": [], "cloaking_review": [],
+                    "evidence_review": [{
+                        "target_url": target, "domain": "duplicate-send.example",
+                        "recipients": [{"email": "abuse@example.org"}],
+                    }], "manual_evidence_completed": {},
+                }), encoding="utf-8")
+            evidence = browser_evidence.create_manual_browser_evidence(
+                target, [("proof.png", b"\x89PNG\r\n\x1a\nproof")], evidence_dir,
+            )
+            result = {
+                "target_url": target, "domain": "duplicate-send.example", "success": True,
+                "sent_ok": 1, "sent_failed": 0, "already_sent": 0, "sent_to": [],
+                "drafts_total": 1, "drafts_sendable": 1,
+            }
+            with (
+                patch.object(domain_worker, "WORKER_DIR", worker_root),
+                patch.object(domain_worker.pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                patch.object(domain_worker, "_run_prechecked_domain", return_value=(result, set(), False)),
+            ):
+                sent = domain_worker.send_manual_evidence_item(
+                    str(current_dir), target, evidence, ["sender@example.org"],
+                )
+                self.assertEqual(1, sent["sent_ok"])
+                self.assertEqual([], domain_worker.list_evidence_review_items(root=worker_root))
+
+            older_state = json.loads((older_dir / "preflight.json").read_text(encoding="utf-8"))
+            self.assertEqual([], older_state["evidence_review"])
+            self.assertIn(target, older_state["manual_evidence_completed"])
 
     def test_precheck_runs_recipient_lookup_and_cloaking_detection_concurrently(self):
         with tempfile.TemporaryDirectory() as job_dir:
