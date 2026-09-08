@@ -15,14 +15,10 @@ class WebformReportTextTests(unittest.TestCase):
         }
         self.url = "https://phish.example.test/vi-vn/?campaign=one"
 
-    def test_registrar_webform_never_contains_urlscan_evidence(self):
+    def test_registrar_webform_never_contains_external_scan_evidence(self):
         text = pt.get_webform_draft_text(
             "phish.example.test", "Example Registrar", "https://form.example.test",
             self.cfg, target_url=self.url,
-            urlscan={
-                "result_url": "https://urlscan.io/result/secret/",
-                "screenshot_url": "https://urlscan.io/screenshots/secret.png",
-            },
         )
         self.assertIn(self.url, text)
         self.assertNotIn("URLScan", text)

@@ -328,7 +328,7 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
 
 
 def _run_one_cdn_check(
-    target: str, urlscan_api_key: str = "", cloaking_vantage_points: list | None = None,
+    target: str, cloaking_vantage_points: list | None = None,
 ) -> dict:
     """Check one target and always return a renderable result."""
     raw = target.strip()
@@ -345,11 +345,6 @@ def _run_one_cdn_check(
             "_error": str(exc),
         }
     result["_original_url"] = raw if "://" in raw else f"https://{domain}"
-    if urlscan_api_key:
-        try:
-            result["urlscan"] = pt.urlscan_submit_and_wait(domain, urlscan_api_key)
-        except Exception as exc:
-            result["urlscan"] = {"error": str(exc)}
     return result
 
 
@@ -467,10 +462,9 @@ if go:
             "results": [None] * total,
             "cfg": cfg,
         })
-        urlscan_api_key = cfg.get("urlscan_api_key") or ""
         cache["pending"] = {
             i: executor.submit(
-                _run_one_cdn_check, target, urlscan_api_key,
+                _run_one_cdn_check, target,
                 cfg.get("cloaking_vantage_points") or [],
             )
             for i, target in enumerate(domains)

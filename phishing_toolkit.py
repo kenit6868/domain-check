@@ -580,7 +580,6 @@ def get_webform_draft_text(
     cfg: dict,
     target_url: str = "",
     vt_link: str = "",
-    urlscan: dict | None = None,
 ) -> str:
     """Generate factual registrar web-form text without third-party scan links."""
     from datetime import datetime, timezone as _tz
@@ -788,7 +787,6 @@ def load_config():
     return {
         "vt_api_key": cfg.get("api", "vt_api_key", fallback="") or os.environ.get("VT_API_KEY", ""),
         "gsb_api_key": cfg.get("api", "gsb_api_key", fallback="") or os.environ.get("GSB_API_KEY", ""),
-        "urlscan_api_key": cfg.get("api", "urlscan_api_key", fallback="") or os.environ.get("URLSCAN_API_KEY", ""),
         "brand_name": cfg.get("company", "brand_name", fallback="[TÊN THƯƠNG HIỆU]"),
         "contact_name": cfg.get("company", "contact_name", fallback="[TÊN NGƯỜI BÁO CÁO]"),
         "contact_email": cfg.get("company", "contact_email", fallback="[EMAIL LIÊN HỆ]"),
@@ -1465,178 +1463,20 @@ def check_mx_records(domain: str) -> dict:
     }
 
 
-# --------------------------------------------------------------------------
-# A3 — URLScan.io: screenshot + DOM analysis (free public API, no key needed)
-# --------------------------------------------------------------------------
-
-def urlscan_submit(domain: str, api_key: str = "", use_http: bool = False) -> dict:
-    """Submit domain lên URLScan.io để lấy screenshot + DOM/DNS analysis.
-
-    Cần API key miễn phí — đăng ký tại https://urlscan.io/ rồi điền urlscan_api_key
-    vào config.ini. Rate limit free: 5000 scans/ngày.
-    use_http=True để submit http:// thay vì https:// khi domain không có SSL hoặc bị
-    URLScan từ chối do DNS/SSL error.
-    """
-    if requests is None:
-        return {"error": "requests not installed"}
-    if not api_key:
-        return {"error": "Chưa có urlscan_api_key trong config.ini — đăng ký free tại https://urlscan.io/"}
-    scheme = "http" if use_http else "https"
-    raw_target = str(domain or "").strip()
-    if raw_target.lower().startswith(("http://", "https://")):
-        parsed_target = urlparse(raw_target)
-        target_url = parsed_target._replace(scheme=scheme).geturl() if use_http else raw_target
-    else:
-        target_url = f"{scheme}://{raw_target}"
-    try:
-        r = requests.post(
-            "https://urlscan.io/api/v1/scan/",
-            json={"url": target_url, "visibility": "public"},
-            headers={"Content-Type": "application/json", "API-Key": api_key},
-            timeout=15,
-        )
-        if r.status_code == 429:
-            return {"error": "URLScan.io rate limit — thử lại sau vài phút"}
-        if r.status_code in (400, 401, 403):
-            try:
-                msg = r.json().get("message", r.text)
-            except Exception:
-                msg = r.text
-            # DNS Error = domain không resolve được từ phía URLScan — tức là domain đã down
-            # hoặc chưa propagate DNS. Trả về warning thay vì error để UI hiện khác biệt.
-            if "DNS" in msg or "resolve" in msg.lower() or "Could not" in msg:
-                return {
-                    "warning": f"URLScan không resolve được domain này ({msg}). "
-                               "Có thể domain đã bị gỡ, DNS chưa propagate, hoặc chỉ hoạt động qua IPv6. "
-                               "Thử dùng http:// thay vì https:// hoặc kiểm tra lại domain.",
-                    "dns_error": True,
-                }
-            return {"error": f"URLScan từ chối ({r.status_code}): {msg}"}
-        r.raise_for_status()
-        data = r.json()
-        uuid = data.get("uuid") or ""
-        return {
-            "scan_id": uuid,
-            "result_url": f"https://urlscan.io/result/{uuid}/",
-            "screenshot_url": f"https://urlscan.io/screenshots/{uuid}.png",
-            "status": "submitted",
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def _urlscan_screenshot_available(screenshot_url: str) -> bool:
-    """URLScan serves a PNG placeholder with HTTP 404 when capture failed."""
-    if not screenshot_url or requests is None:
-        return False
-    try:
-        response = requests.get(screenshot_url, timeout=15, stream=True)
-        try:
-            return response.status_code == 200 and "image/" in response.headers.get("content-type", "").lower()
-        finally:
-            response.close()
-    except Exception:
-        return False
-
-
-def urlscan_result(scan_uuid: str, api_key: str = "") -> dict:
-    """Lấy kết quả scan đã submit lên URLScan.io. Cần truyền api_key giống lúc submit.
-
-    Trả về {"status": "pending"} nếu scan chưa xong (HTTP 404).
-    Trả về dict đầy đủ khi done: screenshot_url, malicious verdict, tags, page_title, IP, country.
-    """
-    if requests is None:
-        return {"error": "requests not installed"}
-    try:
-        headers = {"API-Key": api_key} if api_key else {}
-        r = requests.get(
-            f"https://urlscan.io/api/v1/result/{scan_uuid}/",
-            headers=headers,
-            timeout=15,
-        )
-        if r.status_code == 404:
-            return {"status": "pending"}
-        r.raise_for_status()
-        data = r.json()
-        verdicts = ((data.get("verdicts") or {}).get("overall")) or {}
-        page = data.get("page") or {}
-        screenshot_url = f"https://urlscan.io/screenshots/{scan_uuid}.png"
-        if not _urlscan_screenshot_available(screenshot_url):
-            screenshot_url = ""
-        return {
-            "status": "done",
-            "screenshot_url": screenshot_url,
-            "result_url": f"https://urlscan.io/result/{scan_uuid}/",
-            "malicious": verdicts.get("malicious", False),
-            "score": verdicts.get("score", 0),
-            "tags": verdicts.get("tags") or [],
-            "brands": verdicts.get("brands") or [],
-            "page_title": page.get("title"),
-            "page_ip": page.get("ip"),
-            "page_country": page.get("country"),
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def urlscan_submit_and_wait(domain: str, api_key: str, timeout: int = 65, poll_interval: int = 5) -> dict:
-    """Submit URLScan và poll tự động đến khi có kết quả (hoặc hết timeout).
-
-    Dùng để chạy song song với pipeline chính trong run_check() — submit ngay từ đầu,
-    poll ở cuối khi các bước VT/GSB/WHOIS đã xong nên phần lớn thời gian 30s đã trôi qua.
-    Trả về dict có status="done" nếu thành công, "pending"/error nếu timeout/lỗi.
-    """
-    import time as _time
-    sub = urlscan_submit(domain, api_key)
-    if "error" in sub or "warning" in sub:
-        return sub
-    scan_id = sub.get("scan_id")
-    if not scan_id:
-        return {"error": "URLScan: no scan_id returned"}
-    deadline = _time.time() + timeout
-    _time.sleep(poll_interval)  # đợi lần đầu trước khi bắt đầu poll
-    while _time.time() < deadline:
-        res = urlscan_result(scan_id, api_key)
-        if res.get("status") == "done":
-            return res
-        if "error" in res:
-            return res
-        _time.sleep(poll_interval)
-    return {"status": "pending", "scan_id": scan_id,
-            "screenshot_url": "",
-            "result_url": f"https://urlscan.io/result/{scan_id}/"}
-
-
-def _replace_screenshot_placeholder(content: str, screenshot_url: str) -> str:
-    """Replace legacy/manual screenshot instructions with a real URLScan image URL."""
-    if not screenshot_url:
-        return content
-    content = re.sub(
-        r"(?mi)^Screenshots?(?: evidence)?:\s*Not available at the time of submission\.\s*$",
-        f"Screenshot: {screenshot_url}",
-        content,
-    )
-    content = re.sub(
-        r"(?mi)^Screenshots?:\s*\[ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH[^\]]*\]\s*$",
-        f"Screenshot: {screenshot_url}",
-        content,
-    )
-    content = re.sub(
-        r"(?mi)^\[ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH[^\]]*\]\s*$",
-        f"Screenshot: {screenshot_url}",
-        content,
-    )
-    content = re.sub(
-        r'(?mi)^\(Ảnh chụp phải hiển thị rõ URL ["“].*?["”] trên thanh địa chỉ của trình duyệt\)\s*$',
-        "",
-        content,
-    )
-    return content
-
-
 def prepare_external_email_body(body: str) -> str:
-    """Remove internal drafting instructions before a body is sent externally."""
+    """Remove internal instructions and retired scan evidence before sending."""
     rendered = body or ""
+    # Drafts created by older releases may still contain the retired external
+    # scan block.  Remove it at the final send boundary so a legacy draft can
+    # never leak links or verdicts from that service.
+    rendered = re.sub(
+        r"(?ims)^\s*---\s*Evidence:\s*URLScan(?:\.io)?.*?---\s*End(?:\s+of)?\s+URLScan evidence\s*---\s*",
+        "\n",
+        rendered,
+    )
+    rendered = re.sub(r"(?im)^.*https?://urlscan\.io/[^\r\n]*\r?\n?", "", rendered)
+    rendered = re.sub(r"(?im)^.*\bURLScan(?:\.io)?\b.*\r?\n?", "", rendered)
+    rendered = re.sub(r"(?im)^.*\bNOT\s+flagged\b.*\r?\n?", "", rendered)
     rendered = re.sub(
         r"(?mi)^Screenshots?:\s*\[ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH[^\]]*\]\s*$",
         "",
@@ -1659,68 +1499,6 @@ def prepare_external_email_body(body: str) -> str:
     )
     rendered = re.sub(r"(?ms)^\[NOTE:.*?\]\s*", "", rendered)
     return re.sub(r"\n{3,}", "\n\n", rendered).strip()
-
-
-def append_urlscan_evidence_to_drafts(drafts: list, urlscan_res: dict) -> list:
-    """Append URLScan.io evidence (screenshot link, result URL, verdict) vào cuối tất cả
-    draft files đã sinh. Đồng thời thay thế dòng placeholder ảnh chụp màn hình trong
-    draft bằng URL screenshot thật từ URLScan.
-
-    Trả về list các draft path đã được cập nhật thành công.
-    """
-    if not drafts:
-        return []
-    # Cho phép chạy kể cả khi status="pending" (timeout) — ta vẫn có screenshot_url từ UUID
-    screenshot_url = urlscan_res.get("screenshot_url", "")
-    result_url = urlscan_res.get("result_url", "")
-
-    if urlscan_res.get("status") == "done":
-        verdict = "MALICIOUS" if urlscan_res.get("malicious") else "NOT flagged"
-        score = urlscan_res.get("score", 0)
-        tags = ", ".join(urlscan_res.get("tags") or []) or "—"
-        brands = ", ".join(urlscan_res.get("brands") or []) or "—"
-        page_title = urlscan_res.get("page_title") or "—"
-        page_ip = urlscan_res.get("page_ip") or "—"
-        country = urlscan_res.get("page_country") or "—"
-        evidence_block = (
-            f"\n\n--- Evidence: URLScan.io Analysis ---\n"
-            f"Verdict   : {verdict} (score: {score})\n"
-            f"Page title: {page_title}\n"
-            f"Page IP   : {page_ip} ({country})\n"
-            f"Tags      : {tags}\n"
-            f"Brands    : {brands}\n"
-            f"{f'Screenshot: {screenshot_url}' + chr(10) if screenshot_url else ''}"
-            f"Full report: {result_url}\n"
-            f"--- End of URLScan evidence ---\n"
-        )
-    else:
-        # Timeout hoặc pending — giữ result URL, không khẳng định có screenshot.
-        evidence_block = (
-            f"\n\n--- Evidence: URLScan.io (kết quả đang xử lý) ---\n"
-            f"{f'Screenshot: {screenshot_url}' + chr(10) if screenshot_url else ''}"
-            f"Full report: {result_url}\n"
-            f"--- End of URLScan evidence ---\n"
-        ) if result_url else ""
-
-    updated = []
-    for path in drafts:
-        try:
-            if not os.path.isfile(path):
-                continue
-            with open(path, encoding="utf-8") as f:
-                content = f.read()
-            # Thay thế placeholder ảnh chụp màn hình bằng link thật nếu có screenshot_url,
-            # kể cả draft cũ đã có evidence block nhưng còn sót placeholder.
-            if screenshot_url:
-                content = _replace_screenshot_placeholder(content, screenshot_url)
-            has_evidence = "Evidence: URLScan.io" in content
-            new_content = content if has_evidence else (content + evidence_block if evidence_block else content)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(new_content)
-            updated.append(path)
-        except Exception:
-            pass  # file bị khóa hoặc lỗi khác — bỏ qua, không làm crash UI
-    return updated
 
 
 # --------------------------------------------------------------------------
@@ -1818,7 +1596,7 @@ def append_wayback_evidence_to_drafts(drafts: list, wayback_result: dict) -> lis
     """Append link Wayback Machine archive vào cuối tất cả draft files đã sinh.
 
     Idempotent: kiểm tra 'Wayback Machine Archive' đã có trong file chưa trước khi append.
-    Cùng pattern với append_urlscan_evidence_to_drafts — không crash nếu file bị khóa.
+    Không làm crash nếu file bị khóa; evidence ngoài hệ thống vẫn được cô lập.
     """
     archive_url = wayback_result.get("archive_url")
     if not drafts or not archive_url:
@@ -3043,10 +2821,6 @@ def parse_draft_email(path: str) -> dict:
             break
     body = "\n".join(lines[body_start:])
 
-    screenshot_match = re.search(r"https://urlscan\.io/screenshots/[^\s]+\.png", body)
-    if screenshot_match:
-        body = _replace_screenshot_placeholder(body, screenshot_match.group(0))
-
     if to and ("[TRA ABUSE EMAIL" in to or "[KHÔNG CÓ" in to):
         to = None
     if to:
@@ -3070,10 +2844,8 @@ def validate_report_delivery(
         errors.append("Draft không có Subject")
     if target_url and f"Reported URL: {target_url}" not in body:
         errors.append("Draft không chứa đúng full Reported URL")
-    if "--- Evidence: URLScan.io" in body:
-        errors.append("Draft còn khối URLScan chỉ dành cho kiểm tra nội bộ")
-    if re.search(r"(?i)\bNOT\s+flagged\b", body):
-        errors.append("Draft chứa verdict URLScan 'NOT flagged'")
+    if re.search(r"(?i)urlscan(?:\.io)?|https?://urlscan\.io/", body):
+        errors.append("Draft còn bằng chứng từ dịch vụ scan đã ngừng hỗ trợ")
     if re.search(r"(?i)\[(?:PLEASE|ATTACH|ĐÍNH KÈM|TRA ABUSE|KHÔNG CÓ)", body):
         errors.append("Draft còn placeholder cần xử lý")
     attachment_paths = [os.path.abspath(str(path)) for path in attachments or []]
@@ -3347,6 +3119,7 @@ def append_cloaking_evidence_to_drafts(
         try:
             with open(path, encoding="utf-8") as file:
                 content = file.read()
+            content = prepare_external_email_body(content)
             content = re.sub(
                 r"\n*--- Technical Evidence: Multi-profile Cloaking Check ---.*?"
                 r"--- End of Cloaking Evidence ---\n*",
@@ -3370,6 +3143,7 @@ def append_browser_evidence_to_drafts(drafts: list, evidence_result: dict) -> li
         try:
             with open(path, encoding="utf-8") as file:
                 content = file.read()
+            content = prepare_external_email_body(content)
             content = re.sub(
                 r"\n*--- Technical Evidence: Read-only Browser Inspection ---.*?"
                 r"--- End of Browser Evidence ---\n*",
@@ -3388,11 +3162,6 @@ def append_browser_evidence_to_drafts(drafts: list, evidence_result: dict) -> li
             content = re.sub(
                 r"\n*--- Technical Evidence: Verified Browser Navigation ---.*?"
                 r"--- End of Verified Browser Evidence ---\n*",
-                "\n", content, flags=re.DOTALL,
-            ).rstrip()
-            content = re.sub(
-                r"\n*--- Evidence: URLScan\.io(?: Analysis| \(kết quả đang xử lý\))? ---.*?"
-                r"--- End URLScan Evidence ---\n*",
                 "\n", content, flags=re.DOTALL,
             ).rstrip()
             signature = re.search(r"(?im)^\s*(?:Kind regards|Regards),?\s*$", content)
@@ -3719,15 +3488,6 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
     domain = normalize_domain(target)
     target_url = target.strip() if "://" in target else f"http://{domain}"
 
-    # URLScan: submit sớm (song song với pipeline chính) để thời gian ~30s xử lý
-    # trùng với các bước WHOIS/VT/GSB bên dưới — join ở cuối khi gần xong rồi.
-    _urlscan_key = cfg.get("urlscan_api_key", "")
-    _urlscan_executor = _cf.ThreadPoolExecutor(max_workers=1)
-    if _urlscan_key:
-        _urlscan_future = _urlscan_executor.submit(urlscan_submit_and_wait, domain, _urlscan_key)
-    else:
-        _urlscan_future = None
-
     # Passive cloaking probes run in parallel with WHOIS/VT/GSB. The detector
     # itself executes independent desktop/mobile/referrer profiles concurrently.
     _cloaking_executor = _cf.ThreadPoolExecutor(max_workers=1)
@@ -3896,20 +3656,6 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
             note = "Cloaking evidence could not be appended to every draft"
             drafts_error = (drafts_error + "; " if drafts_error else "") + note
 
-    # Thu kết quả URLScan (thread đã chạy song song từ đầu — thường đã xong hoặc sắp xong)
-    urlscan_data = {}
-    if _urlscan_future is not None:
-        try:
-            urlscan_data = _urlscan_future.result(timeout=75)  # đã poll nội bộ rồi, chỉ cần thêm buffer nhỏ
-        except Exception as e:
-            urlscan_data = {"error": str(e)}
-        finally:
-            _urlscan_executor.shutdown(wait=False)
-        # Phase 3: URLScan chỉ còn là dữ liệu tham khảo nội bộ trên UI. Không
-        # chèn verdict/link/screenshot URLScan vào email gửi ra ngoài.
-    else:
-        _urlscan_executor.shutdown(wait=False)
-
     return {
         "domain": domain,
         "cert": cert,
@@ -3933,7 +3679,6 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
         "drafts_error": drafts_error,
         "registrar_abuse_email_source": registrar_abuse_email_source,
         "registrar_abuse_email_used": registrar_abuse_email_used,
-        "urlscan": urlscan_data,
         "cloaking": cloaking,
     }
 

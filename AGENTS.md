@@ -148,6 +148,12 @@ Không tự khởi động Streamlit nếu người dùng chưa yêu cầu. Buil
   tự mở, preview thumbnail ngay và nút tạo draft xác nhận cloaking phải bị khóa.
   Không dùng nút lưu ảnh riêng: validate toàn bộ batch trước khi ghi file, rồi
   commit evidence cùng thao tác tạo draft; không tự gửi email.
+- URLScan đã được loại bỏ khỏi pipeline: không đọc API key, submit/poll, hiển thị
+  link/kết quả hoặc tạo attachment từ dịch vụ này ở bất kỳ page/worker/CLI nào.
+  Browser Evidence, Wayback và ảnh upload thủ công là các nguồn evidence được hỗ
+  trợ; draft legacy còn dấu vết URLScan chỉ được scrub/chặn tại ranh giới gửi.
+  Không tự sửa `config.ini` vì đây là file secret cục bộ; khóa cũ nếu còn tồn tại
+  sẽ không được ứng dụng đọc.
 - Cảnh báo phishing Cloudflare và trang lỗi trình duyệt/DNS là terminal page,
   không phải bằng chứng cloaking. Khi toàn bộ profile terminal, dùng
   `BLOCKED_OR_UNAVAILABLE`, bỏ manual review cloaking và tiếp tục gửi draft;
@@ -212,6 +218,19 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-09-08 — Phase 7.2 loại bỏ hoàn toàn tích hợp URLScan: xóa API
+  submit/poll, khóa cấu hình trong `config.example.ini`, field/result khỏi
+  pipeline và toàn bộ nút/link/attachment URLScan ở Check Domain, Quick Report
+  và Provider Replies. Browser Evidence cùng upload thủ công là nguồn evidence
+  duy nhất; draft legacy còn dấu vết scan được scrub/chặn tại ranh giới gửi,
+  còn dữ liệu runtime và `config.ini` secret không bị sửa. File chính:
+  `phishing_toolkit.py`, `provider_replies.py`, `pages/1_Check_Domain.py`,
+  `pages/7_Quick_Report.py`, `pages/9_Provider_Replies.py`,
+  `config.example.ini`, test core/UI; đã kiểm tra: 66 test tập trung,
+  235/235 full unittest, compileall, pip check và diff check; tài liệu:
+  `README.md`, `03_Technical_Guide.md`, file này và skill dự án; lưu ý: chỉ
+  mock browser/SMTP, không mở URL hoặc gửi email thật.
 
 - 2026-09-08 — Đồng bộ Browser Evidence nguồn–đích cho Provider Replies và
   Cloaking Review: thêm helper dùng chung ưu tiên hai ảnh URL nguồn/URL đích rồi
@@ -574,7 +593,7 @@ vào phần này.
 
 Nhóm `link_status` đã thống nhất Cloudflare warning/HTTP 403 là `BLOCKED`, không
 phải `LIVE` hay `DIE`; mock response không iterable được xử lý an toàn. Toàn bộ
-test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 236 test.
+test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 235 test.
 Detector cloaking có test thuần cho scoring/profile/path/vantage, fake browser
 cho Playwright và mock attachment worker; không dùng URL nghi ngờ hay SMTP thật
 trong test.

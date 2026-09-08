@@ -284,7 +284,7 @@ người vận hành phê duyệt. Không đính kèm toàn bộ ảnh quan sát
 
 #### Browser Evidence dùng chung — Phase 1
 
-`browser_evidence.py` là lõi capture cho lộ trình thay thế URLScan. Chế độ mặc
+`browser_evidence.py` là lõi capture Browser Evidence chính thức. Chế độ mặc
 định là thụ động: module ghi một PNG và manifest JSON theo cùng evidence set,
 phân biệt rõ `requested_url`, `landing_url`, redirect HTTP do máy chủ trả về,
 profile trình duyệt, control DOM được chọn và destination đã resolve. Ảnh được
@@ -316,7 +316,8 @@ capture dùng `capture_normal_report_evidence()`: ưu tiên
 evidence set qua rerun, hiển thị requested/landing/DOM/final URL và chỉ coi ảnh
 sẵn sàng khi toàn bộ PNG/manifest còn đúng hash. Reply gửi đúng thread đính kèm
 toàn bộ artifact; narrative DOM-open nói rõ URL được mở trực tiếp trong tab mới,
-không tuyên bố đã click. Upload thủ công và URLScan vẫn là fallback tạm thời.
+không tuyên bố đã click. Upload thủ công là fallback duy nhất khi capture tự
+động không tạo được artifact.
 
 #### Check Domain — Phase 2.1 mở URL từ DOM
 
@@ -330,11 +331,11 @@ click, nhập dữ liệu, submit form hay tải file.
 
 Cùng evidence set sau preview được chèn bằng formatter tiếng Anh vào mọi draft và
 truyền nguyên artifact cho cả gửi một draft lẫn gửi tất cả. Gate trước SMTP kiểm
-tra Subject, recipient, full Reported URL, placeholder, chuỗi `NOT flagged`, mọi
-khối URLScan còn sót, sự tồn tại của attachment và 1–3 ảnh + một manifest;
-DOM destination phải có đúng hai ảnh và manifest phải khớp full Reported URL
-hiện tại. URLScan chỉ có thể hiển thị nội bộ,
-không được đưa vào nội dung hoặc attachment gửi ra ngoài.
+tra Subject, recipient, full Reported URL, placeholder, sự tồn tại của attachment
+và 1–3 ảnh + một manifest. Draft legacy còn evidence của dịch vụ scan cũ sẽ bị
+loại ở ranh giới gửi; phiên bản hiện tại không có submit, retry hay attachment
+scan. DOM destination phải có đúng hai ảnh và manifest phải khớp full Reported URL
+hiện tại.
 
 Formatter gửi nhà cung cấp phải biến telemetry thành một lập luận abuse dễ xử
 lý: `Observed Phishing Behavior and Supporting Evidence`, control nhìn thấy,
@@ -397,7 +398,7 @@ hoặc ngày khác có thể đổi biến thể. Mọi biến thể GSB nhắm 
 mọi biến thể Cloudflare nhắm tới service/origin-provider abuse handling.
 
 Registrar và registry cũng dùng formatter dựa trên dữ kiện: luôn giữ full URL/
-path, không đưa URLScan hoặc VirusTotal không có detection ra ngoài, và không tự
+path, không đưa kết quả scan không được xác minh hoặc VirusTotal không có detection ra ngoài, và không tự
 khẳng định có credential/OTP/payment collection. Registrar được yêu cầu điều tra
 rồi áp dụng biện pháp registrar-level phù hợp. Registry được yêu cầu điều tra và
 phối hợp sponsoring registrar; draft chỉ được nói đã báo registrar khi caller có

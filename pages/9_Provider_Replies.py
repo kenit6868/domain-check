@@ -13,10 +13,10 @@ import mail_statistics
 if getattr(mail_statistics, "MODULE_VERSION", 0) < 5:
     mail_statistics = importlib.reload(mail_statistics)
 import provider_replies
-if getattr(provider_replies, "MODULE_VERSION", 0) < 4:
+if getattr(provider_replies, "MODULE_VERSION", 0) < 5:
     provider_replies = importlib.reload(provider_replies)
 from provider_replies import (
-    ACTION_REQUIRED_TYPES, browser_evidence_attachment_paths, build_reply, build_reply_vi, capture_dom_link_evidence, clear_mail_cache, download_evidence_image,
+    ACTION_REQUIRED_TYPES, browser_evidence_attachment_paths, build_reply, build_reply_vi, capture_dom_link_evidence, clear_mail_cache,
     extract_reply_context, fetch_provider_mail_all_folders,
     instructed_reply_address, is_delivery_failure, load_mail_cache, mark_mails_seen,
     load_reply_log, needs_reply, provider_message_vi, received_datetime, record_reply_sent,
@@ -349,7 +349,6 @@ with right:
             if dom_capture["success"]:
                 st.session_state[attachment_key] = dom_capture["path"]
                 st.session_state[browser_evidence_key] = dom_capture
-                st.session_state.pop(f"{key}_urlscan_result", None)
                 if dom_capture.get("href"):
                     st.session_state[detected_redirect_key] = dom_capture["href"]
                 if dom_capture.get("label"):
@@ -377,20 +376,6 @@ with right:
                 st.success("Đã lưu ảnh để đính kèm vào email phản hồi.")
             except Exception as exc:
                 st.error(f"Không lưu được ảnh: {exc}")
-        if not cfg.get("urlscan_api_key"):
-            st.warning("Chưa có URLScan API key trong config.ini nên chưa thể tự chụp ảnh.")
-        if st.button("Chụp ảnh bằng URLScan", key=f"{key}_capture", disabled=not bool(reported_url and cfg.get("urlscan_api_key"))):
-            with st.spinner("Đang quét và tạo ảnh bằng URLScan..."):
-                scan = pt.urlscan_submit_and_wait(reported_url, cfg.get("urlscan_api_key", ""), timeout=65)
-                if scan.get("screenshot_url"):
-                    try:
-                        st.session_state[attachment_key] = download_evidence_image(scan["screenshot_url"], mail.domain or reported_url)
-                        st.session_state.pop(browser_evidence_key, None)
-                        st.session_state[f"{key}_urlscan_result"] = scan.get("result_url", "")
-                    except Exception as exc:
-                        st.error(f"Tải ảnh thất bại: {exc}")
-                else:
-                    st.error(f"URLScan chưa tạo được ảnh: {scan.get('error') or scan.get('warning') or 'Không rõ lỗi'}")
         screenshot_path = st.session_state.get(attachment_key, "")
         browser_capture = st.session_state.get(browser_evidence_key) or {}
         browser_attachments = browser_evidence_attachment_paths(browser_capture)
@@ -431,8 +416,6 @@ with right:
                     st.error("Browser evidence đã thay đổi hoặc không còn hợp lệ. Hãy chụp lại trước khi gửi.")
             else:
                 st.image(screenshot_path, caption="Ảnh sẽ được đính kèm email", width=520)
-            result_url = st.session_state.get(f"{key}_urlscan_result", "")
-            if result_url: st.link_button("Mở báo cáo URLScan", result_url)
     else:
         screenshot_path = st.session_state.get(attachment_key, "")
         browser_capture = st.session_state.get(browser_evidence_key) or {}
@@ -444,7 +427,6 @@ with right:
     details = {"reported_url": reported_url, "button_label": button_label, "redirect_url": redirect_url, "official_url": official_url, "evidence": evidence,
                "screenshot_attached": has_valid_screenshot,
                "browser_evidence": browser_capture,
-               "urlscan_result": st.session_state.get(f"{key}_urlscan_result", ""),
                "contact_name": cfg.get("contact_name", ""), "contact_email": cfg.get("contact_email", "")}
     default_subject, default_body, warnings = build_reply(mail, details)
     subject_key, body_key = f"{key}_subject", f"{key}_body"

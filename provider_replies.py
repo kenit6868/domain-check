@@ -18,7 +18,7 @@ from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr, parsedate_to_datetime
 from html import unescape
 
-MODULE_VERSION = 4
+MODULE_VERSION = 5
 
 # Proxy support — tái dùng từ phishing_toolkit để tránh duplicate code
 try:
@@ -709,7 +709,6 @@ def build_reply(mail, details):
     elif mail.request_type == "screenshot":
         if details.get("screenshot_attached"):
             core = "Please find the requested supporting screenshot attached."
-            if details.get("urlscan_result"): core += f"\nURLScan analysis: {details['urlscan_result']}"
         else:
             core = "[ATTACH VERIFIED SCREENSHOTS BEFORE SENDING]"; warnings.append("Cần tạo hoặc đính kèm ảnh thật trước khi gửi.")
     elif mail.request_type in ("technical_evidence", "clarification"):
@@ -872,22 +871,6 @@ def build_reply_vi(mail, details):
         "clarification": f"Nội dung trả lời cung cấp thông tin giải thích bổ sung:\n{evidence or '[CHƯA NHẬP]'}",
     }
     return translations.get(mail.request_type, "Vui lòng đối chiếu kỹ nội dung tiếng Anh trước khi gửi.")
-
-
-def download_evidence_image(image_url, domain="evidence"):
-    """Download a URLScan screenshot to the local evidence directory."""
-    if not image_url.lower().startswith("https://urlscan.io/screenshots/"):
-        raise ValueError("Chỉ chấp nhận screenshot từ urlscan.io")
-    response = requests.get(image_url, timeout=30)
-    response.raise_for_status()
-    content_type = (response.headers.get("Content-Type") or "").lower()
-    if "image/" not in content_type or len(response.content) > 15 * 1024 * 1024:
-        raise ValueError("Dữ liệu tải về không phải ảnh hợp lệ hoặc vượt quá 15 MB")
-    safe_domain = re.sub(r"[^a-zA-Z0-9._-]", "_", domain or "evidence")[:100]
-    os.makedirs(EVIDENCE_DIR, exist_ok=True)
-    path = os.path.join(EVIDENCE_DIR, f"{safe_domain}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.png")
-    with open(path, "wb") as handle: handle.write(response.content)
-    return path
 
 
 def save_uploaded_evidence(filename, content, domain="evidence"):

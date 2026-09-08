@@ -78,7 +78,6 @@ if "check_domain_result" in st.session_state:
     cloaking = result.get("cloaking", {})
     domain_age_days = result.get("domain_age_days")
     mx_records = result.get("mx_records", {})
-    urlscan_auto = result.get("urlscan", {})
     target_url = result.get("target_url") or cloaking.get("target_url") or f"https://{domain}/"
     evidence_case_key = hashlib.sha256(target_url.encode("utf-8", "ignore")).hexdigest()[:12]
     manual_signature_key = f"check_domain_manual_evidence_signature_{evidence_case_key}"
@@ -504,73 +503,6 @@ if "check_domain_result" in st.session_state:
                 st.error("Evidence đã thay đổi hoặc không còn hợp lệ. Hãy chụp lại trước khi gửi.")
         else:
             st.warning("Chưa có Browser Evidence; các nút gửi email bên dưới sẽ bị khóa.")
-
-    # ── A3: URLScan.io ────────────────────────────────────────────────────────
-    # Auto-scan đã chạy song song trong run_check() — hiển thị kết quả ngay.
-    # Giữ nút retry thủ công cho trường hợp auto-scan thất bại (no API key, DNS error, timeout).
-    urlscan_key = f"urlscan_{domain}"
-    _auto_done = urlscan_auto.get("status") == "done"
-    _auto_has_url = bool(urlscan_auto.get("screenshot_url"))
-    _auto_error = urlscan_auto.get("error") or urlscan_auto.get("warning")
-    _manual_result = st.session_state.get(f"{urlscan_key}_result")
-    _active_result = _manual_result if (_manual_result and _manual_result.get("status") == "done") else (urlscan_auto if _auto_done else None)
-
-    with st.expander("📸 URLScan.io — Screenshot & Phân tích trang", expanded=(_auto_done or bool(_active_result))):
-        if _auto_done and _active_result:
-            screenshot_url = _active_result.get("screenshot_url")
-            result_url = _active_result.get("result_url")
-            us1, us2, us3 = st.columns(3)
-            us1.metric("URLScan Verdict", "🚨 Malicious" if _active_result.get("malicious") else "✅ Not flagged")
-            us2.metric("Score", _active_result.get("score", 0))
-            us3.metric("Page IP", _active_result.get("page_ip") or "N/A")
-            tags = _active_result.get("tags") or []
-            brands = _active_result.get("brands") or []
-            if tags:
-                st.markdown(f"**Tags:** {', '.join(tags)}")
-            if brands:
-                st.markdown(f"**Brands detected:** {', '.join(brands)}")
-            if screenshot_url:
-                st.image(screenshot_url, caption="Screenshot từ URLScan.io (tham khảo nội bộ)", width="stretch")
-            st.caption("URLScan chỉ để tham khảo nội bộ; kết quả này không được chèn vào email.")
-            evidence_text = (
-                f"Evidence (URLScan.io):\n"
-                f"- Screenshot: {screenshot_url}\n"
-                f"- Full analysis: {result_url}\n"
-                f"- Verdict: {'MALICIOUS' if _active_result.get('malicious') else 'Not flagged'} "
-                f"(score: {_active_result.get('score', 0)})"
-            )
-            st.code(evidence_text, language=None)
-        elif _auto_has_url and not _auto_done:
-            # Timeout nhưng đã có screenshot URL (PNG khả năng vẫn render được)
-            st.warning("⏳ URLScan chưa hoàn thành verdict; dữ liệu chỉ dùng tham khảo nội bộ.")
-            st.code(f"Screenshot: {urlscan_auto['screenshot_url']}\nFull report: {urlscan_auto.get('result_url','')}", language=None)
-        elif _auto_error:
-            if "urlscan_api_key" not in cfg or not cfg.get("urlscan_api_key"):
-                st.info("🔑 Chưa cấu hình `urlscan_api_key` trong config.ini — scan tự động bị bỏ qua.")
-            else:
-                st.warning(f"Auto-scan: {_auto_error}")
-
-        # Retry thủ công (khi auto thất bại hoặc muốn scan lại)
-        if not _auto_done:
-            st.divider()
-            st.caption("Retry thủ công:")
-            col_us1, col_us2 = st.columns([1, 3])
-            with col_us1:
-                use_http = st.checkbox("Dùng http://", key=f"urlscan_http_{domain}")
-                if st.button("🔍 Submit URLScan", key=f"urlscan_submit_{domain}"):
-                    with st.spinner("Đang submit và chờ kết quả (~30 giây)..."):
-                        retry_res = pt.urlscan_submit_and_wait(domain, cfg.get("urlscan_api_key", ""), timeout=65)
-                    if "warning" in retry_res:
-                        st.warning(retry_res["warning"])
-                    elif "error" in retry_res:
-                        st.error(retry_res["error"])
-                    else:
-                        st.session_state[f"{urlscan_key}_result"] = retry_res
-                        st.rerun()
-            with col_us2:
-                pending_data = st.session_state.get(urlscan_key)
-                if pending_data and pending_data.get("scan_id"):
-                    st.info(f"Link kết quả: {pending_data.get('result_url')}")
 
     # ── B3: Wayback Machine Archive ───────────────────────────────────────────
     wayback_key = f"wayback_{domain}"

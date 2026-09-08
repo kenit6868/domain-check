@@ -169,7 +169,7 @@ an toàn thì fallback sang một ảnh nguồn thụ động. Evidence được
 qua rerun, hiển thị thumbnail, requested/landing/DOM/final URL; khi gửi reply,
 toàn bộ PNG cùng manifest đã kiểm tra hash được đính kèm đúng theo preview. Draft
 DOM-open mô tả thao tác mở URL trực tiếp, không khẳng định đã click. Upload thủ
-công và URLScan vẫn được giữ làm fallback tạm thời trong phase chuyển đổi.
+công là fallback duy nhất khi Browser Evidence tự động không tạo được artifact.
 
 Các consumer đã tích hợp theo các phase riêng: Provider Replies và Check Domain
   dùng lõi Browser Evidence; Domain Worker cho domain thường tự thử capture DOM
@@ -211,14 +211,14 @@ sát; nếu không có field, email vẫn report suspected phishing/brand impers
 dựa trên ảnh trang nhưng không bịa chi tiết credential.
 
 Quality gate chặn draft thiếu Subject, recipient, sai full Reported URL, còn
-placeholder, chứa `NOT flagged`, còn khối URLScan hoặc thiếu attachment hợp lệ.
-URLScan vẫn chỉ hiển thị để tham khảo nội bộ, không được tự động hay thủ công
-chèn vào email. Gate còn đối chiếu full URL trong manifest với report hiện tại để
+placeholder hoặc thiếu attachment hợp lệ. Draft legacy còn bằng chứng từ dịch
+vụ scan cũ sẽ bị loại ở ranh giới gửi và không được tạo mới. Gate còn đối chiếu
+full URL trong manifest với report hiện tại để
 không gắn nhầm evidence giữa hai path; detector cloaking và Domain Worker không click.
 
 Các nội dung dùng để dán vào **web form** (GSB, Cloudflare, registrar và
 registry) luôn
-ghi đúng full URL/path. Mẫu không chèn URLScan hoặc screenshot URLScan và không
+ghi đúng full URL/path. Mẫu không chèn kết quả scan bên thứ ba và không
 tự khẳng định đã lấy OTP/thông tin thanh toán khi chưa có quan sát chứng minh;
 thay vào đó yêu cầu nhà cung cấp điều tra và áp dụng chính sách nếu xác nhận.
 GSB và Cloudflare có hai pool riêng, mỗi pool 5 biến thể: GSB yêu cầu cảnh báo/

@@ -30,9 +30,10 @@ class ProviderRepliesUiTests(unittest.TestCase):
 
     def test_provider_page_uses_shared_capture_state_and_exact_attachment_pair(self):
         source = (ROOT / "pages" / "9_Provider_Replies.py").read_text(encoding="utf-8")
+        self.assertIn('getattr(provider_replies, "MODULE_VERSION", 0) < 5', source)
         self.assertIn("browser_evidence_attachment_paths", source)
         self.assertIn("st.session_state[browser_evidence_key] = dom_capture", source)
-        self.assertIn('st.session_state.pop(f"{key}_urlscan_result", None)', source)
+        self.assertNotIn("urlscan", source.lower())
         self.assertIn("attachments = browser_attachments or", source)
         self.assertIn("has_valid_screenshot = bool(browser_attachments or has_legacy_screenshot)", source)
         self.assertIn('"Chụp URL nguồn + URL đích từ DOM"', source)

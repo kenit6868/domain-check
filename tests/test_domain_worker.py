@@ -3,7 +3,7 @@ import os
 import tempfile
 import threading
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -46,24 +46,25 @@ class DomainWorkerTests(unittest.TestCase):
         self.assertIn("Security Team", custom_body)
         self.assertIn("abuse@example.org", custom_body)
 
-    def test_old_draft_placeholder_is_removed_when_urlscan_evidence_exists(self):
-        with tempfile.TemporaryDirectory() as draft_dir:
-            path = os.path.join(draft_dir, "target.example_registrar_report.txt")
-            screenshot = "https://urlscan.io/screenshots/scan-id.png"
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(
-                    "To: abuse@example.org\nSubject: Report\n\n"
-                    "Screenshots: [ĐÍNH KÈM ẢNH CHỤP MÀN HÌNH — bắt buộc có thanh địa chỉ trình duyệt]\n"
-                    "(Ảnh chụp phải hiển thị rõ URL \"https://target.example/\" trên thanh địa chỉ của trình duyệt)\n"
-                    f"\n--- Evidence: URLScan.io Analysis ---\nScreenshot: {screenshot}\n"
-                )
-            domain_worker.pt.append_urlscan_evidence_to_drafts(
-                [path], {"status": "done", "screenshot_url": screenshot, "result_url": "https://urlscan.io/result/id/"}
-            )
-            parsed = domain_worker.pt.parse_draft_email(path)
-            self.assertNotIn("ĐÍNH KÈM", parsed["body"])
-            self.assertNotIn("Ảnh chụp phải hiển thị", parsed["body"])
-            self.assertIn(f"Screenshot: {screenshot}", parsed["body"])
+    def test_external_body_removes_retired_scan_evidence(self):
+        body = (
+            "To: abuse@example.org\nSubject: Report\n\n"
+            "Reported URL: https://target.example/\n"
+            "--- Evidence: URLScan.io Analysis ---\n"
+            "Verdict: NOT flagged\n"
+            "Screenshot: https://urlscan.io/screenshots/scan-id.png\n"
+            "--- End URLScan Evidence ---\n"
+            "--- Evidence: URLScan Analysis ---\n"
+            "Marker: stale-scan\n"
+            "--- End of URLScan evidence ---\n"
+            "Regards,\nByc\nbyc@example.org"
+        )
+        rendered = domain_worker.pt.prepare_external_email_body(body)
+        self.assertNotIn("URLScan", rendered)
+        self.assertNotIn("urlscan.io", rendered.lower())
+        self.assertNotIn("NOT flagged", rendered)
+        self.assertNotIn("stale-scan", rendered)
+        self.assertIn("Reported URL: https://target.example/", rendered)
 
     def test_cloaking_evidence_is_refreshed_without_duplicate_blocks(self):
         with tempfile.TemporaryDirectory() as draft_dir:
@@ -99,16 +100,6 @@ class DomainWorkerTests(unittest.TestCase):
         self.assertNotIn("ĐÍNH KÈM", rendered)
         self.assertNotIn("Ảnh chụp", rendered)
         self.assertNotIn("Screenshot", rendered)
-
-    def test_urlscan_404_placeholder_is_not_treated_as_screenshot(self):
-        placeholder = Mock(status_code=404, headers={"content-type": "image/png"})
-        placeholder.close = Mock()
-        screenshot = Mock(status_code=200, headers={"content-type": "image/png"})
-        screenshot.close = Mock()
-        with patch.object(domain_worker.pt.requests, "get", return_value=placeholder):
-            self.assertFalse(domain_worker.pt._urlscan_screenshot_available("https://urlscan.io/screenshots/x.png"))
-        with patch.object(domain_worker.pt.requests, "get", return_value=screenshot):
-            self.assertTrue(domain_worker.pt._urlscan_screenshot_available("https://urlscan.io/screenshots/x.png"))
 
     def test_precheck_only_resolves_recipients_without_full_pipeline(self):
         with tempfile.TemporaryDirectory() as job_dir:

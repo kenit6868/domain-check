@@ -48,9 +48,9 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   nội dung.
 - Provider Replies dùng Browser Evidence chung làm lựa chọn ưu tiên và giữ
   evidence set theo mail trong session state. Chỉ attachment PNG + manifest còn
-  đúng hash mới được coi là browser evidence hợp lệ; upload/URLScan legacy có thể
-  tồn tại làm fallback trong giai đoạn chuyển đổi nhưng không được trộn với
-  manifest của capture khác. Capture tự động phải ưu tiên đúng hai ảnh nguồn/đích
+  đúng hash mới được coi là browser evidence hợp lệ; upload thủ công là fallback
+  duy nhất khi capture tự động không tạo được artifact. Capture tự động phải ưu
+  tiên đúng hai ảnh nguồn/đích
   từ DOM destination rồi mới fallback một ảnh nguồn thụ động; UI hiển thị cả hai
   thumbnail và gửi toàn bộ ảnh + manifest. Narrative phải nói URL đích được mở
   trực tiếp, không tự nhận là đã click control.
@@ -58,8 +58,8 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   một manifest
   hợp lệ; cùng artifact đã preview phải đi qua cả gửi đơn và gửi tất cả. Gate
   trước SMTP chặn thiếu Subject/recipient/full Reported URL, placeholder,
-  `NOT flagged` và attachment không tồn tại. URLScan có thể còn hiển thị nội bộ
-  trong giai đoạn chuyển đổi nhưng không được chèn vào email.
+  evidence scan legacy và attachment không tồn tại. Phiên bản hiện tại không
+  submit, hiển thị hoặc đính kèm dịch vụ scan bên ngoài.
 - Check Domain có `Passive DOM` mặc định và `Mở URL từ DOM` opt-in. Chế độ DOM
   chụp trang nguồn, mở URL Register/Login trong tab mới cùng browser context và
   chụp trang đích; preview URL nguồn, DOM href, URL cuối cùng cùng redirect chain.
@@ -86,7 +86,7 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Nút gửi được phép chạy khi worker còn prechecking/running/waiting vì case đã
   tách khỏi `ready`; claim theo URL và lock preflight phải ngăn gửi trùng/ghi đè.
   Không trộn luồng này với ảnh đối chiếu cloaking 2–4 ảnh.
-- Nội dung web form phải giữ full URL/path, không chèn URLScan/screenshot URLScan
+- Nội dung web form phải giữ full URL/path, không chèn kết quả scan bên thứ ba
   và không khẳng định hành vi thu thập OTP/payment nếu không có bằng chứng quan
   sát tương ứng. Ưu tiên mô tả suspected phishing/impersonation và yêu cầu provider
   điều tra, xác nhận rồi áp dụng chính sách.

@@ -29,8 +29,7 @@ class CheckDomainBrowserEvidenceTests(unittest.TestCase):
         }, target_url="https://source.test/path")
         self.assertTrue(any("Subject" in error for error in errors))
         self.assertTrue(any("full Reported URL" in error for error in errors))
-        self.assertTrue(any("NOT flagged" in error for error in errors))
-        self.assertTrue(any("URLScan" in error and "nội bộ" in error for error in errors))
+        self.assertTrue(any("dịch vụ scan đã ngừng hỗ trợ" in error for error in errors))
         self.assertTrue(any("placeholder" in error for error in errors))
 
     def test_quality_gate_accepts_one_to_three_images_with_valid_manifest(self):
@@ -146,11 +145,11 @@ class CheckDomainBrowserEvidenceTests(unittest.TestCase):
         self.assertIn("Ảnh bằng chứng thủ công (1–3 ảnh)", source)
         self.assertGreaterEqual(source.count("require_browser_evidence=True"), 2)
         self.assertIn("attachments=browser_attachments", source)
-        self.assertNotIn("append_urlscan_evidence_to_drafts(result.get", source)
+        self.assertNotIn("urlscan_submit", source.lower())
+        self.assertNotIn("urlscan_api_key", source.lower())
         self.assertIn("attachments=attachments", email_ui)
-        phase_comment = toolkit.index("# Phase 3: URLScan")
-        return_block = toolkit.index('return {\n        "domain": domain', phase_comment)
-        self.assertNotIn("append_urlscan_evidence_to_drafts", toolkit[phase_comment:return_block])
+        self.assertNotIn("urlscan_submit_and_wait", toolkit)
+        self.assertNotIn('"urlscan":', toolkit)
 
     def test_check_domain_verified_mode_captures_and_renders_preview(self):
         target = "https://source.example/path"
@@ -222,7 +221,7 @@ class CheckDomainBrowserEvidenceTests(unittest.TestCase):
                 "virustotal": {}, "safebrowsing": {}, "ca_note": None,
                 "http_check": {}, "cloaking": {"target_url": target, "verdict": "NO_SIGNAL"},
                 "domain_age_days": None, "mx_records": {"records": [], "providers": []},
-                "urlscan": {}, "reputation": {"verdict": "unknown", "label": "Unknown", "reasons": []},
+                "reputation": {"verdict": "unknown", "label": "Unknown", "reasons": []},
                 "drafts": [draft_path], "drafts_error": "", "log_error": "",
                 "virustotal_submit": None, "registry_contact": {"source": "not_found"},
                 "registrar_abuse_email_source": None, "registrar_abuse_email_used": None,
