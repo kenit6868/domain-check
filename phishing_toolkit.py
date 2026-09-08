@@ -552,7 +552,7 @@ WEB_FORM_REGISTRARS = {
     "opensrs":              "https://www.tucowsdomains.com/report-abuse",
     "namesilo":             "https://www.namesilo.com/report_abuse.php",
     "porkbun":              "https://www.porkbun.com/abuse",
-    "namecheap":            "https://support.namecheap.com/index.php?/Tickets/Submit",  # tạm dùng web form, không gửi email
+#     "namecheap":            "https://support.namecheap.com/index.php?/Tickets/Submit",  # tạm dùng web form, không gửi email
     "sav.com":              "https://abuse.sav.com",
     "key-systems":          "https://abuse.cleandns.space",
     "instra":               "https://abuse.cleandns.space",
