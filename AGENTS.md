@@ -19,6 +19,9 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
   thread và xử lý evidence.
 - `mail_statistics.py`, `pages/11_Mail_Statistics.py`: đếm Inbox/Sent/Junk chỉ đọc
   theo ngày địa phương từ IMAP `INTERNALDATE` và trang thống kê theo tài khoản.
+- `report_statistics.py`: phân tích hiệu quả report theo đúng account và khoảng
+  ngày, chỉ đọc `sent_log.csv` cùng cache Provider Replies để nối delivery → reply
+  → outcome; không mở IMAP, không gửi mail và không lưu body/credential.
 - `link_status.py`, `domain_utils.py`: tiện ích kiểm tra link/domain.
 - `cloaking_detector.py`, `cloaking_ui.py`: detector HTTP đa profile, xác minh
   Playwright thụ động, manifest/ảnh bằng chứng và UI dùng chung.
@@ -161,6 +164,13 @@ Không tự khởi động Streamlit nếu người dùng chưa yêu cầu. Buil
 - Draft/email gửi nhà cung cấp phải dùng tiếng Anh; formatter external không
   được lấy nguyên label/detail tiếng Việt từ UI. Chỉ dữ liệu chứng cứ nguyên gốc
   như title hoặc matched keyword được phép giữ ngôn ngữ của website.
+- Thống kê hiệu quả report phải chọn đúng một account và khoảng ngày. Job/cache
+  Inbox/Sent/Junk chỉ đọc mailbox đang chọn; `report_statistics.py` chỉ đọc
+  `sent_log.csv` và cache Provider Replies, không mở IMAP/gửi mail. Delivery mới
+  ghi metadata không bí mật (account, Message-ID, recipient, kênh, draft/subject,
+  evidence source/count), không ghi body/credential. Reply chỉ nối cùng account
+  theo Message-ID/ticket/domain/provider; record thiếu account bị loại. Evidence
+  legacy thiếu metadata hiển thị `unknown`, không suy đoán.
 - Khi làm Streamlit, phải đọc `.agents/skills/developing-with-streamlit/SKILL.md`.
   Không thêm `streamlit.components.v1` mới; ưu tiên native widgets/component v2.
 - Khi làm nghiệp vụ takedown, dùng skill
@@ -218,6 +228,24 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-09-08 — Bổ sung thống kê hiệu quả report theo mailbox: mọi luồng gửi
+  ghi metadata delivery không bí mật vào `data/sent_log.csv` (account,
+  Message-ID, recipient, kênh, draft/subject, evidence source/count); Provider
+  Replies follow-up ghi cùng ledger và giữ source message ID. Page **Thống kê
+  email** bắt buộc chọn một tài khoản, job/cache Inbox/Sent/Junk được lọc theo
+  account và có thêm khoảng ngày phân tích report, bảng evidence tự động/thủ
+  công, provider/kênh/subject/draft, outcome và Sent Mail → Provider Replies.
+  Cache cùng ngày được merge theo account nên check mail B không xóa kết quả mail A.
+  `report_statistics.py` chỉ đọc local artifacts, loại reply thiếu account và
+  giữ evidence legacy là `unknown`; không mở IMAP/gửi mail trong bước phân tích.
+  File chính: `report_statistics.py`, `phishing_toolkit.py`,
+  `provider_replies.py`, `mail_statistics.py`, `email_send_ui.py`,
+  `domain_worker.py`, `cloaking_review_sender.py`,
+  `pages/9_Provider_Replies.py`, `pages/11_Mail_Statistics.py`, `PhishingTool.spec`, test analytics
+  và AppTest; đã kiểm tra: focused/AppTest, 248/248 full unittest, compileall,
+  pip check và diff check; tài liệu: `README.md`,
+  `03_Technical_Guide.md`, file này và skill dự án; lưu ý: chỉ mock IMAP/SMTP.
 
 - 2026-09-08 — Phase 7.2 loại bỏ hoàn toàn tích hợp URLScan: xóa API
   submit/poll, khóa cấu hình trong `config.example.ini`, field/result khỏi
@@ -593,7 +621,7 @@ vào phần này.
 
 Nhóm `link_status` đã thống nhất Cloudflare warning/HTTP 403 là `BLOCKED`, không
 phải `LIVE` hay `DIE`; mock response không iterable được xử lý an toàn. Toàn bộ
-test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 235 test.
+test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 248 test.
 Detector cloaking có test thuần cho scoring/profile/path/vantage, fake browser
 cho Playwright và mock attachment worker; không dùng URL nghi ngờ hay SMTP thật
 trong test.

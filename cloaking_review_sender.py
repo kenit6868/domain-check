@@ -592,15 +592,27 @@ def send_prepared_review(preparation: dict, cfg: dict) -> dict:
                 attempted_at=attempted_at,
             )
             try:
+                evidence_meta = pt.evidence_log_metadata(
+                    attachments,
+                    source_hint=("manual_upload" if decision == CONFIRMED_CLOAKING and
+                                 (_cloaking_result(item).get("operator_evidence") or {}) else ""),
+                )
                 pt.log_sent({
-                    "timestamp": _now(),
+                    "timestamp": result.get("sent_at") or _now(),
                     "domain": preparation.get("domain") or item.get("domain"),
+                    "target_url": preparation.get("target_url") or item.get("target_url") or "",
                     "draft_file": filename,
                     "to": recipient,
                     "subject": delivery.get("subject") or "",
                     "account": row["account"],
                     "success": ok,
                     "error": row["error"],
+                    "message_id": result.get("message_id") or "",
+                    "delivery_kind": "report",
+                    "send_mode": "cloaking_review",
+                    "report_channel": pt.report_channel_from_draft(filename, recipient),
+                    "cloaking_disposition": decision,
+                    **evidence_meta,
                 })
             except Exception as exc:  # Sending success must survive a log failure.
                 log_errors.append(str(exc))

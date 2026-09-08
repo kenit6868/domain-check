@@ -21,7 +21,7 @@ _KNOWN_SENT_FOLDERS = ("Sent", "Sent Items", "Sent Messages", "INBOX.Sent")
 _KNOWN_JUNK_FOLDERS = ("Junk", "Spam", "Junk Email", "INBOX.Junk", "INBOX.Spam", "[Gmail]/Spam")
 CACHE_PATH = _runtime_path("mail_statistics_cache.json")
 CACHE_VERSION = 1
-MODULE_VERSION = 6
+MODULE_VERSION = 7
 JOB_DIR = _runtime_path("mail_statistics_jobs")
 ACTIVE_JOB_STATES = {"queued", "running"}
 
@@ -72,8 +72,8 @@ def launch_statistics_job(job_path: str):
         raise
 
 
-def latest_statistics_job(selected_day: date) -> dict | None:
-    """Return the newest persisted status for one local day."""
+def latest_statistics_job(selected_day: date, account_name: str | None = None) -> dict | None:
+    """Return the newest persisted status for one local day/account."""
     if not os.path.isdir(JOB_DIR):
         return None
     candidates = []
@@ -83,6 +83,11 @@ def latest_statistics_job(selected_day: date) -> dict | None:
         try:
             with open(job_path, encoding="utf-8") as handle: job = json.load(handle)
             if job.get("selected_day") != selected_day.isoformat(): continue
+            requested_accounts = {
+                str(value or "").strip().lower() for value in (job.get("accounts") or [])
+            }
+            if account_name and str(account_name).strip().lower() not in requested_accounts:
+                continue
             with open(status_path, encoding="utf-8") as handle: status = json.load(handle)
             candidates.append((os.path.getmtime(status_path), {**status, "job_id": job.get("job_id", name)}))
         except (OSError, ValueError, TypeError):
@@ -101,8 +106,8 @@ def _read_statistics_cache():
         return {"version": CACHE_VERSION, "days": {}}
 
 
-def load_cached_statistics(selected_day: date) -> list[dict]:
-    """Load one day's sanitized result rows; invalid cache entries are ignored."""
+def load_cached_statistics(selected_day: date, account_name: str | None = None) -> list[dict]:
+    """Load one day's sanitized rows, optionally restricted to one account."""
     record = _read_statistics_cache()["days"].get(selected_day.isoformat(), {})
     rows = record.get("results") if isinstance(record, dict) else None
     if not isinstance(rows, list):
@@ -122,11 +127,18 @@ def load_cached_statistics(selected_day: date) -> list[dict]:
             })
         except (TypeError, ValueError):
             continue
+    if account_name:
+        selected = str(account_name).strip().lower()
+        valid = [row for row in valid if row["account"].strip().lower() == selected]
     return valid
 
 
 def save_cached_statistics(selected_day: date, results: list[dict]) -> None:
-    """Atomically cache one day's non-secret result rows."""
+    """Atomically merge one day's non-secret result rows by account.
+
+    The UI can check one mailbox at a time; merging keeps an earlier account's
+    same-day result available when a different mailbox is checked later.
+    """
     data = _read_statistics_cache()
     sanitized = [{
         "account": str(row.get("account") or ""),
@@ -136,9 +148,22 @@ def save_cached_statistics(selected_day: date, results: list[dict]) -> None:
         "status": str(row.get("status") or "error"),
         "error": str(row.get("error") or ""),
     } for row in results]
-    data["days"][selected_day.isoformat()] = {
+    day_key = selected_day.isoformat()
+    previous = data["days"].get(day_key, {})
+    previous_rows = previous.get("results") if isinstance(previous, dict) else None
+    merged = {}
+    for row in previous_rows or []:
+        if isinstance(row, dict):
+            identity = str(row.get("account") or "").strip().lower()
+            if identity:
+                merged[identity] = row
+    for row in sanitized:
+        identity = row["account"].strip().lower()
+        if identity:
+            merged[identity] = row
+    data["days"][day_key] = {
         "updated_at": datetime.now().astimezone().isoformat(),
-        "results": sanitized,
+        "results": list(merged.values()),
     }
     os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
     temp_path = f"{CACHE_PATH}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
@@ -350,8 +375,13 @@ def run_statistics_job(job_path: str) -> None:
         _atomic_json(status_path, {"state": "running", "error": "", "started_at": datetime.now().astimezone().isoformat()})
         from phishing_toolkit import load_config
         configured = list(load_config().get("smtp_accounts", []))
-        requested = set(job.get("accounts") or [])
-        accounts = [account for account in configured if str(account.get("username") or "") in requested]
+        requested = {
+            str(value or "").strip().lower() for value in (job.get("accounts") or [])
+        }
+        accounts = [
+            account for account in configured
+            if str(account.get("username") or "").strip().lower() in requested
+        ]
         selected_day = date.fromisoformat(job["selected_day"])
         results = daily_mail_statistics(accounts, selected_day, datetime.now().astimezone().tzinfo)
         save_cached_statistics(selected_day, results)

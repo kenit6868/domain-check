@@ -2584,6 +2584,72 @@ def _imap_save_sent(account: dict, raw_msg: bytes) -> str | None:
         return str(e)
 
 
+def evidence_log_metadata(attachments: list[str] | None = None, source_hint: str = "") -> dict:
+    """Return non-secret evidence metadata for the report effectiveness ledger.
+
+    The helper deliberately records only counts/type, never image bytes or
+    manifest contents.  Legacy sends without these fields remain ``unknown``
+    in analytics instead of being guessed as having or lacking screenshots.
+    """
+    paths = [os.path.abspath(str(path)) for path in (attachments or []) if path]
+    image_count = sum(
+        os.path.splitext(path)[1].lower() in {".png", ".jpg", ".jpeg", ".webp"}
+        for path in paths
+    )
+    manifest_paths = [path for path in paths if os.path.splitext(path)[1].lower() == ".json"]
+    sources = set()
+    hint = str(source_hint or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if hint in {"automatic", "browser", "browser_automatic", "auto"}:
+        sources.add("automatic")
+    elif hint in {"manual", "manual_upload", "operator", "upload"}:
+        sources.add("manual")
+    for manifest_path in manifest_paths:
+        try:
+            with open(manifest_path, encoding="utf-8-sig") as handle:
+                manifest = json.load(handle)
+            evidence_type = str(
+                manifest.get("evidence_type") or manifest.get("capture_strategy") or ""
+            ).strip().lower().replace("-", "_").replace(" ", "_")
+            if evidence_type in {"manual", "manual_upload", "operator", "operator_upload"}:
+                sources.add("manual")
+            elif evidence_type:
+                sources.add("automatic")
+        except (OSError, UnicodeError, ValueError, TypeError, AttributeError):
+            continue
+    if not paths:
+        source = "none"
+    elif len(sources) > 1:
+        source = "mixed"
+    elif sources:
+        source = next(iter(sources))
+    else:
+        source = "unknown"
+    return {
+        "evidence_source": source,
+        "evidence_images": image_count,
+        "evidence_manifest": bool(manifest_paths),
+        "attachment_count": len(paths),
+    }
+
+
+def report_channel_from_draft(filename: str, recipient: str = "") -> str:
+    """Classify an outbound draft for account-scoped effectiveness reports."""
+    text = f"{filename or ''} {recipient or ''}".lower()
+    if "vncert" in text:
+        return "vncert"
+    if "hosting" in text or "isp" in text or "origin_ip" in text:
+        return "hosting"
+    if "registry" in text:
+        return "registry"
+    if "registrar" in text:
+        return "registrar"
+    if "cloudflare" in text or "cdn" in text:
+        return "cdn"
+    if "chongluadao" in text or "coccoc" in text or "community" in text:
+        return "community"
+    return "other"
+
+
 def _send_via_account(
     account: dict, proxy_str: str | None, to: str, subject: str, body: str,
     attachments: list[str] | None = None,
@@ -2612,9 +2678,11 @@ def _send_via_account(
         msg["From"] = username
         msg["To"] = to
         msg["Date"] = formatdate(localtime=False, usegmt=True)
-        msg["Message-ID"] = make_msgid(
+        message_id = make_msgid(
             domain=username.split("@")[-1] if "@" in username else None,
         )
+        msg["Message-ID"] = message_id
+        sent_at = datetime.now(timezone.utc).isoformat()
         msg.set_content(body, charset="utf-8")
 
         for attachment_path in attachments or []:
@@ -2670,6 +2738,8 @@ def _send_via_account(
                 "stage": stage,
                 "attempts": attempts,
                 "transport": transport,
+                "message_id": message_id,
+                "sent_at": sent_at,
             }
 
         # Lưu copy vào Sent folder qua IMAP (không làm gì với Gmail — tự lưu)
@@ -2681,6 +2751,8 @@ def _send_via_account(
             "proxy": proxy_label,
             "success": True,
             "error": None,
+            "message_id": message_id,
+            "sent_at": sent_at,
             "imap_note": imap_note,
             "stage": "sent",
             "attempts": attempts,
@@ -2695,6 +2767,8 @@ def _send_via_account(
             "stage": stage,
             "attempts": attempts,
             "transport": locals().get("transport", "unknown"),
+            "message_id": locals().get("message_id", ""),
+            "sent_at": locals().get("sent_at", ""),
         }
 
 
@@ -3880,8 +3954,9 @@ def cmd_send(args):
         status = "✓ OK" if r["success"] else f"✗ LỖI: {r['error']}"
         print(f"  {r['account']}  [{r['proxy']}]  →  {status}")
         try:
+            evidence_meta = evidence_log_metadata()
             log_sent({
-                "timestamp": ts,
+                "timestamp": r.get("sent_at") or ts,
                 "domain": domain_from_draft_filename(os.path.basename(path)),
                 "draft_file": os.path.basename(path),
                 "to": parsed["to"],
@@ -3889,6 +3964,11 @@ def cmd_send(args):
                 "account": r.get("account") or "",
                 "success": r["success"],
                 "error": r.get("error") or "",
+                "message_id": r.get("message_id") or "",
+                "delivery_kind": "report",
+                "send_mode": "cli",
+                "report_channel": report_channel_from_draft(os.path.basename(path), parsed["to"]),
+                **evidence_meta,
             })
         except Exception as e:
             print(f"  Cảnh báo: ghi {SENT_LOG_PATH} lỗi: {e}")

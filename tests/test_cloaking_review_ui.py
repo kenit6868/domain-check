@@ -54,6 +54,10 @@ class CloakingReviewUiTests(unittest.TestCase):
         self.assertNotIn("import domain_worker", source)
         self.assertIn('("cloaking_review_sender.py", ".")', build_spec)
 
+    def test_report_statistics_is_bundled_for_frozen_app(self):
+        build_spec = (ROOT / "PhishingTool.spec").read_text(encoding="utf-8")
+        self.assertIn('("report_statistics.py", ".")', build_spec)
+
     def test_today_table_survives_stale_cached_queue_module(self):
         with (
             tempfile.TemporaryDirectory() as review_dir,

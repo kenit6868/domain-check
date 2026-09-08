@@ -480,7 +480,41 @@ with right:
                 attachments=attachments, proxy_str=proxy_str,
             )
         if result["success"]:
-            record_reply_sent(mail, subject, mail.reply_to)
+            record_reply_sent(
+                mail,
+                subject,
+                mail.reply_to,
+                message_id=result.get("message_id", ""),
+                target_url=reported_url,
+                attachments=attachments,
+            )
+            try:
+                evidence_meta = pt.evidence_log_metadata(
+                    attachments,
+                    source_hint="manual_upload" if not browser_capture else "",
+                )
+                pt.log_sent({
+                    "timestamp": result.get("sent_at") or datetime.now(timezone.utc).isoformat(),
+                    "domain": pt.normalize_domain(reported_url or mail.domain),
+                    "target_url": reported_url,
+                    "draft_file": "provider_reply",
+                    "to": mail.reply_to,
+                    "subject": subject,
+                    "account": account_name,
+                    "success": True,
+                    "error": "",
+                    "message_id": result.get("message_id") or "",
+                    "thread_message_id": result.get("in_reply_to") or mail.message_id,
+                    "ticket_ref": mail.ticket or "",
+                    "delivery_kind": "provider_reply",
+                    "send_mode": "provider_replies",
+                    "report_channel": "provider_reply",
+                    "provider_key": mail.provider,
+                    "provider_label": mail.provider_label,
+                    **evidence_meta,
+                })
+            except Exception as log_exc:
+                st.warning(f"Đã gửi nhưng không ghi được thống kê delivery: {log_exc}")
             if result.get("sent_copy_saved"):
                 st.session_state["provider_reply_sent_notice"] = "sent-and-saved"
             else:

@@ -105,6 +105,15 @@ Các trang (xem sidebar bên trái):
   Sau mỗi lần **Kiểm tra**, kết quả được lưu theo ngày vào
   `data/mail_statistics_cache.json` và tự hiện lại khi mở trang; nút **Xóa cache
   ngày đã chọn** chỉ xóa ngày đang chọn. Cache không chứa password hay body thư.
+  Chọn **Tài khoản cần thống kê** để chỉ xem Inbox/Sent/Junk và hiệu quả report
+  của đúng mailbox đó. Phần **Hiệu quả report** chỉ đọc `data/sent_log.csv` cùng
+  cache Provider Replies (không mở IMAP thêm), lọc theo khoảng ngày riêng và
+  đối chiếu từng report với reply bằng Message-ID/ticket/domain/provider; hiển
+  thị evidence tự động/thủ công, registrar/registry/hosting, subject/draft,
+  outcome và bảng Sent Mail → Provider Replies → kết quả xử lý. Delivery cũ
+  thiếu metadata evidence được giữ là **chưa phân loại**, không suy đoán.
+  Cache số lượng trong cùng một ngày được merge theo account, nên kiểm tra mail
+  B sau mail A không làm mất số liệu mail A.
 
 Trong khu vực **Browser Blocking** của **Check Domain** và **Quick Report** có
 thêm nút mở form báo cáo của **Chống Lừa Đảo** và **Cốc Cốc Safe**. Các nút chỉ
@@ -129,6 +138,7 @@ cloaking_ui.py            - Khối hiển thị kết quả cloaking dùng chung
 cloaking_review_queue.py  - Hàng đợi review cloaking bền vững giữa các worker job
 cloaking_review_sender.py - Chuẩn bị preview và gửi trực tiếp case Cloaking Review
 domain_worker.py          - Precheck email/cloaking và worker batch cho domain thường
+report_statistics.py      - Phân tích hiệu quả report theo account/khoảng ngày từ metadata local
 domain_check.py           - Bản đơn giản chỉ check SSL + WHOIS (không cần API key)
 streamlit_app.py           - Trang chủ giao diện web (streamlit run streamlit_app.py)
 pages/                      - Các trang còn lại của giao diện web (multipage app)
@@ -292,7 +302,8 @@ Luồng sử dụng hiện tại:
 
 Worker chạy bằng process riêng nên vẫn tiếp tục nếu đóng hoặc refresh tab trình
 duyệt. Trang này hiển thị tiến độ, kết quả gửi của từng domain và có nút dừng hẳn
-process worker. Mỗi email thành công được ghi ngay vào `sent_log.csv`; job và danh
+process worker. Mỗi email thành công được ghi ngay vào `sent_log.csv` kèm metadata
+account, Message-ID, recipient, kênh, draft/subject và evidence source/count; job và danh
 sách mới tự bỏ qua delivery đã gửi thành công trong ngày hiện tại.
 Draft VNCERT mặc định không tự gửi; chỉ bật nếu toàn bộ danh sách thực sự
 nhắm tới nạn nhân tại Việt Nam. Job Domain Worker thường nằm trong

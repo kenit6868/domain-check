@@ -476,6 +476,7 @@ def _send_domain_drafts(
     summary = {"drafts_total": len(drafts), "drafts_sendable": 0, "sent_ok": 0, "sent_failed": 0, "already_sent": 0, "sent_to": []}
     successful_accounts = set()
     sent_deliveries = sent_deliveries if sent_deliveries is not None else set()
+    evidence_meta = pt.evidence_log_metadata(attachments)
     items = prepared_drafts if prepared_drafts is not None else [{"path": path} for path in drafts]
     for item in items:
         if stop_path and _should_stop(stop_path):
@@ -568,14 +569,20 @@ def _send_domain_drafts(
                 "error": result.get("error") or "",
             })
             row = {
-                "timestamp": _now(),
+                "timestamp": result.get("sent_at") or _now(),
                 "domain": domain,
+                "target_url": target_url,
                 "draft_file": filename,
                 "to": parsed["to"],
                 "subject": parsed["subject"],
                 "account": delivery_account,
                 "success": ok,
                 "error": result.get("error") or "",
+                "message_id": result.get("message_id") or "",
+                "delivery_kind": "report",
+                "send_mode": "domain_worker",
+                "report_channel": pt.report_channel_from_draft(filename, parsed["to"]),
+                **evidence_meta,
             }
             try:
                 pt.log_sent(row)
@@ -1649,9 +1656,14 @@ def _send_manual_preview_deliveries(
         summary["sent_to"].append(row)
         try:
             pt.log_sent({
-                "timestamp": _now(), "domain": domain, "draft_file": filename,
+                "timestamp": result.get("sent_at") or _now(), "domain": domain,
+                "target_url": target_url, "draft_file": filename,
                 "to": recipient, "subject": delivery.get("subject") or "",
                 "account": delivery_account, "success": ok, "error": row["error"],
+                "message_id": result.get("message_id") or "",
+                "delivery_kind": "report", "send_mode": "domain_evidence_review",
+                "report_channel": pt.report_channel_from_draft(filename, recipient),
+                **pt.evidence_log_metadata(attachments, source_hint="manual_upload"),
             })
         except Exception as exc:
             _append_event(events_path, {

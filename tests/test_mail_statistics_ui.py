@@ -7,6 +7,7 @@ from streamlit.testing.v1 import AppTest
 
 import mail_statistics
 import phishing_toolkit as pt
+import report_statistics
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,6 +85,55 @@ class MailStatisticsUiTests(unittest.TestCase):
         self.assertEqual(app.dataframe[0].value.iloc[1]["Tổng nhận + rác"], "—")
         self.assertEqual(app.dataframe[0].value.iloc[1]["Trạng thái"], "Không có trong IMAP")
         self.assertEqual(list(app.error), [])
+
+    def test_check_job_uses_only_selected_account(self):
+        accounts = [
+            {"imap_host": "mail.example.test", "username": "a@example.test", "password": "secret"},
+            {"imap_host": "mail.example.test", "username": "b@example.test", "password": "secret"},
+        ]
+        with (
+            patch.object(pt, "load_config", return_value={"smtp_accounts": accounts}),
+            patch.object(mail_statistics, "latest_statistics_job", return_value=None),
+            patch.object(mail_statistics, "load_cached_statistics", return_value=[]),
+            patch.object(mail_statistics, "create_statistics_job", return_value="job.json") as creator,
+            patch.object(mail_statistics, "launch_statistics_job") as launcher,
+        ):
+            app = AppTest.from_file(str(ROOT / "pages" / "11_Mail_Statistics.py"), default_timeout=10).run()
+            self.assertEqual(list(app.exception), [])
+            self.assertEqual(len(app.selectbox), 1)
+            app.selectbox[0].select("b@example.test").run()
+            self.assertEqual(list(app.exception), [])
+            app.button[0].click().run()
+        creator.assert_called_once_with(date.today(), [accounts[1]])
+        launcher.assert_called_once_with("job.json")
+
+    def test_report_analytics_receives_selected_account(self):
+        accounts = [
+            {"imap_host": "mail.example.test", "username": "a@example.test", "password": "secret"},
+            {"imap_host": "mail.example.test", "username": "b@example.test", "password": "secret"},
+        ]
+        cached = [{
+            "account": "b@example.test", "received": 1, "sent": 1, "junk": 0,
+            "status": "ok", "error": "",
+        }]
+        empty_analytics = {
+            "sent_total": 0, "sent_success": 0, "linked_reply_total": 0,
+            "resolved_total": 0, "response_rate": 0.0, "takedown_rate": 0.0,
+            "evidence": {"automatic": 0, "manual": 0, "mixed": 0, "none": 0, "unknown": 0},
+            "by_channel": [], "by_provider": [], "by_subject": [], "by_draft": [],
+            "outcomes": {}, "links": [], "warnings": [],
+        }
+        with (
+            patch.object(pt, "load_config", return_value={"smtp_accounts": accounts}),
+            patch.object(mail_statistics, "latest_statistics_job", return_value=None),
+            patch.object(mail_statistics, "load_cached_statistics", side_effect=[[], cached]),
+            patch.object(report_statistics, "build_account_report", return_value=empty_analytics) as builder,
+        ):
+            app = AppTest.from_file(str(ROOT / "pages" / "11_Mail_Statistics.py"), default_timeout=10).run()
+            app.selectbox[0].select("b@example.test").run()
+        self.assertEqual(list(app.exception), [])
+        builder.assert_called_once()
+        self.assertEqual(builder.call_args.args[0], "b@example.test")
 
     def test_cached_day_renders_without_imap_and_clear_button_removes_it(self):
         account = {

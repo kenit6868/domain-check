@@ -89,6 +89,43 @@ class MailStatisticsTests(unittest.TestCase):
                     raw = json.load(handle)
             self.assertNotIn("password", str(raw).lower())
 
+    def test_cached_results_can_be_scoped_to_one_account(self):
+        selected_day = date(2026, 9, 1)
+        rows = [
+            {"account": "a@example.test", "received": 7, "sent": 4, "junk": 1, "status": "ok", "error": ""},
+            {"account": "b@example.test", "received": 2, "sent": 9, "junk": 0, "status": "ok", "error": ""},
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            stats, "CACHE_PATH", os.path.join(temp_dir, "mail_statistics_cache.json")
+        ):
+            stats.save_cached_statistics(selected_day, rows)
+            scoped = stats.load_cached_statistics(selected_day, "B@EXAMPLE.TEST")
+        self.assertEqual([row["account"] for row in scoped], ["b@example.test"])
+
+    def test_account_check_merges_into_daily_cache_without_erasing_other_accounts(self):
+        selected_day = date(2026, 9, 1)
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            stats, "CACHE_PATH", os.path.join(temp_dir, "mail_statistics_cache.json")
+        ):
+            stats.save_cached_statistics(selected_day, [{
+                "account": "a@example.test", "received": 7, "sent": 4, "junk": 1,
+                "status": "ok", "error": "",
+            }])
+            stats.save_cached_statistics(selected_day, [{
+                "account": "b@example.test", "received": 2, "sent": 9, "junk": 0,
+                "status": "ok", "error": "",
+            }])
+            all_rows = stats.load_cached_statistics(selected_day)
+        self.assertEqual({row["account"] for row in all_rows}, {"a@example.test", "b@example.test"})
+
+    def test_latest_job_can_be_scoped_to_one_account(self):
+        selected_day = date(2026, 9, 1)
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(stats, "JOB_DIR", temp_dir):
+            job_path = stats.create_statistics_job(selected_day, [{"username": "a@example.test"}])
+            self.assertIsNotNone(stats.latest_statistics_job(selected_day, "A@EXAMPLE.TEST"))
+            self.assertIsNone(stats.latest_statistics_job(selected_day, "b@example.test"))
+            self.assertTrue(os.path.exists(job_path))
+
     def test_counts_exact_local_day_in_inbox_and_flagged_sent_folder(self):
         fake = FakeImap()
         account = {

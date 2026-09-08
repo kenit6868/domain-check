@@ -548,12 +548,26 @@ def load_reply_log():
         return {}
 
 
-def record_reply_sent(mail, subject, recipient):
-    """Persist a successful provider reply; credentials and body are not stored."""
+def record_reply_sent(
+    mail, subject, recipient, *, message_id="", target_url="", attachments=None,
+):
+    """Persist a successful provider reply; credentials and body are not stored.
+
+    Optional delivery metadata lets the effectiveness dashboard link the
+    provider follow-up to the original message without storing the reply body.
+    """
+    attachment_meta = list(attachments or []) if isinstance(attachments, (list, tuple)) else []
+    image_count = sum(
+        os.path.splitext(str(path))[1].lower() in {".png", ".jpg", ".jpeg", ".webp"}
+        for path in attachment_meta
+    )
     data = load_reply_log()
     record = {
         "account": mail.account,
         "uid": mail.uid,
+        # Keep the received provider message ID stable for the existing
+        # reply-log key/UI. The newly-created outgoing ID is stored separately
+        # so threading metadata does not overwrite the source identity.
         "message_id": mail.message_id,
         "provider": mail.provider_label,
         "domain": mail.domain,
@@ -561,6 +575,10 @@ def record_reply_sent(mail, subject, recipient):
         "subject": subject,
         "recipient": recipient,
         "sent_at": datetime.now(timezone.utc).isoformat(),
+        "sent_message_id": str(message_id or ""),
+        "in_reply_to": str(getattr(mail, "message_id", "") or ""),
+        "target_url": str(target_url or ""),
+        "evidence_images": image_count,
     }
     data[reply_log_key(mail)] = record
     os.makedirs(os.path.dirname(REPLY_LOG_PATH), exist_ok=True)
@@ -1105,7 +1123,9 @@ def send_threaded_reply(account, mail, subject, body, attachments=None, proxy_st
     if mail.channel != "email" or not mail.reply_to: return {"success": False, "error": "Không có Reply-To hợp lệ."}
     msg = EmailMessage(); msg["From"] = account["username"]; msg["To"] = mail.reply_to; msg["Subject"] = subject
     msg["Date"] = formatdate(localtime=False, usegmt=True)
-    msg["Message-ID"] = make_msgid(domain=account["username"].split("@")[-1] if "@" in account["username"] else None)
+    message_id = make_msgid(domain=account["username"].split("@")[-1] if "@" in account["username"] else None)
+    msg["Message-ID"] = message_id
+    sent_at = datetime.now(timezone.utc).isoformat()
     if mail.message_id: msg["In-Reply-To"] = mail.message_id; msg["References"] = mail.message_id
     msg.set_content(body)
     for path in attachments or []:
@@ -1138,6 +1158,11 @@ def send_threaded_reply(account, mail, subject, body, attachments=None, proxy_st
                 smtp.login(account["username"], account["password"]); smtp.send_message(msg)
 
         sent_copy_error = _append_sent_copy(account, msg.as_bytes())
-        return {"success": True, "error": "", "sent_at": datetime.now(timezone.utc).isoformat(),
+        return {"success": True, "error": "", "sent_at": sent_at, "message_id": message_id,
+                "in_reply_to": mail.message_id,
                 "sent_copy_saved": not bool(sent_copy_error), "sent_copy_error": sent_copy_error}
-    except Exception as exc: return {"success": False, "error": str(exc)}
+    except Exception as exc:
+        return {
+            "success": False, "error": str(exc), "message_id": message_id,
+            "in_reply_to": mail.message_id, "sent_at": sent_at,
+        }

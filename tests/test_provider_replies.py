@@ -439,6 +439,7 @@ Logs or other evidence of abuse: Original reporter text.
                 record = record_reply_sent(mail, "Re: Case NC-1234", "abuse@namecheap.com")
                 log = load_reply_log()
         self.assertEqual(log[reply_log_key(mail)]["recipient"], "abuse@namecheap.com")
+        self.assertEqual(record["message_id"], mail.message_id)
         self.assertEqual(record["ticket"], "NC-1234")
         self.assertNotIn("body", record)
 

@@ -173,6 +173,14 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
 - Mọi nội dung do tool soạn để gửi nhà cung cấp phải dùng tiếng Anh. Không tái
   sử dụng trực tiếp label/detail tiếng Việt của UI trong draft; dữ liệu quan sát
   nguyên gốc như page title hoặc matched keyword có thể giữ nguyên làm bằng chứng.
+- Thống kê hiệu quả report phải có phạm vi một account + khoảng ngày rõ ràng.
+  `pages/11_Mail_Statistics.py` chỉ tạo job/cache Inbox/Sent/Junk cho mailbox
+  đang chọn; `report_statistics.py` chỉ đọc `sent_log.csv` và Provider Replies
+  cache, không mở IMAP hay gửi mail. Delivery mới phải ghi metadata không bí mật
+  (account, Message-ID, recipient, kênh, draft/subject, evidence source/count),
+  không ghi body/credential. Reply chỉ được nối với report cùng account theo
+  Message-ID/ticket/domain/provider; record reply thiếu account bị loại. Evidence
+  legacy thiếu metadata phải hiển thị `unknown`, không suy đoán có/không có ảnh.
 
 ## Tài liệu và kiểm tra
 

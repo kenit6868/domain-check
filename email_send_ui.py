@@ -106,15 +106,22 @@ def render_send_all_ui(
                     })
                     # Ghi sent_log
                     try:
+                        evidence_meta = pt.evidence_log_metadata(attachments)
                         pt.log_sent({
-                            "timestamp": ts,
+                            "timestamp": r.get("sent_at") or ts,
                             "domain": pt.domain_from_draft_filename(filename),
+                            "target_url": target_url,
                             "draft_file": filename,
                             "to": parsed["to"],
                             "subject": parsed["subject"],
                             "account": r.get("account") or "",
                             "success": r["success"],
                             "error": r.get("error") or "",
+                            "message_id": r.get("message_id") or "",
+                            "delivery_kind": "report",
+                            "send_mode": "ui_bulk",
+                            "report_channel": pt.report_channel_from_draft(filename, parsed["to"]),
+                            **evidence_meta,
                         })
                     except Exception:
                         pass
@@ -236,15 +243,22 @@ def render_send_email_ui(
         ts = datetime.now(timezone.utc).isoformat()
         for r in results:
             try:
+                evidence_meta = pt.evidence_log_metadata(attachments)
                 pt.log_sent({
-                    "timestamp": ts,
+                    "timestamp": r.get("sent_at") or ts,
                     "domain": pt.domain_from_draft_filename(filename),
+                    "target_url": target_url,
                     "draft_file": filename,
                     "to": parsed["to"],
                     "subject": parsed["subject"],
                     "account": r.get("account") or "",
                     "success": r["success"],
                     "error": r.get("error") or "",
+                    "message_id": r.get("message_id") or "",
+                    "delivery_kind": "report",
+                    "send_mode": "ui_single" if not is_bulk else "ui_bulk",
+                    "report_channel": pt.report_channel_from_draft(filename, parsed["to"]),
+                    **evidence_meta,
                 })
             except Exception as e:
                 st.warning(f"Ghi sent_log.csv lỗi (không ảnh hưởng việc gửi): {e}")
@@ -297,6 +311,8 @@ def render_send_email_ui(
                         "success": True,
                         "error": "",
                         "ticket_ref": ticket_val,
+                        "delivery_kind": "ticket_update",
+                        "send_mode": "ui_ticket_update",
                     })
                     st.success(f"✅ Đã lưu ticket #{ticket_val}")
                 except Exception as e:

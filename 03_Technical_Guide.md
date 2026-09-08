@@ -440,6 +440,31 @@ theo ngày địa phương và tự nạp lại khi mở trang. Nút **Xóa cach
 không ảnh hưởng ngày khác. Cache chỉ có account/count/status/error, không có
 credential hoặc nội dung email.
 
+### Thống kê hiệu quả report theo account
+
+Trong cùng menu, người vận hành chọn một **Tài khoản cần thống kê**. Job
+Inbox/Sent/Junk chỉ được tạo cho account đó; bộ lọc cache và trạng thái job cũng
+được áp dụng theo account, vì vậy số liệu của mail A không trộn với mail B.
+
+Khối **Hiệu quả report** là phân tích cục bộ, không tự mở IMAP và không gửi
+email. Nó đọc `data/sent_log.csv` (các delivery mới có account, Message-ID,
+recipient, kênh, draft/subject và metadata evidence) và cache Provider Replies
+đã đồng bộ ở page **Phản hồi NCC**. Có thể chọn khoảng ngày report riêng. Mỗi
+report được nối với một reply theo thứ tự ưu tiên Message-ID/ticket, sau đó
+full domain và provider trong cùng khoảng thời gian; một reply chỉ được dùng
+một lần.
+
+UI hiển thị tổng report thành công/thất bại, ảnh Browser Evidence tự động,
+upload thủ công hoặc không có ảnh, hiệu quả theo registrar/registry/hosting/CDN,
+provider/recipient, Subject/draft, outcome (acknowledged, action required,
+delivery failed, resolved) và bảng đối chiếu Sent Mail → Provider Replies →
+kết quả xử lý. Delivery cũ không có metadata evidence được giữ ở nhóm
+**unknown**, không suy đoán. Reply cache thiếu account bị loại khỏi báo cáo để
+tránh gán nhầm sang mailbox đang chọn. Các nguồn đều chỉ lưu metadata, không
+ghi credential hoặc nội dung thư vào thống kê.
+Cache đếm mail của cùng một ngày được merge theo username account; chạy lại cho
+mail B không ghi đè kết quả mail A. Nút xóa cache vẫn xóa toàn bộ ngày đang chọn.
+
 Chạy script Python Playwright dưới đây để tự động hóa việc chụp ảnh toàn trang, trích xuất HTML nguồn, HAR log mạng và tính mã băm SHA256 để gửi báo cáo lạm dụng:
 
 ```python
