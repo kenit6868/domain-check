@@ -194,6 +194,14 @@ def _has_explicit_request(text, request_type):
 def classify_request(subject, body):
     subject_lower = (subject or "").lower()
     status_text = f"{subject}\n{provider_request_text(body)}".lower()
+    resolution_patterns = (
+        r"action has been taken", r"domain has been suspended", r"domain has been disabled",
+        r"(?:website|site) has been taken down", r"content has been removed",
+        r"case (?:is|has been) closed", r"finished analys(?:ing|is)",
+        r"completed our investigation", r"domain is no longer (?:active|accessible)",
+    )
+    if any(re.search(pattern, provider_request_text(body), re.I) for pattern in resolution_patterns):
+        return "resolved", LABELS["resolved"], "review"
     # Cloudflare's standard forwarding notice is a terminal acknowledgement:
     # the report has already been routed to the parties that can act on it.
     # The generic footer may still mention abusereply@cloudflare.com, but that
@@ -364,10 +372,10 @@ def parse_message(uid, account, raw_message):
                         "" if is_bounce else _ticket(f"{subject}\n{body}"), channel, risk)
 
 
-def fetch_provider_mail(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None, include_unrelated=False):
+def fetch_provider_mail(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None, include_unrelated=False, timeout=30):
     host = account.get("imap_host") or account.get("host")
     if not host or not account.get("username") or not account.get("password"): raise ValueError("Tài khoản thiếu cấu hình IMAP")
-    conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)))
+    conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)), timeout=timeout)
     try:
         conn.login(account["username"], account["password"]); status, _ = conn.select(account.get("imap_mailbox", "INBOX"), readonly=True)
         if status != "OK": raise RuntimeError("Không mở được INBOX")
@@ -418,7 +426,7 @@ def _read_cache_file():
         return {}
 
 
-def discover_junk_mailbox(account):
+def discover_junk_mailbox(account, timeout=30):
     """Find the account's Junk/Spam mailbox without changing message state."""
     configured = account.get("imap_junk_mailbox", "")
     if configured:
@@ -426,7 +434,7 @@ def discover_junk_mailbox(account):
     host = account.get("imap_host") or account.get("host")
     if not host or not account.get("username") or not account.get("password"):
         return ""
-    conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)))
+    conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)), timeout=timeout)
     try:
         conn.login(account["username"], account["password"])
         status, lines = conn.list()
@@ -446,10 +454,10 @@ def discover_junk_mailbox(account):
         except Exception: pass
 
 
-def fetch_provider_mail_all_folders(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None):
+def fetch_provider_mail_all_folders(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None, timeout=30):
     """Fetch relevant provider mail from Inbox and Junk, with per-folder counts."""
     inbox = account.get("imap_mailbox", "INBOX")
-    junk = discover_junk_mailbox(account)
+    junk = discover_junk_mailbox(account, timeout=timeout)
     folders = [("Inbox", inbox)]
     if junk and junk.lower() != inbox.lower():
         folders.append(("Thư rác", junk))
@@ -463,7 +471,7 @@ def fetch_provider_mail_all_folders(account, limit=None, unread_only=False, date
         try:
             found = fetch_provider_mail(
                 folder_account, limit, unread_only, date_from, date_to,
-                folder_progress if progress_callback else None, include_unrelated=True,
+                folder_progress if progress_callback else None, include_unrelated=True, timeout=timeout,
             )
             for mail in found:
                 mail.source_mailbox = mailbox

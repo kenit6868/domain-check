@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import imaplib
+import importlib
+import inspect
 import json
 import os
 import re
 import subprocess
+import shutil
 import sys
 import uuid
+import time
 from datetime import date, datetime, timedelta
 from email.utils import parsedate_to_datetime
 
@@ -23,6 +27,8 @@ CACHE_PATH = _runtime_path("mail_statistics_cache.json")
 CACHE_VERSION = 1
 MODULE_VERSION = 7
 JOB_DIR = _runtime_path("mail_statistics_jobs")
+ANALYSIS_CACHE_PATH = _runtime_path("provider_mail_analysis_cache.json")
+ANALYSIS_JOB_DIR = _runtime_path("provider_mail_analysis_jobs")
 ACTIVE_JOB_STATES = {"queued", "running"}
 
 
@@ -32,7 +38,13 @@ def _atomic_json(path, value):
     try:
         with open(temp_path, "w", encoding="utf-8") as handle:
             json.dump(value, handle, ensure_ascii=False, indent=2)
-        os.replace(temp_path, path)
+        for attempt in range(30):
+            try:
+                os.replace(temp_path, path)
+                break
+            except PermissionError:
+                if attempt == 29: raise
+                time.sleep(min(0.05 * (attempt + 1), 0.5))
     finally:
         try: os.remove(temp_path)
         except FileNotFoundError: pass
@@ -344,6 +356,151 @@ def count_account_incoming(account: dict, date_from: date, date_to: date, local_
             pass
 
 
+def _analysis_key(start, end): return f"{start.isoformat()}:{end.isoformat()}"
+
+
+def load_provider_analysis_cache(start, end):
+    try:
+        with open(ANALYSIS_CACHE_PATH, encoding="utf-8") as h: data = json.load(h)
+        rows = data.get("ranges", {}).get(_analysis_key(start, end), {}).get("results", [])
+        return rows if isinstance(rows, list) else []
+    except (OSError, ValueError, TypeError, AttributeError): return []
+
+
+def save_provider_analysis_cache(start, end, results):
+    try:
+        with open(ANALYSIS_CACHE_PATH, encoding="utf-8") as h: data = json.load(h)
+    except (OSError, ValueError, TypeError): data = {"version": 1, "ranges": {}}
+    data.setdefault("version", 1); data.setdefault("ranges", {})
+    data["ranges"][_analysis_key(start, end)] = {"updated_at": datetime.now().astimezone().isoformat(), "results": results}
+    _atomic_json(ANALYSIS_CACHE_PATH, data)
+
+
+def clear_provider_analysis_cache(start, end):
+    try:
+        with open(ANALYSIS_CACHE_PATH, encoding="utf-8") as h: data = json.load(h)
+    except (OSError, ValueError, TypeError, AttributeError):
+        data = {"ranges": {}}
+    removed = data.get("ranges", {}).pop(_analysis_key(start, end), None) is not None
+    if removed: _atomic_json(ANALYSIS_CACHE_PATH, data)
+    # Also remove only the persisted job/log folders for this date range.
+    for name in os.listdir(ANALYSIS_JOB_DIR) if os.path.isdir(ANALYSIS_JOB_DIR) else []:
+        folder = os.path.abspath(os.path.join(ANALYSIS_JOB_DIR, name))
+        job_file = os.path.join(folder, "job.json")
+        try:
+            with open(job_file, encoding="utf-8") as h: job = json.load(h)
+            if (job.get("date_from"), job.get("date_to")) == (start.isoformat(), end.isoformat()):
+                if os.path.commonpath((folder, os.path.abspath(ANALYSIS_JOB_DIR))) == os.path.abspath(ANALYSIS_JOB_DIR):
+                    shutil.rmtree(folder)
+                    removed = True
+        except (OSError, ValueError, TypeError):
+            continue
+    return removed
+
+
+def analyze_provider_mail(account, start, end, local_tz, timeout=30, progress_callback=None):
+    import provider_replies as pr
+    if "timeout" not in inspect.signature(pr.fetch_provider_mail_all_folders).parameters: pr = importlib.reload(pr)
+    try:
+        mails, folders = pr.fetch_provider_mail_all_folders(account, date_from=start, date_to=end, timeout=timeout, progress_callback=progress_callback)
+    except (OSError, EOFError, imaplib.IMAP4.error, imaplib.IMAP4.abort):
+        mails, folders = pr.fetch_provider_mail_all_folders(account, date_from=start, date_to=end, timeout=timeout, progress_callback=progress_callback)
+    selected = []
+    for mail in mails:
+        received = pr.received_datetime(mail)
+        if received is None: continue
+        if received.tzinfo is None: received = received.replace(tzinfo=local_tz)
+        if start <= received.astimezone(local_tz).date() <= end: selected.append(mail)
+    strong_resolution = ("action has been taken", "domain has been suspended", "domain has been disabled", "website has been taken down", "site has been taken down", "content has been removed", "domain has been removed")
+    resolved = [m for m in selected if m.request_type == "resolved" and any(x in m.body.lower() for x in strong_resolution)]
+    failed = [m for m in selected if m.request_type == "delivery_failed"]
+    messages = []
+    for mail in resolved + failed:
+        evidence = next((line.strip() for line in mail.body.splitlines() if any(x in line.lower() for x in strong_resolution)), "")
+        messages.append({"date": mail.server_date or mail.date, "provider": mail.provider_label, "sender": mail.sender, "subject": mail.subject, "domain": mail.domain, "ticket": mail.ticket, "body": mail.body, "evidence": evidence, "category": "NCC đã xử lý domain" if mail in resolved else "Mail đi bị trả/bị chặn"})
+    return {"account": str(account.get("username") or ""), "status": "ok", "error": "", "resolved": len(resolved), "delivery_failed": len(failed), "messages": messages, "folders": folders}
+
+
+def provider_mail_analysis(accounts, start, end, local_tz):
+    results = []
+    for account in accounts:
+        name = str(account.get("username") or "Tài khoản chưa đặt tên")
+        if not account.get("imap_host"):
+            results.append({"account": name, "status": "not_configured", "error": "", "resolved": 0, "delivery_failed": 0, "messages": []}); continue
+        try: results.append(analyze_provider_mail(account, start, end, local_tz))
+        except Exception as exc: results.append({"account": name, "status": "error", "error": str(exc), "resolved": 0, "delivery_failed": 0, "messages": []})
+    return results
+
+
+def translate_provider_body(body):
+    """Provide a conservative local translation for common provider notices."""
+    replacements = (
+        ("Action has been taken", "Đã thực hiện biện pháp xử lý"),
+        ("domain has been suspended", "domain đã bị tạm ngưng"),
+        ("domain has been disabled", "domain đã bị vô hiệu hóa"),
+        ("website has been taken down", "website đã bị gỡ xuống"),
+        ("content has been removed", "nội dung đã bị gỡ bỏ"),
+        ("Thank you for your report", "Cảm ơn bạn đã gửi báo cáo"),
+        ("We have reviewed your report", "Chúng tôi đã xem xét báo cáo của bạn"),
+        ("The case is closed", "Vụ việc đã được đóng"),
+        ("Regards", "Trân trọng"),
+    )
+    translated = str(body or "")
+    for source, target in replacements:
+        translated = re.sub(re.escape(source), target, translated, flags=re.I)
+    return translated
+
+
+def create_provider_analysis_job(start, end, accounts):
+    job_id = f"{start.isoformat()}_{end.isoformat()}_{uuid.uuid4().hex}"; folder = os.path.join(ANALYSIS_JOB_DIR, job_id)
+    _atomic_json(os.path.join(folder, "job.json"), {"job_id": job_id, "date_from": start.isoformat(), "date_to": end.isoformat(), "accounts": [str(a.get("username") or "") for a in accounts]})
+    _atomic_json(os.path.join(folder, "status.json"), {"state": "queued", "completed_accounts": 0, "total_accounts": len(accounts), "error": ""})
+    return os.path.join(folder, "job.json")
+
+
+def latest_provider_analysis_job(start, end):
+    found = []
+    if not os.path.isdir(ANALYSIS_JOB_DIR): return None
+    for name in os.listdir(ANALYSIS_JOB_DIR):
+        folder = os.path.join(ANALYSIS_JOB_DIR, name)
+        try:
+            with open(os.path.join(folder, "job.json"), encoding="utf-8") as h: job = json.load(h)
+            if (job.get("date_from"), job.get("date_to")) != (start.isoformat(), end.isoformat()): continue
+            with open(os.path.join(folder, "status.json"), encoding="utf-8") as h: status = json.load(h)
+            found.append((os.path.getmtime(os.path.join(folder, "status.json")), status))
+        except (OSError, ValueError, TypeError): pass
+    return max(found, key=lambda x: x[0])[1] if found else None
+
+
+def launch_provider_analysis_job(path):
+    return subprocess.Popen([sys.executable, os.path.abspath(__file__), "--run-provider-analysis-job", os.path.abspath(path)], cwd=os.path.dirname(os.path.abspath(__file__)), creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0, start_new_session=os.name != "nt")
+
+
+def run_provider_analysis_job(path):
+    folder = os.path.dirname(os.path.abspath(path)); status_path = os.path.join(folder, "status.json")
+    try:
+        with open(path, encoding="utf-8") as h: job = json.load(h)
+        from phishing_toolkit import load_config
+        wanted = set(job.get("accounts") or []); accounts = [a for a in load_config().get("smtp_accounts", []) if str(a.get("username") or "") in wanted]
+        start, end = date.fromisoformat(job["date_from"]), date.fromisoformat(job["date_to"]); results = []
+        _atomic_json(status_path, {"state": "running", "completed_accounts": 0, "total_accounts": len(accounts), "error": ""})
+        for account in accounts:
+            def checkpoint(current, position, total, _folder):
+                partial = {"account": str(account.get("username") or ""), "status": "ok", "error": "", "resolved": 0, "delivery_failed": 0, "messages": []}
+                strong = ("action has been taken", "domain has been suspended", "domain has been disabled", "website has been taken down", "site has been taken down", "content has been removed", "domain has been removed")
+                for mail in current:
+                    category = "NCC đã xử lý domain" if mail.request_type == "resolved" and any(x in mail.body.lower() for x in strong) else "Mail đi bị trả/bị chặn" if mail.request_type == "delivery_failed" else ""
+                    if not category: continue
+                    if category.startswith("NCC"): partial["resolved"] += 1
+                    else: partial["delivery_failed"] += 1
+                    partial["messages"].append({"date": mail.server_date or mail.date, "provider": mail.provider_label, "sender": mail.sender, "subject": mail.subject, "domain": mail.domain, "ticket": mail.ticket, "body": mail.body, "evidence": next((line.strip() for line in mail.body.splitlines() if any(x in line.lower() for x in strong)), ""), "category": category})
+                save_provider_analysis_cache(start, end, results + [partial])
+            results.append(analyze_provider_mail(account, start, end, datetime.now().astimezone().tzinfo, progress_callback=checkpoint)); save_provider_analysis_cache(start, end, results)
+            _atomic_json(status_path, {"state": "running", "completed_accounts": len(results), "total_accounts": len(accounts), "error": ""})
+        _atomic_json(status_path, {"state": "complete", "completed_accounts": len(results), "total_accounts": len(accounts), "error": ""})
+    except Exception as exc: _atomic_json(status_path, {"state": "failed", "completed_accounts": 0, "total_accounts": 0, "error": str(exc)})
+
+
 def daily_mail_statistics(accounts: list[dict], selected_day: date, local_tz) -> list[dict]:
     """Return isolated per-account results so one broken mailbox cannot hide others."""
     results = []
@@ -398,5 +555,7 @@ def run_statistics_job(job_path: str) -> None:
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--run-job":
         run_statistics_job(sys.argv[2])
+    elif len(sys.argv) == 3 and sys.argv[1] == "--run-provider-analysis-job":
+        run_provider_analysis_job(sys.argv[2])
     else:
         raise SystemExit("Usage: mail_statistics.py --run-job <job.json>")

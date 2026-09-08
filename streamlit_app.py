@@ -35,5 +35,6 @@ _pages = st.navigation([
     st.Page("pages/5_Report_Drafts.py",       title="Report Drafts",    icon="✉️"),
     st.Page("pages/9_Provider_Replies.py",    title="Phản hồi NCC",     icon="📨"),
     st.Page("pages/11_Mail_Statistics.py",    title="Thống kê email",   icon=":material/mail:"),
+    st.Page("pages/13_Provider_Mail_Analysis.py", title="Phân tích phản hồi email", icon=":material/analytics:"),
 ])
 _pages.run()
