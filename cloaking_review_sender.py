@@ -16,6 +16,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
+import browser_evidence
 import cloaking_review_queue as review_queue
 import phishing_toolkit as pt
 
@@ -23,7 +24,7 @@ import phishing_toolkit as pt
 CONFIRMED_CLOAKING = "confirmed_cloaking"
 NOT_CLOAKING = "not_cloaking"
 VALID_DECISIONS = {CONFIRMED_CLOAKING, NOT_CLOAKING}
-PREPARATION_VERSION = 2
+PREPARATION_VERSION = 3
 _LOCK_STALE_SECONDS = 10 * 60
 _MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
@@ -102,6 +103,38 @@ def _attachment_fingerprints(paths: list[str]) -> list[dict]:
             "sha256": digest.hexdigest(),
         })
     return fingerprints
+
+
+def _normal_browser_evidence(
+    evidence: dict | None, target_url: str,
+) -> tuple[dict, list[str], str]:
+    """Validate normal-report evidence and bind it to the reviewed full URL."""
+    value = dict(evidence) if isinstance(evidence, dict) else {}
+    try:
+        attachments = browser_evidence.evidence_attachment_paths(value)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError(f"Browser Evidence report thường không hợp lệ: {exc}") from exc
+    if not attachments:
+        raise ValueError(
+            "Hãy chụp URL nguồn/URL đích hoặc upload ảnh report thường trước khi tạo draft."
+        )
+    requested = str(value.get("requested_url") or "").strip().rstrip("/")
+    expected = str(target_url or "").strip().rstrip("/")
+    if not requested or requested != expected:
+        raise ValueError("Browser Evidence không thuộc đúng URL đang được review.")
+    signature_payload = {
+        "requested_url": requested,
+        "evidence_type": str(value.get("evidence_type") or ""),
+        "manifest_path": os.path.abspath(str(value.get("manifest_path") or "")),
+        "attachments": _attachment_fingerprints(attachments),
+    }
+    signature = hashlib.sha256(
+        json.dumps(
+            signature_payload, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return value, attachments, signature
 
 
 def _assert_selectable(item: dict, decision: str) -> None:
@@ -263,6 +296,7 @@ def _sendable_drafts(paths: list[str], *, include_vncert: bool) -> list[dict]:
 
 def prepare_review_delivery(
     queue_id: str, *, decision: str, account_names: list[str], cfg: dict,
+    normal_browser_evidence: dict | None = None,
 ) -> dict:
     """Run the shared check pipeline and return the exact delivery preview.
 
@@ -283,8 +317,12 @@ def prepare_review_delivery(
             raise ValueError(evidence_status["reason"])
         approved_evidence = evidence_status["result"]
         attachments = evidence_status["attachments"]
+        normal_evidence = {}
+        normal_evidence_signature = ""
     else:
-        attachments = []
+        normal_evidence, attachments, normal_evidence_signature = (
+            _normal_browser_evidence(normal_browser_evidence, target_url)
+        )
 
     check_result = pt.run_check(target_url, False, cfg)
     draft_paths = list(check_result.get("drafts") or [])
@@ -304,6 +342,11 @@ def prepare_review_delivery(
         updated_paths = pt.remove_cloaking_evidence_from_drafts(draft_paths)
         if len(updated_paths) != len(draft_paths):
             raise OSError("Không thể loại evidence cloaking khỏi toàn bộ draft thường.")
+        updated_paths = pt.append_browser_evidence_to_drafts(
+            updated_paths, normal_evidence,
+        )
+        if len(updated_paths) != len(draft_paths):
+            raise OSError("Không thể chèn Browser Evidence vào toàn bộ draft thường.")
 
     drafts = _sendable_drafts(
         updated_paths, include_vncert=bool(item.get("include_vncert", False)),
@@ -331,6 +374,8 @@ def prepare_review_delivery(
         "accounts": selected_accounts,
         "prepared_at": _now(),
         "evidence_signature": _evidence_signature(approved_evidence),
+        "normal_browser_evidence": normal_evidence,
+        "normal_evidence_signature": normal_evidence_signature,
         "attachments": attachments,
         "attachment_fingerprints": _attachment_fingerprints(attachments),
         "deliveries": deliveries,
@@ -342,13 +387,21 @@ def prepare_review_delivery(
 
 def preparation_is_current(
     preparation: dict | None, item: dict | None, *, decision: str | None,
-    account_names: list[str] | None,
+    account_names: list[str] | None, normal_browser_evidence: dict | None = None,
 ) -> bool:
     if not preparation or not item or decision not in VALID_DECISIONS:
         return False
     selected = list(dict.fromkeys(
         name for name in (_account_name(value) for value in (account_names or [])) if name
     ))
+    normal_signature = ""
+    if decision == NOT_CLOAKING:
+        try:
+            _value, _attachments, normal_signature = _normal_browser_evidence(
+                normal_browser_evidence, str(item.get("target_url") or ""),
+            )
+        except (OSError, TypeError, ValueError):
+            return False
     return bool(
         preparation.get("version") == PREPARATION_VERSION
         and preparation.get("queue_id") == item.get("queue_id")
@@ -356,6 +409,7 @@ def preparation_is_current(
         and preparation.get("decision") == decision
         and list(preparation.get("accounts") or []) == selected
         and preparation.get("evidence_signature") == _evidence_signature(_cloaking_result(item))
+        and preparation.get("normal_evidence_signature", "") == normal_signature
     )
 
 
@@ -407,7 +461,11 @@ def send_prepared_review(preparation: dict, cfg: dict) -> dict:
         _assert_selectable(item, decision)
         _selected_account_names(accounts, cfg)
         if not preparation_is_current(
-            preparation, item, decision=decision, account_names=accounts,
+            preparation,
+            item,
+            decision=decision,
+            account_names=accounts,
+            normal_browser_evidence=preparation.get("normal_browser_evidence"),
         ):
             raise ValueError("Draft preview đã cũ. Hãy tạo/cập nhật draft lại trước khi gửi.")
 
@@ -420,8 +478,27 @@ def send_prepared_review(preparation: dict, cfg: dict) -> dict:
                 expected_attachments,
             ):
                 raise ValueError("Nội dung evidence đã thay đổi. Hãy kiểm tra và tạo lại draft trước khi gửi.")
-        elif attachments:
-            raise ValueError("Report thường không được chứa attachment cloaking.")
+        else:
+            _normal_value, expected_attachments, expected_signature = (
+                _normal_browser_evidence(
+                    preparation.get("normal_browser_evidence"),
+                    str(preparation.get("target_url") or ""),
+                )
+            )
+            if attachments != expected_attachments:
+                raise ValueError(
+                    "Danh sách Browser Evidence report thường đã thay đổi. Hãy tạo lại draft."
+                )
+            if preparation.get("normal_evidence_signature") != expected_signature:
+                raise ValueError(
+                    "Nội dung Browser Evidence report thường đã thay đổi. Hãy tạo lại draft."
+                )
+            if preparation.get("attachment_fingerprints") != _attachment_fingerprints(
+                expected_attachments,
+            ):
+                raise ValueError(
+                    "Nội dung attachment report thường đã thay đổi. Hãy tạo lại draft."
+                )
 
         attempt_id = (
             "direct_" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

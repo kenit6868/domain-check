@@ -2,16 +2,40 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
 
+import browser_evidence
 import cloaking_review_queue as review_queue
 import cloaking_review_sender as review_sender
 import phishing_toolkit as pt
 from cloaking_ui import render_cloaking_result
+
+
+def _normal_evidence_paths(evidence: dict | None) -> list[str]:
+    try:
+        attachments = browser_evidence.evidence_attachment_paths(evidence or {})
+    except (OSError, TypeError, ValueError):
+        return []
+    return [
+        path for path in attachments
+        if os.path.splitext(path)[1].lower() != ".json"
+    ]
+
+
+def _upload_signature(uploads: list) -> list[dict]:
+    return [
+        {
+            "name": str(upload.name or ""),
+            "size": len(upload.getvalue()),
+            "sha256": hashlib.sha256(upload.getvalue()).hexdigest(),
+        }
+        for upload in uploads
+    ]
 
 
 def _local_review_day(timestamp: str | None = None) -> str:
@@ -257,6 +281,11 @@ pending_manual_ready = False
 pending_manual_error = ""
 pending_manual_device = "desktop and mobile"
 pending_manual_network = "direct and Google"
+normal_browser_key = f"cloaking_review_normal_browser_{detail_id}"
+normal_browser_result = st.session_state.get(normal_browser_key) or {}
+normal_uploads = []
+normal_upload_signature = []
+normal_upload_valid = False
 
 with st.container(border=True):
     st.subheader(detail_item.get("domain") or detail_item.get("target_url"), anchor=False)
@@ -509,7 +538,8 @@ if editable:
         disabled=bool(locked_decision),
         help=(
             "Xác nhận cloaking: dùng evidence đã duyệt và đính kèm manifest + hai ảnh. "
-            "Không phải cloaking: loại toàn bộ evidence/attachment cloaking."
+            "Không phải cloaking: loại evidence cloaking và dùng Browser Evidence "
+            "riêng của report thường."
         ),
     )
     decision = (
@@ -525,6 +555,111 @@ if editable:
         )
 
     preview_key = f"cloaking_review_preview_{detail_id}"
+    normal_browser_paths = _normal_evidence_paths(normal_browser_result)
+    if decision == review_sender.NOT_CLOAKING:
+        with st.container(border=True):
+            st.markdown("**Browser Evidence cho report thường**")
+            st.caption(
+                "Công cụ đọc control Đăng ký/Đăng nhập, chụp URL nguồn rồi mở URL "
+                "đích trong tab mới để chụp ảnh thứ hai. Nếu không có URL đích an toàn, "
+                "hệ thống giữ một ảnh nguồn thụ động; không click hoặc submit form."
+            )
+            if st.button(
+                "Chụp URL nguồn + URL đích từ DOM",
+                icon=":material/photo_camera:",
+                key=f"cloaking_review_capture_normal_{detail_id}",
+            ):
+                try:
+                    with st.spinner(
+                        "Đang tạo Browser Evidence cho report thường; chưa gửi email..."
+                    ):
+                        captured = browser_evidence.capture_normal_report_evidence(
+                            detail_item.get("target_url", ""),
+                            pt._runtime_path(os.path.join("evidence", "browser")),
+                            profile_name="cloaking_review_not_cloaking",
+                            headless=False,
+                        )
+                    paths = _normal_evidence_paths(captured)
+                    if not paths:
+                        raise ValueError(
+                            captured.get("error") or "Không tạo được ảnh hợp lệ"
+                        )
+                    st.session_state[normal_browser_key] = captured
+                    st.session_state.pop(preview_key, None)
+                    st.session_state["cloaking_review_flash"] = {
+                        "kind": "success",
+                        "message": (
+                            f"Đã tạo {len(paths)} ảnh Browser Evidence cho report thường."
+                        ),
+                    }
+                    st.rerun()
+                except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                    st.error(f"Không thể capture Browser Evidence: {exc}")
+
+            if normal_browser_paths:
+                with st.container(horizontal=True, gap="small"):
+                    for index, image_path in enumerate(normal_browser_paths):
+                        role = "URL nguồn" if index == 0 else "URL đích"
+                        st.image(image_path, caption=role, width=260)
+                st.success(
+                    f"Đã có {len(normal_browser_paths)} ảnh + manifest hợp lệ. "
+                    "Các file này sẽ được chèn vào draft report thường.",
+                    icon=":material/verified:",
+                )
+                if normal_browser_result.get("resolved_destination"):
+                    st.write(
+                        "**DOM destination:** `"
+                        + str(normal_browser_result.get("resolved_destination"))
+                        + "`"
+                    )
+                if normal_browser_result.get("final_url"):
+                    st.write(
+                        f"**Final destination URL:** `{normal_browser_result.get('final_url')}`"
+                    )
+
+            st.caption(
+                "Nếu capture tự động không thành công, upload 1–3 ảnh của đúng URL. "
+                "Ảnh chỉ được ghi khi bạn bấm tạo draft."
+            )
+            normal_uploads = list(st.file_uploader(
+                "Ảnh report thường dự phòng (1–3 ảnh PNG/JPEG)",
+                type=["png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key=f"cloaking_review_normal_uploads_{detail_id}",
+            ) or [])
+            valid_normal_uploads = []
+            invalid_normal_uploads = []
+            for upload in normal_uploads:
+                data = upload.getvalue()
+                if (
+                    data
+                    and len(data) <= browser_evidence.MAX_SCREENSHOT_BYTES
+                    and (
+                        data.startswith(b"\x89PNG\r\n\x1a\n")
+                        or data.startswith(b"\xff\xd8\xff")
+                    )
+                ):
+                    valid_normal_uploads.append(upload)
+                else:
+                    invalid_normal_uploads.append(upload.name)
+            normal_upload_signature = _upload_signature(normal_uploads)
+            normal_upload_valid = bool(
+                1 <= len(normal_uploads) <= browser_evidence.MAX_MANUAL_SCREENSHOTS
+                and len(valid_normal_uploads) == len(normal_uploads)
+            )
+            if valid_normal_uploads:
+                with st.container(horizontal=True, gap="small"):
+                    for upload in valid_normal_uploads:
+                        st.image(upload.getvalue(), caption=upload.name, width=160)
+            if invalid_normal_uploads:
+                st.error(
+                    "Ảnh không hợp lệ hoặc quá 10 MB: "
+                    + ", ".join(invalid_normal_uploads)
+                )
+            elif len(normal_uploads) > browser_evidence.MAX_MANUAL_SCREENSHOTS:
+                st.warning("Chỉ được chọn tối đa 3 ảnh report thường.")
+
+    normal_evidence_ready = bool(normal_browser_paths or normal_upload_valid)
     effective_evidence_ready = bool(evidence_status["ready"])
     if pending_manual_attempted:
         effective_evidence_ready = pending_manual_ready
@@ -537,6 +672,12 @@ if editable:
             "Chưa thể tạo draft cloaking. Hãy chọn 2–4 ảnh hợp lệ ở phía trên và "
             "tích xác nhận; không cần bấm lưu ảnh riêng.",
             icon=":material/photo_library:",
+        )
+    if decision == review_sender.NOT_CLOAKING and not normal_evidence_ready:
+        st.info(
+            "Khi bấm tạo draft, hệ thống sẽ tự capture URL nguồn/URL đích. "
+            "Uploader chỉ cần dùng nếu capture tự động thất bại.",
+            icon=":material/photo_camera:",
         )
     prepare_label = (
         "Xác nhận ảnh & tạo draft để xem"
@@ -592,12 +733,55 @@ if editable:
                         st.session_state[
                             f"cloaking_review_manual_{detail_id}_close"
                         ] = True
-                st.session_state[preview_key] = review_sender.prepare_review_delivery(
+                normal_evidence_for_preview = normal_browser_result
+                if (
+                    decision == review_sender.NOT_CLOAKING
+                    and normal_upload_valid
+                ):
+                    normal_evidence_for_preview = (
+                        browser_evidence.create_manual_browser_evidence(
+                            detail_item.get("target_url", ""),
+                            [
+                                (upload.name, upload.getvalue())
+                                for upload in normal_uploads
+                            ],
+                            pt._runtime_path(os.path.join("evidence", "browser")),
+                            profile_name="cloaking_review_not_cloaking_manual",
+                        )
+                    )
+                    st.session_state[normal_browser_key] = normal_evidence_for_preview
+                    normal_browser_result = normal_evidence_for_preview
+                elif (
+                    decision == review_sender.NOT_CLOAKING
+                    and not _normal_evidence_paths(normal_evidence_for_preview)
+                ):
+                    normal_evidence_for_preview = (
+                        browser_evidence.capture_normal_report_evidence(
+                            detail_item.get("target_url", ""),
+                            pt._runtime_path(os.path.join("evidence", "browser")),
+                            profile_name="cloaking_review_not_cloaking",
+                            headless=False,
+                        )
+                    )
+                    if not _normal_evidence_paths(normal_evidence_for_preview):
+                        raise ValueError(
+                            normal_evidence_for_preview.get("error")
+                            or "Capture tự động không tạo được Browser Evidence hợp lệ; hãy upload ảnh thủ công."
+                        )
+                    st.session_state[normal_browser_key] = normal_evidence_for_preview
+                    normal_browser_result = normal_evidence_for_preview
+                prepared_preview = review_sender.prepare_review_delivery(
                     detail_id,
                     decision=decision,
                     account_names=selected_accounts,
                     cfg=cfg,
+                    normal_browser_evidence=(
+                        normal_evidence_for_preview
+                        if decision == review_sender.NOT_CLOAKING else None
+                    ),
                 )
+                prepared_preview["normal_upload_signature"] = normal_upload_signature
+                st.session_state[preview_key] = prepared_preview
             if manual_evidence_saved:
                 st.success(
                     "Đã tự lưu cặp ảnh và tạo draft. Hãy đọc nội dung bên dưới trước khi gửi."
@@ -619,8 +803,18 @@ if editable:
         current_item,
         decision=decision,
         account_names=selected_accounts,
+        normal_browser_evidence=(
+            normal_browser_result
+            if decision == review_sender.NOT_CLOAKING else None
+        ),
     )
     if decision == review_sender.CONFIRMED_CLOAKING and pending_manual_attempted:
+        preview_current = False
+    if (
+        decision == review_sender.NOT_CLOAKING
+        and preview
+        and (preview.get("normal_upload_signature") or []) != normal_upload_signature
+    ):
         preview_current = False
 
     st.subheader("Draft mẫu trước khi gửi", anchor=False)
@@ -646,9 +840,19 @@ if editable:
             )
         else:
             st.info(
-                "Draft report thường: không có nội dung hoặc attachment cloaking.",
+                "Draft report thường: đã loại evidence cloaking và đính kèm Browser "
+                "Evidence URL nguồn/URL đích đã preview.",
                 icon=":material/mail:",
             )
+            normal_preview_paths = _normal_evidence_paths(
+                preview.get("normal_browser_evidence") or {}
+            )
+            if normal_preview_paths:
+                st.caption(
+                    "Attachment report thường: "
+                    + ", ".join(os.path.basename(path) for path in normal_preview_paths)
+                    + ", manifest JSON"
+                )
         preview_token = str(preview.get("prepared_at") or "preview").replace(":", "_")
         for index, delivery in enumerate(preview.get("deliveries") or []):
             label = (

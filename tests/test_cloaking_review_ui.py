@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
+import browser_evidence
 import cloaking_review_queue as review_queue
 import cloaking_review_sender as review_sender
 import phishing_toolkit as pt
@@ -38,6 +39,9 @@ class CloakingReviewUiTests(unittest.TestCase):
         self.assertIn("review_sender.prepare_review_delivery", source)
         self.assertIn("review_sender.send_prepared_review", source)
         self.assertIn("Draft mẫu trước khi gửi", source)
+        self.assertIn("browser_evidence.capture_normal_report_evidence", source)
+        self.assertIn("Chụp URL nguồn + URL đích từ DOM", source)
+        self.assertIn("normal_browser_evidence=", source)
         self.assertIn("needs_manual_evidence", source)
         self.assertIn("confirmed_evidence_blocked", source)
         self.assertIn("Xác nhận ảnh & tạo draft để xem", source)
@@ -205,6 +209,7 @@ class CloakingReviewUiTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as review_dir,
             tempfile.TemporaryDirectory() as worker_dir,
+            tempfile.TemporaryDirectory() as evidence_dir,
         ):
             with patch.object(review_queue, "REVIEW_DIR", review_dir):
                 item = review_queue.enqueue_worker_result(
@@ -224,8 +229,17 @@ class CloakingReviewUiTests(unittest.TestCase):
                         "skipped": "manual_review_required",
                     },
                 )
+                normal_evidence = browser_evidence.create_manual_browser_evidence(
+                    item["target_url"],
+                    [
+                        ("source.png", PNG_1X1),
+                        ("destination.png", PNG_1X1),
+                    ],
+                    evidence_dir,
+                    profile_name="cloaking_review_ui_not_cloaking",
+                )
                 preview = {
-                    "version": 1,
+                    "version": review_sender.PREPARATION_VERSION,
                     "queue_id": item["queue_id"],
                     "target_url": item["target_url"],
                     "domain": item["domain"],
@@ -233,7 +247,11 @@ class CloakingReviewUiTests(unittest.TestCase):
                     "accounts": ["sender@example.org"],
                     "prepared_at": "2026-08-31T02:00:00+00:00",
                     "evidence_signature": "test",
-                    "attachments": [],
+                    "normal_browser_evidence": normal_evidence,
+                    "normal_evidence_signature": "normal-test",
+                    "attachments": browser_evidence.evidence_attachment_paths(
+                        normal_evidence,
+                    ),
                     "drafts_total": 1,
                     "drafts_sendable": 1,
                     "deliveries": [{
@@ -252,6 +270,11 @@ class CloakingReviewUiTests(unittest.TestCase):
                     patch.object(
                         review_sender, "prepare_review_delivery", return_value=preview,
                     ) as prepare,
+                    patch.object(
+                        browser_evidence,
+                        "capture_normal_report_evidence",
+                        return_value=normal_evidence,
+                    ) as capture,
                     patch.object(
                         review_sender, "preparation_is_current",
                         side_effect=lambda value, *_args, **_kwargs: bool(value),
@@ -296,6 +319,7 @@ class CloakingReviewUiTests(unittest.TestCase):
                         button for button in app.button
                         if button.label == "Tạo / cập nhật draft để xem"
                     )
+                    self.assertFalse(prepare_button.disabled)
                     app = prepare_button.click().run()
                     confirmation = next(
                         checkbox for checkbox in app.checkbox
@@ -314,7 +338,12 @@ class CloakingReviewUiTests(unittest.TestCase):
                     app = send_button.click().run()
 
             self.assertEqual(list(app.exception), [])
+            capture.assert_called_once()
             prepare.assert_called_once()
+            self.assertEqual(
+                prepare.call_args.kwargs["normal_browser_evidence"],
+                normal_evidence,
+            )
             send.assert_called_once()
             self.assertTrue(any(
                 "Gửi trực tiếp hoàn tất" in success.value for success in app.success

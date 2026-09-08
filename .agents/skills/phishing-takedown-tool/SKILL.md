@@ -50,7 +50,10 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   evidence set theo mail trong session state. Chỉ attachment PNG + manifest còn
   đúng hash mới được coi là browser evidence hợp lệ; upload/URLScan legacy có thể
   tồn tại làm fallback trong giai đoạn chuyển đổi nhưng không được trộn với
-  manifest của capture khác.
+  manifest của capture khác. Capture tự động phải ưu tiên đúng hai ảnh nguồn/đích
+  từ DOM destination rồi mới fallback một ảnh nguồn thụ động; UI hiển thị cả hai
+  thumbnail và gửi toàn bộ ảnh + manifest. Narrative phải nói URL đích được mở
+  trực tiếp, không tự nhận là đã click control.
 - Check Domain chỉ mở gửi email sau khi Browser Evidence có 1–3 PNG/JPEG + đúng
   một manifest
   hợp lệ; cùng artifact đã preview phải đi qua cả gửi đơn và gửi tất cả. Gate
@@ -94,9 +97,12 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   để chụp destination. Không có URL tĩnh hoặc mở đích lỗi thì fallback passive source;
   chỉ khi cả hai capture không có artifact hợp lệ mới ghi `evidence_review`. Terminal
   browser/DNS source không phải content evidence và tiếp tục draft thường. Page
-  `Domain Evidence Review` đọc mọi preflight v4 trong ngày, dedupe full URL và gửi
-  trực tiếp sau upload 1–3 ảnh; sau khi gửi thành công phải đánh dấu cả bản ghi trùng
-  ở job khác để không tái xuất hiện; không tạo job review mới.
+  `Domain Evidence Review` đọc mọi preflight v4 trong ngày, dedupe full URL và tách
+  uploader khỏi Domain Worker. Sau upload 1–3 ảnh, page phải tạo dry-run preview hiển
+  thị đúng body đã personalize theo account/recipient rồi mới cho xác nhận gửi; gửi
+  dùng đúng delivery plan đã preview, kiểm tra fingerprint ảnh/draft, ghi rõ trạng thái
+  từng delivery và retry chỉ lượt còn thiếu. Sau khi gửi thành công phải đánh dấu cả bản
+  ghi trùng ở job khác để không tái xuất hiện; không tạo job review mới.
 - Formatter registrar/registry phải dùng dữ kiện quan sát, không đưa VirusTotal
   không có detection ra ngoài và không tự yêu cầu `serverHold`/`clientHold` như
   kết luận mặc định. Registry chỉ được nói đã báo registrar khi có delivery state
@@ -160,7 +166,10 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   `already_sent_today` từ event.
 - Quyết định review phải tách ba disposition: xác nhận cloaking (gửi kèm
   evidence), không phải cloaking (gửi report thường, không evidence/attachment
-  cloaking) và bỏ qua. Không được suy ra selection từ toàn bộ queue.
+  cloaking) và bỏ qua. Với `not_cloaking`, phải tạo Browser Evidence report thường
+  riêng: ưu tiên hai ảnh nguồn/đích, fallback một ảnh nguồn hoặc upload 1–3 ảnh;
+  chèn narrative vào draft, khóa fingerprint và đính kèm artifact đã preview.
+  Không được suy ra selection từ toàn bộ queue.
 - Mọi nội dung do tool soạn để gửi nhà cung cấp phải dùng tiếng Anh. Không tái
   sử dụng trực tiếp label/detail tiếng Việt của UI trong draft; dữ liệu quan sát
   nguyên gốc như page title hoặc matched keyword có thể giữ nguyên làm bằng chứng.

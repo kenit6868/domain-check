@@ -606,6 +606,44 @@ class BrowserEvidenceTests(unittest.TestCase):
                 )
             self.assertEqual([], os.listdir(folder))
 
+    def test_normal_report_capture_prefers_two_image_dom_destination(self):
+        dom = {"success": True, "screenshot_paths": ["source.png", "destination.png"]}
+        with (
+            patch.object(be, "capture_dom_destination_evidence", return_value=dom) as capture_dom,
+            patch.object(be, "capture_passive_browser_evidence") as capture_passive,
+            patch.object(be, "evidence_attachment_paths", return_value=[
+                "source.png", "destination.png", "manifest.json",
+            ]),
+        ):
+            result = be.capture_normal_report_evidence(
+                "https://source.test/path", "C:/evidence",
+                profile_name="provider_reply", headless=False,
+            )
+        self.assertEqual("dom_destination", result["capture_strategy"])
+        self.assertEqual(2, len(result["screenshot_paths"]))
+        self.assertFalse(capture_dom.call_args.kwargs["headless"])
+        capture_passive.assert_not_called()
+
+    def test_normal_report_capture_falls_back_to_passive_source(self):
+        dom = {"success": False, "terminal": False, "error": "No safe DOM destination"}
+        passive = {"success": True, "screenshot_path": "source.png"}
+
+        def attachments(value):
+            return ["source.png", "manifest.json"] if value is passive else []
+
+        with (
+            patch.object(be, "capture_dom_destination_evidence", return_value=dom),
+            patch.object(be, "capture_passive_browser_evidence", return_value=passive) as capture_passive,
+            patch.object(be, "evidence_attachment_paths", side_effect=attachments),
+        ):
+            result = be.capture_normal_report_evidence(
+                "https://source.test/path", "C:/evidence",
+                profile_name="cloaking_review", headless=True,
+            )
+        self.assertEqual("passive_fallback", result["capture_strategy"])
+        self.assertEqual("No safe DOM destination", result["fallback_reason"])
+        self.assertTrue(capture_passive.call_args.kwargs["headless"])
+
 
 
 if __name__ == "__main__":

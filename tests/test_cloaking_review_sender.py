@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import browser_evidence
 import cloaking_review_queue as review_queue
 import cloaking_review_sender as sender
 import phishing_toolkit as pt
@@ -170,15 +171,25 @@ class CloakingReviewSenderTests(unittest.TestCase):
         self.assertEqual(len(prepared["attachments"]), 3)
         self.assertIn("Assessment: POSSIBLE", prepared["deliveries"][0]["body"])
 
-    def test_not_cloaking_preview_removes_evidence_and_attachments(self):
+    def test_not_cloaking_preview_replaces_cloaking_with_normal_browser_evidence(self):
         with (
             tempfile.TemporaryDirectory() as review_dir,
             tempfile.TemporaryDirectory() as job_dir,
             tempfile.TemporaryDirectory() as report_dir,
+            tempfile.TemporaryDirectory() as evidence_dir,
             patch.object(review_queue, "REVIEW_DIR", review_dir),
         ):
             item = self._case(review_dir, job_dir)
             draft = self._draft(report_dir, with_old_evidence=True)
+            normal_evidence = browser_evidence.create_manual_browser_evidence(
+                item["target_url"],
+                [
+                    ("source.png", b"\x89PNG\r\n\x1a\n source"),
+                    ("destination.png", b"\x89PNG\r\n\x1a\n destination"),
+                ],
+                evidence_dir,
+                profile_name="not_cloaking_test",
+            )
             with patch.object(pt, "run_check", return_value={
                 "domain": "review.example", "drafts": [draft], "drafts_error": "",
             }):
@@ -187,10 +198,73 @@ class CloakingReviewSenderTests(unittest.TestCase):
                     decision=sender.NOT_CLOAKING,
                     account_names=["sender@example.org"],
                     cfg=self._cfg(),
+                    normal_browser_evidence=normal_evidence,
                 )
 
-        self.assertEqual(prepared["attachments"], [])
+        self.assertEqual(len(prepared["attachments"]), 3)
         self.assertNotIn("Multi-profile Cloaking Check", prepared["deliveries"][0]["body"])
+        self.assertIn(
+            "Observed Phishing Behavior and Supporting Evidence",
+            prepared["deliveries"][0]["body"],
+        )
+        self.assertEqual(
+            normal_evidence["screenshot_paths"], prepared["attachments"][:2],
+        )
+
+    def test_not_cloaking_preview_requires_normal_browser_evidence(self):
+        with (
+            tempfile.TemporaryDirectory() as review_dir,
+            tempfile.TemporaryDirectory() as job_dir,
+            patch.object(review_queue, "REVIEW_DIR", review_dir),
+        ):
+            item = self._case(review_dir, job_dir)
+            with (
+                patch.object(pt, "run_check") as run_check,
+                self.assertRaisesRegex(ValueError, "Browser Evidence|chụp URL nguồn"),
+            ):
+                sender.prepare_review_delivery(
+                    item["queue_id"],
+                    decision=sender.NOT_CLOAKING,
+                    account_names=["sender@example.org"],
+                    cfg=self._cfg(),
+                )
+        run_check.assert_not_called()
+
+    def test_not_cloaking_direct_send_attaches_previewed_normal_evidence(self):
+        with (
+            tempfile.TemporaryDirectory() as review_dir,
+            tempfile.TemporaryDirectory() as job_dir,
+            tempfile.TemporaryDirectory() as report_dir,
+            tempfile.TemporaryDirectory() as evidence_dir,
+            patch.object(review_queue, "REVIEW_DIR", review_dir),
+        ):
+            item = self._case(review_dir, job_dir)
+            draft = self._draft(report_dir, with_old_evidence=True)
+            evidence = browser_evidence.create_manual_browser_evidence(
+                item["target_url"],
+                [("source.png", b"\x89PNG\r\n\x1a\n source")],
+                evidence_dir,
+                profile_name="not_cloaking_send_test",
+            )
+            cfg = self._cfg()
+            with patch.object(pt, "run_check", return_value={
+                "domain": "review.example", "drafts": [draft], "drafts_error": "",
+            }):
+                prepared = sender.prepare_review_delivery(
+                    item["queue_id"], decision=sender.NOT_CLOAKING,
+                    account_names=["sender@example.org"], cfg=cfg,
+                    normal_browser_evidence=evidence,
+                )
+            with (
+                patch.object(pt, "send_report_email_single", return_value={
+                    "success": True, "account": "sender@example.org", "error": "",
+                }) as send,
+                patch.object(pt, "log_sent"),
+            ):
+                result = sender.send_prepared_review(prepared, cfg)
+
+        self.assertEqual(send.call_args.kwargs["attachments"], prepared["attachments"])
+        self.assertEqual(review_queue.SENT, result["queue_state"])
 
     def test_changed_evidence_after_preview_is_blocked_before_smtp(self):
         with (

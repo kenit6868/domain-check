@@ -35,7 +35,9 @@ class ProviderRepliesUiTests(unittest.TestCase):
         self.assertIn('st.session_state.pop(f"{key}_urlscan_result", None)', source)
         self.assertIn("attachments = browser_attachments or", source)
         self.assertIn("has_valid_screenshot = bool(browser_attachments or has_legacy_screenshot)", source)
-        self.assertIn('width=520', source)
+        self.assertIn('"Chụp URL nguồn + URL đích từ DOM"', source)
+        self.assertIn('caption=role, width=300', source)
+        self.assertIn('browser_capture.get("final_url")', source)
         self.assertNotIn('caption="Ảnh sẽ được đính kèm email", use_container_width=True', source)
 
 

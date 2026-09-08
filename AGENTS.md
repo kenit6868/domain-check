@@ -86,9 +86,10 @@ Không tự khởi động Streamlit nếu người dùng chưa yêu cầu. Buil
 - Queue cloaking phải bền vững qua refresh/job mới. Domain Worker chỉ tự động
   xử lý case không cloaking; mọi quyết định cloaking phải thực hiện tại
   Cloaking Review trên đúng record đã chọn. Quyết định `not_cloaking` phải
-  loại khối evidence và attachment cloaking trước khi gửi report thường. UI chỉ
-  hiển thị record của ngày địa phương hiện tại; record cũ vẫn giữ nội bộ để audit
-  nhưng sang ngày mới phải check lại URL để tạo case mới.
+  loại khối evidence/attachment cloaking, rồi dùng Browser Evidence report thường
+  riêng đã preview (nguồn–đích, passive fallback hoặc upload) trước khi gửi. UI
+  chỉ hiển thị record của ngày địa phương hiện tại; record cũ vẫn giữ nội bộ để
+  audit nhưng sang ngày mới phải check lại URL để tạo case mới.
 - Nút precheck Domain Worker dùng schema v4: lookup email và cloaking chạy song
   song theo từng full URL, cloaking không dùng cache email và case cần duyệt chỉ
   enqueue/ghi preflight tăng dần khi có ít nhất một email nhận hợp lệ. Case
@@ -98,9 +99,12 @@ Không tự khởi động Streamlit nếu người dùng chưa yêu cầu. Buil
   mới phân loại cloaking.
 - Sau recipient/cloaking precheck, domain thường phải capture Browser Evidence.
   Chỉ evidence hợp lệ mới vào `ready`; capture lỗi vào `evidence_review`, tách
-  khỏi batch tự động. Check Domain và danh sách này nhận 1–3 ảnh PNG/JPEG thủ
-  công, preview ngay, tạo manifest hash không qua nút lưu; gửi lỗi giữ evidence
-  để retry. Đây là evidence report thường, không thay quy tắc 2–4 ảnh cloaking.
+  khỏi batch tự động. Check Domain và page `Domain Evidence Review` nhận 1–3 ảnh
+  PNG/JPEG thủ công, preview thumbnail ngay; Domain Worker chỉ hiển thị số lượng/link
+  và không có uploader inline. Review phải tạo dry-run preview exact theo từng
+  account/recipient, giữ fingerprint draft + manifest trước SMTP; gửi lỗi giữ
+  evidence và retry chỉ delivery còn thiếu. Đây là evidence report thường, không
+  thay quy tắc 2–4 ảnh cloaking.
 - Verified navigation là lớp opt-in riêng cho report thường: chỉ click anchor
   HTTP(S) hoặc button `data-href` không submit có nhãn Register/Login trong
   browser cô lập, chụp đúng ảnh trước/sau và ghi URL cuối + redirect 3xx vào
@@ -208,6 +212,30 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-09-08 — Đồng bộ Browser Evidence nguồn–đích cho Provider Replies và
+  Cloaking Review: thêm helper dùng chung ưu tiên hai ảnh URL nguồn/URL đích rồi
+  fallback một ảnh nguồn; Provider Replies preview/gửi toàn bộ PNG + manifest và
+  narrative DOM-open không claim click. Disposition `not_cloaking` loại evidence
+  cloaking nhưng bắt buộc Browser Evidence report thường riêng, hỗ trợ upload 1–3
+  ảnh, chèn block tiếng Anh vào draft và khóa fingerprint trước SMTP; file chính:
+  `browser_evidence.py`, `provider_replies.py`, `pages/9_Provider_Replies.py`,
+  `cloaking_review_sender.py`, `pages/10_Cloaking_Review.py`, test core/UI; đã
+  kiểm tra: focused/AppTest, 236/236 full unittest, compileall, pip check và diff
+  check; tài liệu: `README.md`, `03_Technical_Guide.md`, file này và skill dự án;
+  lưu ý: chỉ mock browser/SMTP, không mở URL hoặc gửi email thật.
+
+- 2026-09-08 — Tách hoàn toàn upload evidence khỏi Domain Worker và hoàn thiện
+  Domain Evidence Review: Domain Worker chỉ còn hiển thị số lượng/liên kết; page
+  review tạo dry-run preview một lần, hiển thị đúng To/Subject/body theo từng
+  account + recipient, rồi gửi chính delivery plan đó sau khi kiểm tra fingerprint
+  draft/ảnh. Ledger hiển thị trạng thái từng delivery; retry tự bỏ qua lượt đã gửi
+  thành công trong ngày và chỉ xử lý account/recipient còn thiếu; không tạo job mới;
+  file chính: `domain_worker.py`, `pages/6_Domain_Worker.py`,
+  `pages/12_Domain_Evidence_Review.py`, test worker/UI; đã kiểm tra: focused test,
+  AppTest, 231/231 full unittest, compileall, pip check và diff check; tài liệu:
+  `README.md`, `03_Technical_Guide.md`, file này và skill dự án; lưu ý: chỉ mock
+  SMTP/browser, không mở URL thật hoặc gửi report thật.
 
 - 2026-09-08 — Domain Worker evidence capture: precheck v4 thử mở destination HTTP(S)
   từ control Register/Login trong DOM để chụp ảnh nguồn + đích; nếu không có URL tĩnh
@@ -546,7 +574,7 @@ vào phần này.
 
 Nhóm `link_status` đã thống nhất Cloudflare warning/HTTP 403 là `BLOCKED`, không
 phải `LIVE` hay `DIE`; mock response không iterable được xử lý an toàn. Toàn bộ
-test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 229 test.
+test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 236 test.
 Detector cloaking có test thuần cho scoring/profile/path/vantage, fake browser
 cho Playwright và mock attachment worker; không dùng URL nghi ngờ hay SMTP thật
 trong test.

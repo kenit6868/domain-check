@@ -806,6 +806,102 @@ def capture_verified_navigation_evidence(*args, **kwargs) -> dict:
     return capture_dom_destination_evidence(*args, **kwargs)
 
 
+def capture_normal_report_evidence(
+    target_url: str,
+    evidence_root: str,
+    *,
+    profile_name: str = DEFAULT_PROFILE,
+    user_agent: str = DEFAULT_USER_AGENT,
+    viewport: dict | None = None,
+    timeout_ms: int = 45_000,
+    headless: bool = True,
+) -> dict:
+    """Capture the strongest safe Browser Evidence for a normal report.
+
+    Prefer the two-image source/destination artifact exposed by a static
+    Register/Login DOM control.  When no safe destination can be opened, keep
+    the report usable by falling back to one passive source-page screenshot.
+    Both branches return a validated screenshot set plus its manifest.
+    """
+
+    def _attempt(value) -> dict:
+        value = value if isinstance(value, dict) else {}
+        return {
+            "success": bool(value.get("success")),
+            "terminal": bool(value.get("terminal")),
+            "terminal_stage": str(value.get("terminal_stage") or ""),
+            "evidence_type": str(value.get("evidence_type") or ""),
+            "error": redact_text(value.get("error", ""))[:500],
+        }
+
+    def _valid(value) -> bool:
+        try:
+            return bool(evidence_attachment_paths(value))
+        except (OSError, TypeError, ValueError):
+            return False
+
+    shared = {
+        "user_agent": user_agent,
+        "viewport": viewport,
+        "timeout_ms": timeout_ms,
+        "headless": headless,
+    }
+    try:
+        dom_result = capture_dom_destination_evidence(
+            target_url,
+            evidence_root,
+            profile_name=f"{profile_name}_dom_destination",
+            **shared,
+        )
+    except Exception as exc:  # Keep the passive fallback available.
+        dom_result = {
+            "success": False,
+            "terminal": False,
+            "error": redact_text(exc),
+        }
+    if _valid(dom_result):
+        result = dict(dom_result)
+        result["capture_strategy"] = "dom_destination"
+        result["fallback_reason"] = ""
+        result["dom_destination_attempt"] = _attempt(dom_result)
+        return result
+
+    try:
+        passive_result = capture_passive_browser_evidence(
+            target_url,
+            evidence_root,
+            profile_name=f"{profile_name}_passive",
+            **shared,
+        )
+    except Exception as exc:  # Return a sanitized failure instead of crashing UI.
+        passive_result = {
+            "success": False,
+            "terminal": False,
+            "error": redact_text(exc),
+        }
+    if _valid(passive_result):
+        result = dict(passive_result)
+        result["capture_strategy"] = "passive_fallback"
+        result["fallback_reason"] = (
+            _attempt(dom_result)["error"] or "DOM destination was not available"
+        )
+        result["dom_destination_attempt"] = _attempt(dom_result)
+        return result
+
+    if isinstance(passive_result, dict) and passive_result.get("terminal"):
+        result = dict(passive_result)
+    elif isinstance(dom_result, dict) and dom_result.get("terminal"):
+        result = dict(dom_result)
+    else:
+        result = dict(
+            passive_result if isinstance(passive_result, dict) else dom_result
+        )
+    result["capture_strategy"] = "terminal" if result.get("terminal") else "failed"
+    result["dom_destination_attempt"] = _attempt(dom_result)
+    result["passive_attempt"] = _attempt(passive_result)
+    return result
+
+
 def validate_evidence_artifacts(result: dict) -> dict:
     """Validate one automatic or 1-3 manual screenshots and their manifest."""
     raw_paths = (result or {}).get("screenshot_paths") or []

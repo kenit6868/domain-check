@@ -81,10 +81,13 @@ Các trang (xem sidebar bên trái):
   job gửi batch
 - **Cloaking Review** — hàng đợi bền vững để xem evidence của từng domain, xem
   trước đúng draft/email nhận rồi gửi SMTP trực tiếp; không hiển thị case không
-  có email nhận và không tạo worker job gửi
+  có email nhận và không tạo worker job gửi. Khi chọn **Không phải cloaking**,
+  page yêu cầu Browser Evidence report thường: ưu tiên hai ảnh URL nguồn/đích,
+  fallback một ảnh nguồn hoặc upload 1–3 ảnh.
 - **Domain Evidence Review** — danh sách riêng trong ngày cho domain thường
-  không capture được ảnh; upload 1–3 ảnh, xem thumbnail và gửi trực tiếp khi
-  worker và các batch khác vẫn đang chạy
+  không capture được ảnh; upload 1–3 ảnh, xem thumbnail và tạo preview draft
+  trước khi gửi trực tiếp khi worker và các batch khác vẫn đang chạy. Mỗi
+  delivery hiển thị rõ account/email nhận/draft; retry chỉ gửi lượt còn thiếu.
 - **Thống kê email** — chọn ngày (mặc định hôm nay) và đếm toàn bộ thư nhận, đã
   gửi và thư rác của từng tài khoản IMAP. Công cụ dùng `INTERNALDATE`, đổi sang múi giờ địa
   phương rồi mới lọc ngày; chỉ đọc khi bấm **Kiểm tra** và không đổi cờ đã đọc.
@@ -160,10 +163,12 @@ Chế độ này chưa được bật tự động cho detector cloaking; cloaki
 HTTP đa profile và Playwright thụ động.
 
 Phase 2 đã chuyển **Phản hồi NCC** sang lõi này. Nút tạo ảnh DOM vẫn mở Chrome
-có giao diện để người vận hành xử lý challenge nếu cần, nhưng capture không
-click hoặc submit. Page giữ evidence trong session qua rerun, hiển thị thumbnail,
-requested URL, landing URL, DOM destination và số redirect HTTP; khi gửi reply,
-ảnh PNG và manifest đã kiểm tra hash được đính kèm đúng theo preview. Upload thủ
+có giao diện nhưng capture không click hoặc submit. Page ưu tiên chụp hai ảnh:
+URL nguồn và URL đích được đọc từ control Register/Login; nếu không có URL đích
+an toàn thì fallback sang một ảnh nguồn thụ động. Evidence được giữ trong session
+qua rerun, hiển thị thumbnail, requested/landing/DOM/final URL; khi gửi reply,
+toàn bộ PNG cùng manifest đã kiểm tra hash được đính kèm đúng theo preview. Draft
+DOM-open mô tả thao tác mở URL trực tiếp, không khẳng định đã click. Upload thủ
 công và URLScan vẫn được giữ làm fallback tạm thời trong phase chuyển đổi.
 
 Các consumer đã tích hợp theo các phase riêng: Provider Replies và Check Domain
@@ -272,9 +277,13 @@ Luồng sử dụng hiện tại:
    cùng context/referrer để chụp ảnh nguồn và ảnh đích. Nếu không có destination HTTP(S)
    tĩnh hoặc mở đích không thành công, worker fallback sang capture thụ động trang nguồn.
    Chỉ capture thất bại thật sự mới vào **Domain Evidence Review**; page này gộp URL duy nhất
-   trong ngày, hiển thị thumbnail, cho upload 1–3 ảnh và gửi trực tiếp. Upload được preview
-   ngay; gửi lỗi giữ evidence để retry, còn bản ghi trùng ở các job cũ được đánh dấu hoàn tất;
-   page vẫn hoạt động khi worker đang prechecking/running.
+   trong ngày, hiển thị thumbnail và cho upload 1–3 ảnh. Bấm **Tạo / cập nhật draft để xem**
+   để chạy pipeline một lần và xem đúng To/Subject/body theo từng account + recipient; chưa có
+   email nào được gửi ở bước này. Sau khi xác nhận, hệ thống gửi đúng delivery plan đã preview,
+   kiểm tra lại fingerprint ảnh/draft trước SMTP; gửi lỗi giữ evidence và trạng thái từng lượt để
+   retry chỉ phần còn thiếu, còn bản ghi trùng ở các job cũ được đánh dấu hoàn tất. Domain Worker
+   chỉ hiển thị số lượng/link và không còn uploader inline; page review vẫn hoạt động khi worker
+   đang prechecking/running.
    Trang lỗi trình duyệt/DNS được đánh dấu terminal, không yêu cầu upload ảnh lỗi và vẫn gửi draft thường.
 4. Có thể mở **Cloaking Review** ngay trong lúc precheck hoặc Domain Worker thường
    đang chạy. Chọn một case, chọn chế độ/tài khoản, bấm **Tạo / cập nhật draft để
@@ -336,9 +345,13 @@ coi là cloaking. Kết quả cloaking có bốn mức:
 - Với cloaking đã xác nhận, draft tiếng Anh ghi rõ kết luận thủ công, dùng
   evidence đã duyệt trong queue và đính kèm manifest + đúng hai ảnh đại diện.
   Thiếu/rỗng/quá 10 MB một attachment hoặc thiếu cặp ảnh thì chặn gửi. Với
-  **Không phải cloaking**, tool loại toàn bộ khối evidence và attachment cloaking
-  trước cả preview; email sau đó là report phishing thông thường. Hash/size của
-  attachment được khóa theo preview; file bị đổi trước lúc bấm gửi sẽ bị chặn.
+  **Không phải cloaking**, tool loại toàn bộ khối evidence/attachment cloaking,
+  rồi yêu cầu Browser Evidence riêng cho report phishing thông thường. Nút capture
+  ưu tiên hai ảnh URL nguồn + URL đích từ DOM, fallback một ảnh nguồn; nếu chưa
+  capture trước thì thao tác tạo draft tự chạy bước này. Khi tự động thất bại có
+  thể upload 1–3 ảnh. Browser Evidence được chèn vào draft và đính kèm
+  cùng manifest. Hash/size của attachment được khóa theo preview; file bị đổi trước
+  lúc bấm gửi sẽ bị chặn.
 - Cloaking Review không launch process và không tạo job gửi. Nội dung đã preview
   được chuyển nguyên vẹn vào SMTP helper hiện có; kết quả từng delivery được ghi
   ngay vào ledger để một lần gửi bị gián đoạn không gửi lại email đã thành công.

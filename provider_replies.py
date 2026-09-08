@@ -699,7 +699,7 @@ def mark_mails_seen(account, mails_or_uids):
 
 
 def build_reply(mail, details):
-    warnings = []; target = (details.get("reported_url") or "").strip(); official = (details.get("official_url") or "").strip(); evidence = (details.get("evidence") or "").strip(); redirect_url = (details.get("redirect_url") or "").strip(); button_label = (details.get("button_label") or "Register/Login").strip()
+    warnings = []; target = (details.get("reported_url") or "").strip(); official = (details.get("official_url") or "").strip(); evidence = (details.get("evidence") or "").strip(); redirect_url = (details.get("redirect_url") or "").strip(); button_label = (details.get("button_label") or "Register/Login").strip(); browser_capture = details.get("browser_evidence") or {}; destination_final_url = str(browser_capture.get("final_url") or "").strip(); destination_opened = browser_capture.get("evidence_type") == "dom_destination_opened"
     subject = "Re: " + re.sub(r"^(re:\s*)+", "", mail.subject, flags=re.I)
     if mail.provider == "cloudflare" and mail.request_type in ("technical_evidence", "clarification") and mail.ticket:
         subject = f"Re: Phishing Report - Report ID {mail.ticket}"
@@ -724,20 +724,40 @@ def build_reply(mail, details):
                     f"\n\nThe website contains a \"{button_label}\" button that directly links users to an external destination:\n\n"
                     f"{redirect_url}\n\n"
                     "This behavior was verified directly in the page DOM. The button contains:\n\n"
-                    f'href="{redirect_url}"\n\n'
-                    "Steps to reproduce:\n\n"
-                    f"1. Visit {target}\n"
-                    f"2. Locate the \"{button_label}\" button.\n"
-                    "3. Click the button.\n"
-                    f"4. The user is directed to {redirect_url}."
+                    f'href="{redirect_url}"'
                 )
+                if destination_opened:
+                    core += (
+                        "\n\nVerification steps:\n\n"
+                        f"1. Open {target}.\n"
+                        f"2. Locate the \"{button_label}\" control and inspect its declared HTTP(S) destination.\n"
+                        f"3. Open {redirect_url} directly in a separate browser tab using the source page as referrer.\n"
+                        "4. No button click, credential entry, or form submission is performed."
+                    )
+                    if destination_final_url:
+                        core += f"\n5. The destination tab loads: {destination_final_url}."
+                else:
+                    core += (
+                        "\n\nSteps to reproduce:\n\n"
+                        f"1. Visit {target}\n"
+                        f"2. Locate the \"{button_label}\" button.\n"
+                        "3. Click the button.\n"
+                        f"4. The user is directed to {redirect_url}."
+                    )
             if evidence:
                 core += f"\n\nAdditional verified observations:\n{evidence}"
             if details.get("screenshot_attached") and redirect_url:
-                core += (
-                    "\n\nWe have attached a screenshot showing the reported website, the "
-                    f"\"{button_label}\" button, and the corresponding DOM element confirming the external destination URL."
-                )
+                if destination_opened:
+                    core += (
+                        "\n\nWe have attached source and destination screenshots plus a JSON "
+                        "manifest. They show the reported page, the declared DOM destination, "
+                        "and the page displayed after that destination URL was opened directly."
+                    )
+                else:
+                    core += (
+                        "\n\nWe have attached a screenshot showing the reported website, the "
+                        f"\"{button_label}\" button, and the corresponding DOM element confirming the external destination URL."
+                    )
             if target and redirect_url:
                 source_domain = re.sub(r"^https?://", "", target, flags=re.I).split("/", 1)[0]
                 destination_domain = re.sub(r"^https?://", "", redirect_url, flags=re.I).split("/", 1)[0]
@@ -1007,13 +1027,14 @@ def _capture_dom_link_evidence_legacy(target_url, domain="evidence"):
 
 
 def capture_dom_link_evidence(target_url, domain="evidence"):
-    """Create Provider Replies evidence through the shared passive core.
+    """Create Provider Replies evidence through the shared browser core.
 
     The compatibility fields (``path``, ``href``, ``label`` and ``html``) keep
-    existing callers stable while the complete result exposes the manifest,
-    landing URL and server-side redirect chain. No DOM control is clicked.
+    existing callers stable. A safe Register/Login destination produces source
+    and destination screenshots; otherwise the shared core falls back to one
+    passive source screenshot. No DOM control is clicked or form submitted.
     """
-    result = browser_evidence.capture_passive_browser_evidence(
+    result = browser_evidence.capture_normal_report_evidence(
         target_url,
         EVIDENCE_DIR,
         profile_name="provider_reply_desktop",
@@ -1042,6 +1063,8 @@ def capture_dom_link_evidence(target_url, domain="evidence"):
         "html": control.get("dom_element", ""),
         "manifest_path": result.get("manifest_path", ""),
         "http_redirect_chain": (manifest.get("http") or {}).get("redirect_chain") or [],
+        "final_url": str(result.get("final_url") or manifest.get("final_url") or ""),
+        "capture_strategy": str(result.get("capture_strategy") or ""),
     }
 
 

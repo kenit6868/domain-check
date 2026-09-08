@@ -336,15 +336,15 @@ with right:
     if mail.request_type == "screenshot" or requires_redirect_evidence:
         st.markdown("**Ảnh chụp bằng chứng**")
         st.caption(
-            "Ưu tiên ảnh DOM tự động. Công cụ chỉ đọc element và href, không click nút hoặc gửi form. "
-            "Khi Chrome mở, hãy giữ cửa sổ mở và hoàn tất xác minh Cloudflare (nếu có); "
-            "công cụ sẽ tự đọc nút rồi đóng Chrome sau khi chụp xong."
+            "Công cụ ưu tiên đọc URL từ control Đăng ký/Đăng nhập, chụp trang nguồn, "
+            "mở URL đó trong tab mới và chụp trang đích. Nếu không có URL đích an toàn, "
+            "hệ thống fallback sang một ảnh trang nguồn; không click hoặc submit form."
         )
         if st.button(
-            "Tạo ảnh DOM + href tự động", key=f"{key}_capture_dom",
+            "Chụp URL nguồn + URL đích từ DOM", key=f"{key}_capture_dom",
             disabled=not bool(reported_url), type="primary",
         ):
-            with st.spinner("Đang mở Chrome; hãy hoàn tất Cloudflare nếu được hỏi và đừng đóng cửa sổ..."):
+            with st.spinner("Đang mở Chrome và tạo Browser Evidence; chưa gửi email..."):
                 dom_capture = capture_dom_link_evidence(reported_url, mail.domain or reported_url)
             if dom_capture["success"]:
                 st.session_state[attachment_key] = dom_capture["path"]
@@ -354,12 +354,16 @@ with right:
                     st.session_state[detected_redirect_key] = dom_capture["href"]
                 if dom_capture.get("label"):
                     st.session_state[detected_button_key] = dom_capture["label"]
-                st.session_state[f"{key}_capture_notice"] = "Đã tạo ảnh DOM và tự điền href từ element."
+                image_count = len(dom_capture.get("screenshot_paths") or []) or 1
+                st.session_state[f"{key}_capture_notice"] = (
+                    f"Đã tạo {image_count} ảnh Browser Evidence và tự điền URL từ DOM."
+                )
                 st.rerun()
             else:
-                st.error(f"Không tạo được ảnh DOM: {dom_capture['error']}")
-        if st.session_state.pop(f"{key}_capture_notice", None):
-            st.success("Đã tạo ảnh DOM và tự điền href từ element.")
+                st.error(f"Không tạo được Browser Evidence: {dom_capture['error']}")
+        capture_notice = st.session_state.pop(f"{key}_capture_notice", None)
+        if capture_notice:
+            st.success(capture_notice)
         uploaded_image = st.file_uploader(
             "Upload ảnh chụp sau khi bấm nút đăng ký / kiểm tra redirect",
             type=["png", "jpg", "jpeg"], key=f"{key}_evidence_upload",
@@ -391,12 +395,22 @@ with right:
         browser_capture = st.session_state.get(browser_evidence_key) or {}
         browser_attachments = browser_evidence_attachment_paths(browser_capture)
         if screenshot_path and os.path.isfile(screenshot_path):
-            st.image(screenshot_path, caption="Ảnh sẽ được đính kèm email", width=520)
             if browser_capture:
                 if browser_attachments:
                     st.success("Ảnh và manifest đã được kiểm tra hash, sẵn sàng đính kèm.")
+                    screenshot_paths = [
+                        path
+                        for path in (
+                            browser_capture.get("screenshot_paths") or [screenshot_path]
+                        )
+                        if path and os.path.isfile(path)
+                    ]
+                    with st.container(horizontal=True, gap="small"):
+                        for index, image_path in enumerate(screenshot_paths):
+                            role = "URL nguồn" if index == 0 else "URL đích"
+                            st.image(image_path, caption=role, width=300)
                     evidence_meta = st.container(border=True)
-                    evidence_meta.caption("Browser evidence chỉ đọc — không click hoặc submit")
+                    evidence_meta.caption("Browser Evidence — không click hoặc submit")
                     evidence_meta.write(f"**Requested URL:** `{browser_capture.get('requested_url', '')}`")
                     evidence_meta.write(f"**Landing URL:** `{browser_capture.get('landing_url', '')}`")
                     evidence_meta.write(
@@ -404,12 +418,19 @@ with right:
                         + str(browser_capture.get("resolved_destination") or "Không tìm thấy")
                         + "`"
                     )
+                    if browser_capture.get("final_url"):
+                        evidence_meta.write(
+                            f"**Final destination URL:** `{browser_capture.get('final_url')}`"
+                        )
                     hops = browser_capture.get("http_redirect_chain") or []
                     evidence_meta.caption(
-                        f"Server-side redirect: {len(hops)} hop · Loại: dom_observed · Navigation verified: Không"
+                        f"Server-side redirect: {len(hops)} hop · Capture: "
+                        f"{browser_capture.get('capture_strategy') or browser_capture.get('evidence_type') or 'browser'}"
                     )
                 else:
                     st.error("Browser evidence đã thay đổi hoặc không còn hợp lệ. Hãy chụp lại trước khi gửi.")
+            else:
+                st.image(screenshot_path, caption="Ảnh sẽ được đính kèm email", width=520)
             result_url = st.session_state.get(f"{key}_urlscan_result", "")
             if result_url: st.link_button("Mở báo cáo URLScan", result_url)
     else:
@@ -422,6 +443,7 @@ with right:
     has_valid_screenshot = bool(browser_attachments or has_legacy_screenshot)
     details = {"reported_url": reported_url, "button_label": button_label, "redirect_url": redirect_url, "official_url": official_url, "evidence": evidence,
                "screenshot_attached": has_valid_screenshot,
+               "browser_evidence": browser_capture,
                "urlscan_result": st.session_state.get(f"{key}_urlscan_result", ""),
                "contact_name": cfg.get("contact_name", ""), "contact_email": cfg.get("contact_email", "")}
     default_subject, default_body, warnings = build_reply(mail, details)

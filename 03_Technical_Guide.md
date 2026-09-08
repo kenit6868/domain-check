@@ -256,9 +256,13 @@ nguồn sự thật, kể cả khi lần tạo draft hiện tại không tái hi
 Draft tiếng Anh ghi rõ operator đã xác nhận cloaking và chỉ được gửi khi có
 manifest cùng hai ảnh hợp lệ, không rỗng và không quá 10 MB mỗi file. Disposition
 **Không phải cloaking** loại khối evidence lẫn mọi attachment cloaking trước khi
-preview và gửi report phishing thông thường. Preview lưu size + SHA256 của từng
-attachment; nếu file thay đổi trước SMTP, người vận hành phải kiểm tra và tạo lại
-preview.
+preview. Sau đó page yêu cầu một Browser Evidence độc lập cho report phishing
+thông thường: gọi capture nguồn–đích từ DOM, fallback capture thụ động một ảnh
+nguồn, hoặc nhận 1–3 ảnh upload. Nếu chưa có evidence, nút tạo draft tự chạy
+capture; nút capture riêng chỉ dùng khi muốn xem/chụp lại trước. Khối Browser Evidence tiếng Anh được chèn vào
+mọi draft; PNG + manifest đi cùng email. Preview lưu size + SHA256 của từng
+attachment report thường; nếu file thay đổi trước SMTP, người vận hành phải kiểm
+tra và tạo lại preview.
 
 Nếu Playwright không tạo được cặp ảnh hoàn chỉnh, Cloaking Review tự hiển thị
 uploader 2–4 ảnh và khóa bước tạo draft xác nhận cloaking. File được kiểm tra đủ
@@ -305,10 +309,14 @@ nhập dữ liệu, dùng credential, submit form hoặc tải file. Không có 
 toàn, DOM URL trùng trang nguồn hoặc đích là terminal thì capture thất
 bại và không để lại artifact; caller phải fallback sang capture thụ động/upload.
 
-Từ Phase 2, Provider Replies gọi lõi này thay vì tự triển khai capture DOM. UI
-giữ nguyên evidence set qua rerun và chỉ coi ảnh sẵn sàng khi PNG/manifest còn
-đúng hash. Reply gửi đúng thread đính kèm cả PNG lẫn manifest; upload thủ công và
-URLScan vẫn là fallback tạm thời.
+Từ Phase 2, Provider Replies gọi lõi này thay vì tự triển khai capture DOM. Nút
+capture dùng `capture_normal_report_evidence()`: ưu tiên
+`dom_destination_opened` với đúng hai ảnh nguồn/đích, sau đó fallback
+`dom_observed` một ảnh nguồn nếu không có destination an toàn. UI giữ nguyên
+evidence set qua rerun, hiển thị requested/landing/DOM/final URL và chỉ coi ảnh
+sẵn sàng khi toàn bộ PNG/manifest còn đúng hash. Reply gửi đúng thread đính kèm
+toàn bộ artifact; narrative DOM-open nói rõ URL được mở trực tiếp trong tab mới,
+không tuyên bố đã click. Upload thủ công và URLScan vẫn là fallback tạm thời.
 
 #### Check Domain — Phase 2.1 mở URL từ DOM
 
@@ -368,11 +376,15 @@ hoặc destination không mở được, worker dùng `capture_passive_browser_e
 
 Page **Domain Evidence Review** đọc tất cả preflight v4 của các job chính, lọc theo ngày địa
 phương và dedupe theo full URL chuẩn hóa; case chỉ xuất hiện một lần dù bị check ở nhiều job.
-Operator chọn case, xem thumbnail và upload 1–3 ảnh thủ công rồi gửi trực tiếp bằng SMTP helper.
-Không tạo review job mới; thao tác vẫn chạy độc lập khi worker đang prechecking/running/waiting.
-Evidence đã gửi lỗi được giữ để retry, còn case gửi hoàn tất bị loại khỏi danh sách.
-Khi một URL đã gửi thành công, các bản ghi chờ trùng URL trong job khác cũng được đánh dấu
-hoàn tất để không xuất hiện lại sau khi bản ghi mới nhất bị loại.
+Domain Worker chỉ hiển thị số lượng/link, không còn uploader inline. Operator chọn case, xem
+thumbnail và upload 1–3 ảnh thủ công rồi bấm **Tạo / cập nhật draft để xem**. Pipeline được
+chạy một lần ở chế độ dry-run, hiển thị đúng To/Subject/body đã personalize theo từng
+account + recipient và chưa gọi SMTP. Khi xác nhận, hệ thống kiểm tra fingerprint manifest,
+ảnh và draft; chỉ delivery plan đã preview mới được gửi. Ledger hiển thị rõ từng delivery,
+giữ evidence + trạng thái khi lỗi và retry chỉ các account/recipient còn thiếu; case gửi hoàn
+tất bị loại khỏi danh sách. Không tạo review job mới; thao tác vẫn chạy độc lập khi worker
+đang prechecking/running/waiting. Khi một URL đã gửi thành công, các bản ghi chờ trùng URL
+trong job khác cũng được đánh dấu hoàn tất để không xuất hiện lại sau khi bản ghi mới nhất bị loại.
 
 Nếu capture trả về terminal source (trình duyệt/DNS/provider warning), worker không đưa ảnh lỗi
 vào manual review và vẫn cho draft thường tiếp tục; trạng thái terminal không tự khẳng định domain đã bị thu hồi.

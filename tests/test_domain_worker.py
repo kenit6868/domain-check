@@ -445,6 +445,161 @@ class DomainWorkerTests(unittest.TestCase):
             self.assertEqual([], state["evidence_review"])
             self.assertIn(target, state["manual_evidence_completed"])
 
+    def test_manual_evidence_preview_is_exact_plan_and_send_does_not_rerun_check(self):
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            runtime = Path(runtime_dir)
+            worker_root = runtime / "worker_jobs"
+            job_dir = worker_root / "preview-exact"
+            job_dir.mkdir(parents=True)
+            target = "https://preview-exact.example/login"
+            (job_dir / "job.json").write_text(json.dumps({
+                "job_id": "preview-exact", "domains": [target],
+                "allowed_accounts": ["sender@example.org"],
+                "include_vncert": False,
+            }), encoding="utf-8")
+            (job_dir / "preflight.json").write_text(json.dumps({
+                "version": 4, "evidence_review": [{
+                    "target_url": target, "domain": "preview-exact.example",
+                    "recipients": [{"channel": "registrar", "email": "abuse@example.org"}],
+                }],
+            }), encoding="utf-8")
+            draft_path = job_dir / "preview-exact.example_registrar_report.txt"
+            draft_path.write_text(
+                "To: abuse@example.org\nSubject: Abuse report\n\n"
+                "Reported URL: https://preview-exact.example/login\n\n"
+                "This is the exact draft body.\nRegards,\nNeik\n",
+                encoding="utf-8",
+            )
+            evidence = browser_evidence.create_manual_browser_evidence(
+                target,
+                [("source.png", b"\x89PNG\r\n\x1a\n")],
+                str(runtime / "evidence"),
+                profile_name="test_manual",
+            )
+            check_result = {
+                "domain": "preview-exact.example", "drafts": [str(draft_path)],
+                "reputation": {"verdict": "suspicious"},
+                "cloaking": {"verdict": "NO_SIGNAL", "score": 0, "signals": []},
+            }
+            sent_log = runtime / "sent.csv"
+            with (
+                patch.object(domain_worker, "WORKER_DIR", str(worker_root)),
+                patch.object(domain_worker.pt, "SENT_LOG_PATH", str(sent_log)),
+                patch.object(domain_worker.pt, "load_config", return_value={
+                    "contact_name": "Neik", "contact_email": "neik@example.org",
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(domain_worker.pt, "run_check", return_value=check_result) as run_check,
+                patch.object(
+                    domain_worker.pt, "run_cloaking_browser_check",
+                    return_value=check_result["cloaking"],
+                ),
+            ):
+                preview = domain_worker.prepare_manual_evidence_preview(
+                    str(job_dir), target, evidence, ["sender@example.org"],
+                )
+                self.assertEqual("pending", preview["delivery_plan"][0]["status"])
+                expected_body = preview["delivery_plan"][0]["body"]
+                run_check.reset_mock()
+                with (
+                    patch.object(
+                        domain_worker.pt, "send_report_email_single",
+                        return_value={"success": True, "account": "sender@example.org"},
+                    ) as send,
+                    patch.object(domain_worker.pt, "log_sent"),
+                ):
+                    result = domain_worker.send_manual_evidence_item(
+                        str(job_dir), target, evidence, ["sender@example.org"],
+                        preview=preview,
+                    )
+            self.assertEqual(1, result["sent_ok"])
+            self.assertEqual(0, result["sent_failed"])
+            send.assert_called_once()
+            self.assertEqual(expected_body, send.call_args.args[2])
+            run_check.assert_not_called()
+            self.assertEqual([], domain_worker.list_evidence_review_items(root=str(worker_root)))
+
+    def test_manual_evidence_preview_retries_only_failed_account_delivery(self):
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            runtime = Path(runtime_dir)
+            worker_root = runtime / "worker_jobs"
+            job_dir = worker_root / "preview-partial"
+            job_dir.mkdir(parents=True)
+            target = "https://preview-partial.example/login"
+            accounts = ["first@example.org", "second@example.org"]
+            (job_dir / "job.json").write_text(json.dumps({
+                "job_id": "preview-partial", "domains": [target],
+                "allowed_accounts": accounts, "include_vncert": False,
+            }), encoding="utf-8")
+            (job_dir / "preflight.json").write_text(json.dumps({
+                "version": 4, "evidence_review": [{
+                    "target_url": target, "domain": "preview-partial.example",
+                    "recipients": [{"channel": "registrar", "email": "abuse@example.org"}],
+                }],
+            }), encoding="utf-8")
+            draft_path = job_dir / "preview-partial.example_registrar_report.txt"
+            draft_path.write_text(
+                "To: abuse@example.org\nSubject: Abuse report\n\n"
+                "Reported URL: https://preview-partial.example/login\n\n"
+                "Body\nRegards,\nNeik\n",
+                encoding="utf-8",
+            )
+            evidence = browser_evidence.create_manual_browser_evidence(
+                target,
+                [("source.png", b"\x89PNG\r\n\x1a\n")],
+                str(runtime / "evidence"), profile_name="test_manual",
+            )
+            check_result = {
+                "domain": "preview-partial.example", "drafts": [str(draft_path)],
+                "reputation": {"verdict": "suspicious"},
+                "cloaking": {"verdict": "NO_SIGNAL", "score": 0, "signals": []},
+            }
+            sent_log = runtime / "sent.csv"
+            cfg = {
+                "contact_name": "Neik", "contact_email": "neik@example.org",
+                "smtp_accounts": [{"username": account} for account in accounts],
+            }
+            with (
+                patch.object(domain_worker, "WORKER_DIR", str(worker_root)),
+                patch.object(domain_worker.pt, "SENT_LOG_PATH", str(sent_log)),
+                patch.object(domain_worker.pt, "load_config", return_value=cfg),
+                patch.object(domain_worker.pt, "run_check", return_value=check_result),
+                patch.object(
+                    domain_worker.pt, "run_cloaking_browser_check",
+                    return_value=check_result["cloaking"],
+                ),
+            ):
+                preview = domain_worker.prepare_manual_evidence_preview(
+                    str(job_dir), target, evidence, accounts,
+                )
+                outcomes = {
+                    accounts[0]: {"success": True, "account": accounts[0]},
+                    accounts[1]: {"success": False, "account": accounts[1], "error": "temporary"},
+                }
+                with patch.object(
+                    domain_worker.pt, "send_report_email_single",
+                    side_effect=lambda _to, _subject, _body, account, _proxy, attachments=None:
+                        outcomes[account["username"]],
+                ) as send:
+                    first = domain_worker.send_manual_evidence_item(
+                        str(job_dir), target, evidence, accounts, preview=preview,
+                    )
+                self.assertEqual((1, 1), (first["sent_ok"], first["sent_failed"]))
+
+                with patch.object(
+                    domain_worker.pt, "send_report_email_single",
+                    return_value={"success": True, "account": accounts[1]},
+                ) as retry_send:
+                    second = domain_worker.send_manual_evidence_item(
+                        str(job_dir), target, evidence, accounts, preview=preview,
+                    )
+            self.assertEqual(0, second["sent_failed"])
+            self.assertEqual(1, second["sent_ok"])
+            self.assertEqual(1, second["already_sent"])
+            self.assertEqual(1, retry_send.call_count)
+            self.assertEqual(accounts[1], retry_send.call_args.args[3]["username"])
+            self.assertEqual([], domain_worker.list_evidence_review_items(root=str(worker_root)))
+
     def test_manual_evidence_send_hides_duplicate_pending_jobs(self):
         target = "https://duplicate-send.example/path"
         with tempfile.TemporaryDirectory() as worker_root, tempfile.TemporaryDirectory() as evidence_dir:

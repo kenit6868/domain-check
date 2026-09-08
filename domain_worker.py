@@ -4,6 +4,7 @@
 import argparse
 import concurrent.futures
 import csv
+import hashlib
 import json
 import os
 import signal
@@ -608,6 +609,108 @@ def _precheck_drafts(domain: str, drafts: list, include_vncert: bool, events_pat
     return prepared
 
 
+def _sha256_file(path: str) -> str:
+    """Return a stable fingerprint for a staged draft file."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _manual_evidence_draft_preview(
+    domain: str, drafts: list, cfg: dict, include_vncert: bool,
+    events_path: str, attachments: list[str], require_browser_evidence: bool,
+    target_url: str,
+) -> dict:
+    """Build the exact normal-report delivery plan without touching SMTP.
+
+    The returned ``delivery_plan`` contains the already-personalized body that
+    the review page renders.  The send path verifies the draft file hashes and
+    sends this same plan, so a preview cannot silently drift between review and
+    confirmation.
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(events_path)), exist_ok=True)
+    prepared_drafts = []
+    draft_errors = []
+    for path in drafts or []:
+        filename = os.path.basename(str(path))
+        if not include_vncert and filename.endswith("_vncert_report.txt"):
+            continue
+        try:
+            parsed = pt.parse_draft_email(path)
+        except Exception as exc:
+            draft_errors.append({"draft": filename, "error": str(exc)})
+            continue
+        if not parsed.get("to") or not parsed.get("subject"):
+            draft_errors.append({"draft": filename, "error": "Draft không có recipient/Subject hợp lệ"})
+            continue
+        errors = pt.validate_report_delivery(
+            parsed,
+            target_url=target_url,
+            attachments=attachments,
+            require_browser_evidence=require_browser_evidence,
+        )
+        if errors:
+            draft_errors.append({"draft": filename, "error": "; ".join(errors)})
+            continue
+        try:
+            fingerprint = _sha256_file(path)
+        except OSError as exc:
+            draft_errors.append({"draft": filename, "error": f"Không đọc được draft: {exc}"})
+            continue
+        prepared_drafts.append({
+            "path": os.path.abspath(path),
+            "parsed": {
+                "to": str(parsed.get("to") or "").strip(),
+                "subject": str(parsed.get("subject") or "").strip(),
+                "body": str(parsed.get("body") or ""),
+            },
+            "draft": filename,
+            "sha256": fingerprint,
+        })
+
+    accounts = list(cfg.get("smtp_accounts") or [])
+    sent_deliveries = _successfully_sent_deliveries_today()
+    delivery_plan = []
+    for account_cfg in accounts:
+        account_name = str(account_cfg.get("username") or "").strip()
+        if not account_name:
+            continue
+        for item in prepared_drafts:
+            parsed = item["parsed"]
+            delivery_key = (
+                domain.lower().rstrip("."), account_name.lower(),
+                str(item["draft"]).lower(), str(parsed["to"]).lower(),
+            )
+            personalized = pt.personalize_email_body(parsed["body"], cfg, account_cfg)
+            delivery_plan.append({
+                "account": account_name,
+                "to": parsed["to"],
+                "subject": parsed["subject"],
+                "draft": item["draft"],
+                "path": item["path"],
+                "body": personalized,
+                "draft_sha256": item["sha256"],
+                "status": "already_sent" if delivery_key in sent_deliveries else "pending",
+            })
+
+    return {
+        "version": 1,
+        "prepared_at": _now(),
+        "domain": domain,
+        "target_url": target_url,
+        "include_vncert": bool(include_vncert),
+        "require_browser_evidence": bool(require_browser_evidence),
+        "attachments": [os.path.abspath(str(path)) for path in attachments],
+        "drafts_total": len(drafts or []),
+        "drafts_sendable": len(prepared_drafts),
+        "draft_errors": draft_errors,
+        "prepared_drafts": prepared_drafts,
+        "delivery_plan": delivery_plan,
+    }
+
+
 def _precheck_report_recipients(domain: str) -> list[dict]:
     """Resolve real email report channels without running the investigation pipeline."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
@@ -1081,9 +1184,14 @@ def _write_preflight(
 def _run_prechecked_domain(
     prepared, cfg, selected_accounts, include_vncert, events_path, stop_path,
     sent_deliveries, approved_cloaking=False, operator_cloaking_evidence=None,
-    force_normal_report=False,
+    force_normal_report=False, *, dry_run=False,
 ):
-    """Run the full investigation once, then send only after revalidating draft recipients."""
+    """Run the full investigation once, then send after revalidating recipients.
+
+    ``dry_run=True`` stages the same drafts/evidence and returns a delivery plan
+    for Domain Evidence Review.  It never calls SMTP; the later send consumes
+    the plan after checking its fingerprints.
+    """
     target = prepared["target_url"]
     started = time.time()
     send_cfg = dict(cfg)
@@ -1160,6 +1268,16 @@ def _run_prechecked_domain(
             "skipped": "browser_evidence_required",
             "browser_evidence_error": prepared.get("browser_evidence_error") or "Missing valid Browser Evidence",
         }, set(), False)
+    if not force_normal_report and cloaking_verdict not in {"LIKELY", "POSSIBLE"}:
+        # ``pt.run_check`` may have staged a provisional cloaking block before
+        # the browser/terminal pass downgraded the final verdict.  Normal
+        # evidence review must never send that stale internal block.
+        refreshed = pt.remove_cloaking_evidence_from_drafts(result.get("drafts") or [])
+        if len(refreshed) != len(result.get("drafts") or []):
+            result["drafts_error"] = (
+                str(result.get("drafts_error") or "")
+                + "; Cloaking evidence could not be removed from every draft"
+            ).strip("; ")
     if browser_attachments:
         refreshed = pt.append_browser_evidence_to_drafts(
             result.get("drafts") or [], browser_capture,
@@ -1191,16 +1309,50 @@ def _run_prechecked_domain(
             for screenshot in (cloaking.get("operator_evidence") or {}).get("screenshots") or []
             if screenshot.get("path") and os.path.isfile(screenshot["path"])
         )
-    mail, successful_accounts, stopped_during_send = _send_domain_drafts(
-        domain, result.get("drafts") or [], send_cfg, include_vncert,
-        events_path, stop_path, sent_deliveries=sent_deliveries,
-        attachments=evidence_attachments,
-        require_browser_evidence=(
-            require_general_evidence
-            and not (approved_cloaking and not force_normal_report)
-        ),
-        target_url=(target if require_general_evidence else ""),
+    require_delivery_evidence = (
+        require_general_evidence
+        and not (approved_cloaking and not force_normal_report)
     )
+    delivery_target = target if require_general_evidence else ""
+    manual_preview = None
+    if dry_run:
+        manual_preview = _manual_evidence_draft_preview(
+            domain,
+            result.get("drafts") or [],
+            send_cfg,
+            include_vncert,
+            events_path,
+            evidence_attachments,
+            require_delivery_evidence,
+            delivery_target,
+        )
+        mail = {
+            "drafts_total": manual_preview["drafts_total"],
+            "drafts_sendable": manual_preview["drafts_sendable"],
+            "sent_ok": 0, "sent_failed": 0, "already_sent": sum(
+                item.get("status") == "already_sent"
+                for item in manual_preview["delivery_plan"]
+            ),
+            "sent_to": [
+                {
+                    "to": item["to"], "draft": item["draft"],
+                    "account": item["account"], "ok": item["status"] == "already_sent",
+                    "status": item["status"], "error": "",
+                }
+                for item in manual_preview["delivery_plan"]
+                if item.get("status") == "already_sent"
+            ],
+        }
+        successful_accounts = set()
+        stopped_during_send = False
+    else:
+        mail, successful_accounts, stopped_during_send = _send_domain_drafts(
+            domain, result.get("drafts") or [], send_cfg, include_vncert,
+            events_path, stop_path, sent_deliveries=sent_deliveries,
+            attachments=evidence_attachments,
+            require_browser_evidence=require_delivery_evidence,
+            target_url=delivery_target,
+        )
     domain_result = {
         "target_url": target, "domain": domain, "success": True,
         "duration_seconds": round(time.time() - started, 1),
@@ -1216,7 +1368,21 @@ def _run_prechecked_domain(
         "cloaking_result": cloaking,
         **mail,
     }
-    if mail.get("drafts_sendable", 0) == 0:
+    if manual_preview is not None:
+        # Kept in memory by the review page only.  It is removed before any
+        # event/preflight persistence so draft bodies are not copied to state JSON.
+        domain_result["manual_preview"] = {
+            **manual_preview,
+            "cloaking_result": cloaking,
+            "cloaking_verdict": cloaking_verdict,
+            "cloaking_score": cloaking.get("score", 0),
+            "cloaking_signals": cloaking.get("signals") or [],
+            "cloaking_evidence_path": cloaking.get("evidence_path", ""),
+            "browser_evidence": browser_capture,
+            "evidence_attachments": evidence_attachments,
+        }
+        domain_result["send_mode"] = "preview"
+    if mail.get("drafts_sendable", 0) == 0 and not dry_run:
         domain_result["skipped"] = "no_sendable_email"
         _log_no_email(domain, target)
     elif mail.get("sent_ok", 0) == 0 and mail.get("sent_failed", 0) == 0 and mail.get("already_sent", 0):
@@ -1224,8 +1390,285 @@ def _run_prechecked_domain(
     return domain_result, successful_accounts, stopped_during_send
 
 
+def _load_manual_evidence_context(job_dir: str, target_url: str) -> tuple[dict, dict]:
+    """Load one v4 evidence-review item and its source job."""
+    job_dir = os.path.abspath(job_dir)
+    with open(os.path.join(job_dir, "job.json"), encoding="utf-8") as handle:
+        job = json.load(handle)
+    preflight = _read_json(os.path.join(job_dir, "preflight.json"), {})
+    item = next(
+        (
+            dict(value) for value in (preflight.get("evidence_review") or [])
+            if isinstance(value, dict) and value.get("target_url") == target_url
+        ),
+        None,
+    )
+    if not item:
+        raise ValueError("Domain không còn trong danh sách cần ảnh thủ công")
+    return job, item
+
+
+def _filtered_manual_evidence_config(job: dict, allowed_accounts: list[str]) -> tuple[dict, list[dict]]:
+    """Return a config limited to the accounts selected for one review case."""
+    cfg = pt.load_config()
+    allowed = {str(value).strip().lower() for value in allowed_accounts if str(value).strip()}
+    job_allowed = {
+        str(value).strip().lower()
+        for value in (job.get("allowed_accounts") or [])
+        if str(value).strip()
+    }
+    if job_allowed:
+        allowed &= job_allowed
+    selected = [
+        account for account in (cfg.get("smtp_accounts") or [])
+        if str(account.get("username") or "").strip().lower() in allowed
+    ]
+    cfg["smtp_accounts"] = selected
+    return cfg, selected
+
+
+def _manual_evidence_fingerprints(paths: list[str]) -> list[dict]:
+    fingerprints = []
+    for path in paths:
+        absolute = os.path.abspath(str(path))
+        try:
+            fingerprints.append({
+                "path": absolute,
+                "size": os.path.getsize(absolute),
+                "sha256": _sha256_file(absolute),
+            })
+        except OSError as exc:
+            raise ValueError(f"Không đọc được attachment evidence: {exc}") from exc
+    return fingerprints
+
+
+def _validate_manual_evidence_preview(
+    preview: dict, *, job_dir: str, target_url: str, evidence: dict,
+    selected_accounts: list[str], cfg: dict,
+) -> None:
+    """Reject a stale/edited preview before any SMTP call."""
+    if not isinstance(preview, dict) or int(preview.get("version", 0) or 0) != 1:
+        raise ValueError("Draft preview không hợp lệ; hãy tạo lại preview.")
+    if os.path.abspath(str(preview.get("job_dir") or "")) != os.path.abspath(job_dir):
+        raise ValueError("Draft preview thuộc job khác; hãy tạo lại preview.")
+    if str(preview.get("target_url") or "") != str(target_url):
+        raise ValueError("Draft preview không còn khớp full URL hiện tại.")
+    selected = list(dict.fromkeys(
+        str(value).strip() for value in selected_accounts if str(value).strip()
+    ))
+    if list(preview.get("accounts") or []) != selected:
+        raise ValueError("Danh sách tài khoản đã thay đổi; hãy tạo lại preview.")
+    configured = {
+        str(account.get("username") or "").strip(): account
+        for account in (cfg.get("smtp_accounts") or [])
+        if str(account.get("username") or "").strip()
+    }
+    if set(preview.get("accounts") or []) - set(configured):
+        raise ValueError("Có tài khoản trong preview không còn trong cấu hình.")
+    current_attachments = browser_evidence.evidence_attachment_paths(evidence or {})
+    if current_attachments != list(preview.get("attachments") or []):
+        raise ValueError("Evidence đã thay đổi; hãy tạo lại preview trước khi gửi.")
+    current_fingerprints = _manual_evidence_fingerprints(current_attachments)
+    if current_fingerprints != list(preview.get("attachment_fingerprints") or []):
+        raise ValueError("Nội dung evidence đã thay đổi; hãy tạo lại preview trước khi gửi.")
+    for item in preview.get("prepared_drafts") or []:
+        path = os.path.abspath(str(item.get("path") or ""))
+        if not path or not os.path.isfile(path):
+            raise ValueError("Draft preview không còn file draft tương ứng.")
+        try:
+            current_hash = _sha256_file(path)
+        except OSError as exc:
+            raise ValueError(f"Không đọc được draft preview: {exc}") from exc
+        if current_hash != str(item.get("sha256") or ""):
+            raise ValueError("Nội dung draft đã thay đổi; hãy tạo lại preview.")
+    plan_accounts = list(dict.fromkeys(
+        str(item.get("account") or "").strip()
+        for item in (preview.get("delivery_plan") or [])
+        if str(item.get("account") or "").strip()
+    ))
+    if plan_accounts != selected:
+        raise ValueError("Delivery plan không còn khớp tài khoản đã chọn; hãy tạo lại preview.")
+
+
+def prepare_manual_evidence_preview(
+    job_dir: str, target_url: str, evidence: dict, allowed_accounts: list[str],
+) -> dict:
+    """Prepare and return the exact normal-report draft plan without sending.
+
+    The page keeps this result in Streamlit session state.  The result contains
+    draft/attachment fingerprints; ``send_manual_evidence_item`` revalidates
+    them and sends only the displayed body.
+    """
+    job_dir = os.path.abspath(job_dir)
+    job, prepared = _load_manual_evidence_context(job_dir, target_url)
+    attachments = browser_evidence.evidence_attachment_paths(evidence or {})
+    if not attachments:
+        raise ValueError("Browser Evidence thủ công không hợp lệ")
+    cfg, selected = _filtered_manual_evidence_config(job, allowed_accounts)
+    if not selected:
+        raise ValueError("Không có tài khoản SMTP hợp lệ được chọn")
+    prepared["browser_evidence"] = evidence
+    prepared["require_browser_evidence"] = True
+    events_path = os.path.join(job_dir, "events.jsonl")
+    result, _accounts, stopped = _run_prechecked_domain(
+        prepared, cfg, selected, bool(job.get("include_vncert", False)),
+        events_path, None, set(), dry_run=True,
+    )
+    if stopped:
+        raise ValueError("Đã dừng khi chuẩn bị draft preview")
+    if result.get("skipped") == "manual_review_required":
+        raise ValueError(
+            "Lần check lại phát hiện tín hiệu cloaking; domain cần được duyệt tại Cloaking Review."
+        )
+    preview = dict(result.get("manual_preview") or {})
+    if not preview or not preview.get("drafts_sendable"):
+        error = str(result.get("drafts_error") or "Không có draft email hợp lệ để gửi")
+        raise ValueError(error)
+    preview.update({
+        "job_dir": job_dir,
+        "accounts": [str(account.get("username") or "").strip() for account in selected],
+        "attachment_fingerprints": _manual_evidence_fingerprints(attachments),
+        "evidence": evidence,
+        "source_job_id": str(job.get("job_id") or os.path.basename(job_dir)),
+    })
+    return preview
+
+
+def manual_evidence_preview_is_current(
+    preview: dict | None, *, job_dir: str, target_url: str,
+    evidence: dict, selected_accounts: list[str],
+) -> bool:
+    """Return whether a review-page preview still matches current files/state."""
+    try:
+        job, _item = _load_manual_evidence_context(job_dir, target_url)
+        cfg, selected = _filtered_manual_evidence_config(job, selected_accounts)
+        _validate_manual_evidence_preview(
+            preview or {},
+            job_dir=os.path.abspath(job_dir),
+            target_url=target_url,
+            evidence=evidence,
+            selected_accounts=[
+                str(account.get("username") or "").strip()
+                for account in selected
+            ],
+            cfg=cfg,
+        )
+        return True
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return False
+
+
+def _send_manual_preview_deliveries(
+    preview: dict, cfg: dict, events_path: str,
+    sent_deliveries: set[tuple[str, str, str, str]],
+) -> tuple[dict, set[str], bool]:
+    """Send exactly the delivery plan generated by ``prepare_*_preview``."""
+    domain = str(preview.get("domain") or "")
+    attachments = list(preview.get("attachments") or [])
+    target_url = str(preview.get("target_url") or "")
+    require_browser_evidence = bool(preview.get("require_browser_evidence"))
+    summary = {
+        "drafts_total": int(preview.get("drafts_total", 0) or 0),
+        "drafts_sendable": int(preview.get("drafts_sendable", 0) or 0),
+        "sent_ok": 0, "sent_failed": 0, "already_sent": 0, "sent_to": [],
+    }
+    successful_accounts = set()
+    account_map = {
+        str(account.get("username") or "").strip(): account
+        for account in (cfg.get("smtp_accounts") or [])
+        if str(account.get("username") or "").strip()
+    }
+    proxies = cfg.get("smtp_proxies") or []
+    account_order = list(account_map)
+    prepared_by_path = {
+        os.path.abspath(str(item.get("path") or "")): item
+        for item in (preview.get("prepared_drafts") or [])
+    }
+    for delivery in preview.get("delivery_plan") or []:
+        account_name = str(delivery.get("account") or "").strip()
+        path = os.path.abspath(str(delivery.get("path") or ""))
+        filename = str(delivery.get("draft") or os.path.basename(path))
+        recipient = str(delivery.get("to") or "").strip()
+        if account_name not in account_map or path not in prepared_by_path:
+            summary["sent_failed"] += 1
+            summary["sent_to"].append({
+                "to": recipient, "draft": filename, "account": account_name,
+                "ok": False, "status": "failed", "error": "Delivery preview không hợp lệ",
+            })
+            continue
+        if target_url and not recipient:
+            summary["sent_failed"] += 1
+            continue
+        parsed = prepared_by_path[path].get("parsed") or {}
+        errors = pt.validate_report_delivery(
+            parsed, target_url=target_url, attachments=attachments,
+            require_browser_evidence=require_browser_evidence,
+        )
+        if errors:
+            error = "; ".join(errors)
+            summary["sent_failed"] += 1
+            summary["sent_to"].append({
+                "to": recipient, "draft": filename, "account": account_name,
+                "ok": False, "status": "failed", "error": error,
+            })
+            _append_event(events_path, {
+                "type": "draft_error", "domain": domain, "draft": filename,
+                "to": recipient, "account": account_name, "error": error,
+            })
+            continue
+        delivery_key = (domain.lower().rstrip("."), account_name.lower(), filename.lower(), recipient.lower())
+        if delivery_key in sent_deliveries:
+            summary["already_sent"] += 1
+            summary["sent_to"].append({
+                "to": recipient, "draft": filename, "account": account_name,
+                "ok": True, "status": "already_sent", "error": "",
+            })
+            continue
+        account_cfg = account_map[account_name]
+        account_index = account_order.index(account_name)
+        proxy = proxies[account_index % len(proxies)] if proxies else None
+        result = pt.send_report_email_single(
+            recipient,
+            str(delivery.get("subject") or parsed.get("subject") or ""),
+            str(delivery.get("body") or ""),
+            account_cfg,
+            proxy,
+            attachments=attachments or None,
+        )
+        ok = bool(result.get("success"))
+        delivery_account = str(result.get("account") or account_name).strip()
+        if ok:
+            successful_accounts.add(delivery_account.lower())
+            sent_deliveries.add(delivery_key)
+        summary["sent_ok" if ok else "sent_failed"] += 1
+        row = {
+            "to": recipient, "draft": filename, "account": delivery_account,
+            "ok": ok, "status": "sent" if ok else "failed",
+            "error": str(result.get("error") or ""),
+        }
+        summary["sent_to"].append(row)
+        try:
+            pt.log_sent({
+                "timestamp": _now(), "domain": domain, "draft_file": filename,
+                "to": recipient, "subject": delivery.get("subject") or "",
+                "account": delivery_account, "success": ok, "error": row["error"],
+            })
+        except Exception as exc:
+            _append_event(events_path, {
+                "type": "log_error", "domain": domain, "draft": filename,
+                "account": delivery_account, "error": str(exc),
+            })
+        _append_event(events_path, {
+            "type": "email_result", "domain": domain, "draft": filename,
+            "to": recipient, "account": delivery_account, "success": ok,
+            "error": row["error"],
+        })
+    return summary, successful_accounts, False
+
+
 def send_manual_evidence_item(
     job_dir: str, target_url: str, evidence: dict, allowed_accounts: list[str],
+    preview: dict | None = None,
 ) -> dict:
     """Send one preflight-isolated item directly after operator evidence upload."""
     job_dir = os.path.abspath(job_dir)
@@ -1278,26 +1721,57 @@ def send_manual_evidence_item(
     prepared["browser_evidence"] = evidence
     prepared["require_browser_evidence"] = True
 
-    cfg = pt.load_config()
-    allowed = {str(value).strip().lower() for value in allowed_accounts if str(value).strip()}
-    job_allowed = {
-        str(value).strip().lower() for value in (job.get("allowed_accounts") or [])
-        if str(value).strip()
-    }
-    if job_allowed:
-        allowed &= job_allowed
-    cfg["smtp_accounts"] = [
-        account for account in (cfg.get("smtp_accounts") or [])
-        if str(account.get("username") or "").strip().lower() in allowed
-    ]
-    if not cfg["smtp_accounts"]:
+    cfg, selected_accounts = _filtered_manual_evidence_config(job, allowed_accounts)
+    if not selected_accounts:
         release_claim()
         raise ValueError("Không có tài khoản SMTP hợp lệ được chọn")
     try:
-        result, _accounts, _stopped = _run_prechecked_domain(
-            prepared, cfg, cfg["smtp_accounts"], bool(job.get("include_vncert", False)),
-            events_path, None, _successfully_sent_deliveries_today(),
-        )
+        if preview is not None:
+            _validate_manual_evidence_preview(
+                preview,
+                job_dir=job_dir,
+                target_url=target_url,
+                evidence=evidence,
+                selected_accounts=[
+                    str(account.get("username") or "").strip()
+                    for account in selected_accounts
+                ],
+                cfg=cfg,
+            )
+            preview = dict(preview)
+            preview["evidence"] = evidence
+            mail, _accounts, _stopped = _send_manual_preview_deliveries(
+                preview, cfg, events_path, _successfully_sent_deliveries_today(),
+            )
+            result = {
+                "target_url": target_url,
+                "domain": preview.get("domain") or prepared.get("domain") or pt.normalize_domain(target_url),
+                "success": mail.get("sent_failed", 0) == 0 and bool(
+                    mail.get("sent_ok", 0) or mail.get("already_sent", 0)
+                ),
+                "duration_seconds": 0.0,
+                "reputation": None,
+                "cloaking_verdict": preview.get("cloaking_verdict", "NO_SIGNAL"),
+                "cloaking_score": preview.get("cloaking_score", 0),
+                "cloaking_signals": preview.get("cloaking_signals") or [],
+                "cloaking_evidence_path": preview.get("cloaking_evidence_path", ""),
+                "cloaking_approved": False,
+                "cloaking_disposition": "automatic",
+                "cloaking_result": preview.get("cloaking_result") or {},
+                "send_mode": "preview",
+                **mail,
+            }
+            if (
+                mail.get("sent_ok", 0) == 0
+                and mail.get("sent_failed", 0) == 0
+                and mail.get("already_sent", 0)
+            ):
+                result["skipped"] = "already_sent"
+        else:
+            result, _accounts, _stopped = _run_prechecked_domain(
+                prepared, cfg, selected_accounts, bool(job.get("include_vncert", False)),
+                events_path, None, _successfully_sent_deliveries_today(),
+            )
     except Exception:
         release_claim()
         raise

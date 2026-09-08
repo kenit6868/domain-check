@@ -105,10 +105,15 @@ Cloudflare Trust & Safety"""
         captured = {
             "success": True,
             "screenshot_path": "C:/evidence/proof.png",
+            "screenshot_paths": [
+                "C:/evidence/proof.png", "C:/evidence/destination.png",
+            ],
             "manifest_path": "C:/evidence/proof.json",
             "requested_url": "https://source.test/",
             "landing_url": "https://landing.test/",
+            "final_url": "https://target.test/register/final",
             "resolved_destination": "https://target.test/register",
+            "capture_strategy": "dom_destination",
         }
         manifest = {
             "control": {
@@ -118,7 +123,7 @@ Cloudflare Trust & Safety"""
             "http": {"redirect_chain": [{"status": 302}]},
         }
         with patch.object(
-            pr.browser_evidence, "capture_passive_browser_evidence", return_value=captured,
+            pr.browser_evidence, "capture_normal_report_evidence", return_value=captured,
         ) as capture, patch.object(
             pr.browser_evidence, "validate_evidence_artifacts",
             return_value={"valid": True, "errors": [], "manifest": manifest},
@@ -129,6 +134,9 @@ Cloudflare Trust & Safety"""
         self.assertEqual("https://target.test/register", result["href"])
         self.assertEqual("Register", result["label"])
         self.assertEqual([{"status": 302}], result["http_redirect_chain"])
+        self.assertEqual(captured["screenshot_paths"], result["screenshot_paths"])
+        self.assertEqual("https://target.test/register/final", result["final_url"])
+        self.assertEqual("dom_destination", result["capture_strategy"])
         self.assertFalse(capture.call_args.kwargs["headless"])
 
     def test_browser_evidence_attachments_require_valid_hash_pair(self):
@@ -449,5 +457,31 @@ Logs or other evidence of abuse: Original reporter text.
         self.assertTrue(pr._sent_message_matches(mail, ticket_only))
         unrelated = EmailMessage(); unrelated["Subject"] = "Unrelated message"
         self.assertFalse(pr._sent_message_matches(mail, unrelated))
+
+    def test_dom_destination_reply_describes_two_images_without_claiming_click(self):
+        mail = self.make_mail(
+            "noreply@notify.cloudflare.com",
+            "Response to Report ID: abc12345",
+            "Please provide additional technical evidence and clarification.",
+        )
+        mail.provider = "cloudflare"
+        mail.provider_label = "Cloudflare"
+        mail.request_type = "technical_evidence"
+        mail.ticket = "abc12345"
+        _subject, body, _warnings = pr.build_reply(mail, {
+            "reported_url": "https://source.test/path",
+            "button_label": "Register",
+            "redirect_url": "https://destination.test/register",
+            "screenshot_attached": True,
+            "browser_evidence": {
+                "evidence_type": "dom_destination_opened",
+                "final_url": "https://destination.test/home",
+            },
+        })
+        self.assertIn("source and destination screenshots", body)
+        self.assertIn("https://destination.test/home", body)
+        self.assertIn("No button click", body)
+        self.assertNotIn("3. Click the button", body)
+
 
 if __name__ == "__main__": unittest.main()

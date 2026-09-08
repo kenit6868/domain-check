@@ -74,6 +74,54 @@ def _load_items() -> list[dict]:
         return []
 
 
+def _upload_signature(uploads: list) -> list[dict]:
+    """Fingerprint the current uploader selection without writing it yet."""
+    values = []
+    for upload in uploads:
+        data = upload.getvalue()
+        values.append({
+            "name": str(upload.name or ""),
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        })
+    return values
+
+
+def _delivery_rows(preview: dict, item: dict) -> list[dict]:
+    """Render one explicit status row per account/recipient/draft delivery."""
+    statuses = {}
+    for value in (item.get("last_send_result") or {}).get("sent_to") or []:
+        key = (
+            str(value.get("account") or "").strip().lower(),
+            str(value.get("draft") or "").strip().lower(),
+            str(value.get("to") or "").strip().lower(),
+        )
+        statuses[key] = value
+    rows = []
+    for delivery in preview.get("delivery_plan") or []:
+        key = (
+            str(delivery.get("account") or "").strip().lower(),
+            str(delivery.get("draft") or "").strip().lower(),
+            str(delivery.get("to") or "").strip().lower(),
+        )
+        result = statuses.get(key)
+        status = str((result or {}).get("status") or delivery.get("status") or "pending")
+        label = {
+            "pending": "Chờ gửi",
+            "already_sent": "Đã gửi trước đó",
+            "sent": "Gửi thành công",
+            "failed": "Gửi thất bại — retry",
+        }.get(status, status)
+        rows.append({
+            "Tài khoản": delivery.get("account") or "—",
+            "Email nhận": delivery.get("to") or "—",
+            "Draft": delivery.get("draft") or "—",
+            "Trạng thái": label,
+            "Lỗi": str((result or {}).get("error") or ""),
+        })
+    return rows
+
+
 st.set_page_config(
     page_title="Domain Evidence Review",
     page_icon=":material/photo_library:",
@@ -84,6 +132,20 @@ st.caption(
     "Các domain thường bị tách khỏi Domain Worker khi không capture được ảnh hợp lệ. "
     "Tải ảnh lên, kiểm tra preview rồi gửi trực tiếp; không tạo job mới."
 )
+
+if not all(
+    callable(getattr(domain_worker, name, None))
+    for name in (
+        "prepare_manual_evidence_preview",
+        "manual_evidence_preview_is_current",
+    )
+):
+    st.error(
+        "Phiên Streamlit đang giữ module Domain Worker cũ. Hãy dừng và khởi động lại "
+        "Streamlit rồi mở lại trang này để nạp luồng preview mới.",
+        icon=":material/restart_alt:",
+    )
+    st.stop()
 
 if st.button("Mở Domain Worker", icon=":material/arrow_back:"):
     st.switch_page("pages/6_Domain_Worker.py")
@@ -236,14 +298,14 @@ with st.container(border=True):
         st.warning("Chỉ dùng tối đa 3 ảnh; hãy bỏ bớt ảnh trước khi gửi.")
 
     cfg = pt.load_config()
-    accounts = [
+    accounts = list(dict.fromkeys(
         str(account.get("username") or "").strip()
         for account in (cfg.get("smtp_accounts") or [])
         if str(account.get("username") or "").strip()
-    ]
-    accounts = list(dict.fromkeys(accounts))
+    ))
     allowed = {
-        str(account).strip().lower() for account in (active_item.get("allowed_accounts") or [])
+        str(account).strip().lower()
+        for account in (active_item.get("allowed_accounts") or [])
         if str(account).strip()
     }
     account_options = [
@@ -259,51 +321,145 @@ with st.container(border=True):
         key=sender_key,
         help="Mặc định dùng các account đã chọn ở job nguồn.",
     )
-    confirmed = st.checkbox(
-        "Tôi đã kiểm tra đúng URL, email nhận và ảnh; xác nhận gửi report.",
-        key=f"domain_evidence_confirm_{target_key}",
-    )
+
     # Treat the upload as one atomic batch: a mixed valid/invalid selection or
-    # more than three files must be corrected before an existing evidence set
-    # can be sent. This prevents silently dropping a bad attachment.
+    # more than three files must be corrected before a preview can be created.
     upload_batch_valid = bool(uploads) and bool(valid_uploads) and not invalid_uploads and (
         len(uploads) <= browser_evidence.MAX_MANUAL_SCREENSHOTS
     )
     evidence_ready = upload_batch_valid if uploads else existing_valid
+    upload_signature = _upload_signature(uploads) if uploads else []
+    preview_key = f"domain_evidence_preview_{target_key}"
+    preview = st.session_state.get(preview_key)
+    preview_evidence = (
+        preview.get("evidence")
+        if isinstance(preview, dict) and preview.get("evidence")
+        else existing_evidence
+    )
+    preview_current = bool(
+        preview
+        and (preview.get("upload_signature") or []) == upload_signature
+        and domain_worker.manual_evidence_preview_is_current(
+            preview,
+            job_dir=str(active_item.get("job_dir") or ""),
+            target_url=target_url,
+            evidence=preview_evidence,
+            selected_accounts=selected_accounts,
+        )
+    )
+    if preview and not preview_current:
+        st.warning(
+            "Draft preview không còn khớp ảnh, tài khoản hoặc file draft hiện tại. "
+            "Hãy tạo/cập nhật preview trước khi gửi.",
+            icon=":material/sync_problem:",
+        )
+
+    create_preview = st.button(
+        "Tạo / cập nhật draft để xem",
+        icon=":material/preview:",
+        disabled=not (evidence_ready and bool(selected_accounts)),
+        key=f"domain_evidence_preview_button_{target_key}",
+    )
+    if create_preview:
+        try:
+            if valid_uploads:
+                preview_evidence = browser_evidence.create_manual_browser_evidence(
+                    target_url,
+                    [(upload.name, upload.getvalue()) for upload in valid_uploads],
+                    pt._runtime_path(os.path.join("evidence", "browser")),
+                    profile_name="domain_worker_manual",
+                )
+            else:
+                preview_evidence = existing_evidence
+            with st.spinner("Đang tạo draft preview; chưa gửi email... "):
+                prepared_preview = domain_worker.prepare_manual_evidence_preview(
+                    str(active_item.get("job_dir") or ""),
+                    target_url,
+                    preview_evidence,
+                    selected_accounts,
+                )
+            prepared_preview["upload_signature"] = upload_signature
+            st.session_state[preview_key] = prepared_preview
+            st.rerun()
+        except (OSError, ValueError, TypeError) as exc:
+            st.error(f"Không thể tạo draft preview: {exc}")
+
+    preview = st.session_state.get(preview_key)
+    if preview_current and preview:
+        st.success(
+            "Draft preview đã sẵn sàng. Nội dung hiển thị bên dưới chính là nội dung "
+            "sẽ gửi; file/evidence bị thay đổi sẽ bị chặn trước SMTP.",
+            icon=":material/verified:",
+        )
+        if preview.get("draft_errors"):
+            st.warning(
+                "Một số draft không đủ điều kiện gửi và sẽ không nằm trong delivery plan:",
+                icon=":material/warning:",
+            )
+            st.dataframe(
+                pd.DataFrame(preview["draft_errors"]),
+                hide_index=True,
+                width="stretch",
+            )
+        delivery_rows = _delivery_rows(preview, active_item)
+        if delivery_rows:
+            st.dataframe(
+                pd.DataFrame(delivery_rows),
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    "Trạng thái": st.column_config.TextColumn("Trạng thái", width="medium"),
+                    "Lỗi": st.column_config.TextColumn("Lỗi", width="large"),
+                },
+            )
+        st.subheader("Nội dung draft sẽ gửi", anchor=False)
+        for index, delivery in enumerate(preview.get("delivery_plan") or []):
+            label = (
+                f"{delivery.get('account') or '—'} → {delivery.get('to') or '—'} · "
+                f"{delivery.get('draft') or 'draft'}"
+            )
+            with st.expander(label, expanded=index == 0):
+                st.caption(f"To: {delivery.get('to') or '—'}")
+                st.caption(f"Subject: {delivery.get('subject') or '—'}")
+                st.code(str(delivery.get("body") or ""), language=None)
+        st.caption(
+            "Mỗi delivery được theo dõi theo tổ hợp tài khoản gửi + email nhận + draft. "
+            "Khi retry, các delivery đã thành công trong ngày sẽ tự bỏ qua; chỉ lượt còn thiếu được gửi lại."
+        )
+    elif not account_options:
+        st.error("Không còn SMTP account hợp lệ trong cấu hình của job này.")
+    elif not evidence_ready:
+        st.info("Chọn ít nhất 1 ảnh hợp lệ hoặc dùng lại evidence đã lưu trước đó.")
+    else:
+        st.info("Hãy tạo draft preview và đọc nội dung trước khi xác nhận gửi.")
+
+    confirmed = st.checkbox(
+        "Tôi đã đọc draft, kiểm tra email nhận và xác nhận gửi nội dung đang hiển thị.",
+        key=f"domain_evidence_confirm_{target_key}",
+    )
     send = st.button(
         "Gửi mail domain này",
         type="primary",
         icon=":material/send:",
-        disabled=not (confirmed and evidence_ready and bool(selected_accounts)),
+        disabled=not (confirmed and preview_current and bool(selected_accounts)),
         key=f"domain_evidence_send_{target_key}",
     )
-    if not account_options:
-        st.error("Không còn SMTP account hợp lệ trong cấu hình của job này.")
-    elif not evidence_ready:
-        st.info("Chọn ít nhất 1 ảnh hợp lệ hoặc dùng lại evidence đã lưu trước đó.")
 
 if send:
     try:
-        if valid_uploads:
-            evidence = browser_evidence.create_manual_browser_evidence(
-                target_url,
-                [(upload.name, upload.getvalue()) for upload in valid_uploads],
-                pt._runtime_path(os.path.join("evidence", "browser")),
-                profile_name="domain_worker_manual",
-            )
-        else:
-            evidence = existing_evidence
-        with st.spinner("Đang tạo draft, kiểm tra evidence và gửi email..."):
+        evidence = (preview or {}).get("evidence") or existing_evidence
+        with st.spinner("Đang gửi đúng draft đã preview... "):
             result = domain_worker.send_manual_evidence_item(
                 str(active_item.get("job_dir") or ""),
                 target_url,
                 evidence,
                 selected_accounts,
+                preview=preview,
             )
         if int(result.get("sent_failed", 0) or 0):
             st.session_state["domain_evidence_review_flash"] = {
                 "kind": "warning",
-                "message": "Gửi chưa hoàn tất; evidence được giữ lại để retry không cần upload lại.",
+                "message": "Gửi chưa hoàn tất; trạng thái từng account/recipient đã được giữ để retry lượt còn thiếu.",
             }
         elif result.get("skipped") == "manual_review_required":
             st.session_state["domain_evidence_review_flash"] = {
@@ -315,7 +471,9 @@ if send:
                 "kind": "success",
                 "message": "Đã gửi email thành công; domain đã được loại khỏi danh sách chờ ảnh.",
             }
-        st.session_state.pop(active_key, None)
+        if not int(result.get("sent_failed", 0) or 0):
+            st.session_state.pop(active_key, None)
+            st.session_state.pop(preview_key, None)
         st.rerun()
     except (OSError, ValueError, TypeError) as exc:
         st.error(f"Không thể gửi: {exc}")

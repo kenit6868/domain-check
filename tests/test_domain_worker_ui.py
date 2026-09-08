@@ -21,13 +21,17 @@ PNG_1X1 = base64.b64decode(
 
 class DomainWorkerUiTests(unittest.TestCase):
     def test_v4_ui_exposes_manual_evidence_send_flow(self):
-        source = (ROOT / "pages" / "6_Domain_Worker.py").read_text(encoding="utf-8")
-        self.assertIn('"preflight_version": 4', source)
-        self.assertIn('cached_preflight.get("evidence_review")', source)
-        self.assertIn("Ảnh bằng chứng thủ công (1–3 ảnh)", source)
-        self.assertIn("create_manual_browser_evidence", source)
-        self.assertIn("send_manual_evidence_item", source)
-        self.assertIn("Gửi mail domain này", source)
+        worker_source = (ROOT / "pages" / "6_Domain_Worker.py").read_text(encoding="utf-8")
+        review_source = (ROOT / "pages" / "12_Domain_Evidence_Review.py").read_text(encoding="utf-8")
+        self.assertIn('"preflight_version": 4', worker_source)
+        self.assertIn('cached_preflight.get("evidence_review")', worker_source)
+        self.assertIn("Mở Domain Evidence Review", worker_source)
+        self.assertNotIn("file_uploader", worker_source)
+        self.assertNotIn("create_manual_browser_evidence", worker_source)
+        self.assertNotIn("send_manual_evidence_item", worker_source)
+        self.assertIn("Ảnh bằng chứng thủ công (1–3 ảnh PNG/JPEG)", review_source)
+        self.assertIn("prepare_manual_evidence_preview", review_source)
+        self.assertIn("đúng draft đã preview", review_source)
 
     def test_v4_manual_evidence_case_renders_without_sending(self):
         with tempfile.TemporaryDirectory() as runtime_dir, tempfile.TemporaryDirectory() as review_dir:
@@ -72,11 +76,7 @@ class DomainWorkerUiTests(unittest.TestCase):
                 app = AppTest.from_file(str(ROOT / "streamlit_app.py"), default_timeout=10).run()
                 app = app.switch_page("pages/6_Domain_Worker.py").run()
             self.assertEqual([], list(app.exception))
-            self.assertTrue(any(
-                uploader.label == "Ảnh bằng chứng thủ công (1–3 ảnh)"
-                for uploader in app.file_uploader
-            ))
-            self.assertIn("Gửi mail domain này", [button.label for button in app.button])
+            self.assertEqual([], list(app.file_uploader))
             send.assert_not_called()
 
     def test_dedicated_evidence_review_page_lists_daily_case_without_sending(self):
@@ -143,6 +143,19 @@ class DomainWorkerUiTests(unittest.TestCase):
                 "success": True, "sent_ok": 1, "sent_failed": 0,
                 "already_sent": 0, "sent_to": [],
             }
+            preview = {
+                "version": 1,
+                "job_dir": str(job_dir),
+                "target_url": target,
+                "accounts": ["sender@example.org"],
+                "evidence": uploaded_evidence,
+                "upload_signature": [{"name": "source.png", "size": len(PNG_1X1), "sha256": __import__("hashlib").sha256(PNG_1X1).hexdigest()}],
+                "delivery_plan": [{
+                    "account": "sender@example.org", "to": "abuse@example.org",
+                    "draft": "manual-send-page.example_registrar_report.txt",
+                    "subject": "Report", "body": "Draft body",
+                }],
+            }
             with (
                 patch.object(domain_worker, "WORKER_DIR", str(worker_dir)),
                 patch.object(pt, "load_config", return_value={
@@ -152,6 +165,14 @@ class DomainWorkerUiTests(unittest.TestCase):
                     browser_evidence, "create_manual_browser_evidence",
                     return_value=uploaded_evidence,
                 ) as create_evidence,
+                patch.object(
+                    domain_worker, "prepare_manual_evidence_preview",
+                    return_value=preview,
+                ) as prepare_preview,
+                patch.object(
+                    domain_worker, "manual_evidence_preview_is_current",
+                    return_value=True,
+                ),
                 patch.object(
                     domain_worker, "send_manual_evidence_item",
                     return_value=send_result,
@@ -172,11 +193,6 @@ class DomainWorkerUiTests(unittest.TestCase):
                     ("source.png", PNG_1X1, "image/png"),
                     ("broken.png", b"not-an-image", "image/png"),
                 ]).run()
-                confirmation = next(
-                    item for item in app.checkbox
-                    if item.label.startswith("Tôi đã kiểm tra đúng URL")
-                )
-                app = confirmation.check().run()
                 mixed_send = next(
                     item for item in app.button if item.label == "Gửi mail domain này"
                 )
@@ -188,9 +204,16 @@ class DomainWorkerUiTests(unittest.TestCase):
                 app = uploader.set_value([
                     ("source.png", PNG_1X1, "image/png"),
                 ]).run()
+                preview_button = next(
+                    item for item in app.button
+                    if item.label == "Tạo / cập nhật draft để xem"
+                )
+                self.assertFalse(preview_button.disabled)
+                app = preview_button.click().run()
+                self.assertTrue(any("Draft body" in block.value for block in app.code))
                 confirmation = next(
                     item for item in app.checkbox
-                    if item.label.startswith("Tôi đã kiểm tra đúng URL")
+                    if item.label.startswith("Tôi đã đọc draft")
                 )
                 app = confirmation.check().run()
                 send_button = next(
@@ -200,8 +223,12 @@ class DomainWorkerUiTests(unittest.TestCase):
                 app = send_button.click().run()
             self.assertEqual([], list(app.exception))
             create_evidence.assert_called_once()
+            prepare_preview.assert_called_once_with(
+                str(job_dir), target, uploaded_evidence, ["sender@example.org"],
+            )
             send_manual.assert_called_once_with(
                 str(job_dir), target, uploaded_evidence, ["sender@example.org"],
+                preview=preview,
             )
             self.assertTrue(any(
                 "Đã gửi email thành công" in success.value for success in app.success
