@@ -85,13 +85,18 @@ Không tự khởi động Streamlit nếu người dùng chưa yêu cầu. Buil
   loại khối evidence và attachment cloaking trước khi gửi report thường. UI chỉ
   hiển thị record của ngày địa phương hiện tại; record cũ vẫn giữ nội bộ để audit
   nhưng sang ngày mới phải check lại URL để tạo case mới.
-- Nút precheck Domain Worker dùng schema v3: lookup email và cloaking chạy song
+- Nút precheck Domain Worker dùng schema v4: lookup email và cloaking chạy song
   song theo từng full URL, cloaking không dùng cache email và case cần duyệt chỉ
   enqueue/ghi preflight tăng dần khi có ít nhất một email nhận hợp lệ. Case
   cloaking không email phải vào `excluded_no_email`, không được migrate/hiển thị
   ở Cloaking Review; số đếm/link Domain Worker chỉ tính case có email của ngày
   hiện tại. Chỉ `ready` được chuyển sang job gửi thường; không chờ pipeline gửi
   mới phân loại cloaking.
+- Sau recipient/cloaking precheck, domain thường phải capture Browser Evidence.
+  Chỉ evidence hợp lệ mới vào `ready`; capture lỗi vào `evidence_review`, tách
+  khỏi batch tự động. Check Domain và danh sách này nhận 1–3 ảnh PNG/JPEG thủ
+  công, preview ngay, tạo manifest hash không qua nút lưu; gửi lỗi giữ evidence
+  để retry. Đây là evidence report thường, không thay quy tắc 2–4 ảnh cloaking.
 - Cloaking Review tạo draft preview và gửi đồng bộ, trực tiếp bằng SMTP helper;
   không tạo worker job hoặc launch process. Nội dung đã preview phải chính là
   nội dung gửi. Lock ngắn theo queue ID chỉ ngăn hai phiên gửi cùng case và không
@@ -190,6 +195,36 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-08 — Browser Evidence Phase 4 cho Check Domain/Domain Worker: fallback
+  upload 1–3 ảnh PNG/JPEG tạo manifest hash, preview không nút lưu; worker
+  preflight v4 capture domain thường, chỉ evidence hợp lệ vào batch và tách lỗi
+  sang `evidence_review` để upload/gửi từng URL, giữ evidence khi SMTP lỗi và
+  chuyển Cloaking Review nếu check lại có tín hiệu; file chính:
+  `browser_evidence.py`, `phishing_toolkit.py`, `domain_worker.py`,
+  `pages/1_Check_Domain.py`, `pages/6_Domain_Worker.py`, test core/worker/AppTest;
+  đã kiểm tra: focused, 211/211 full unittest, compileall, pip check, spec và diff check;
+  tài liệu: `README.md`, `03_Technical_Guide.md`, file này và skill dự án; lưu ý:
+  chỉ mock SMTP/browser, không gửi email hoặc mở URL thật.
+
+- 2026-09-08 — Cho phép gửi thủ công case `evidence_review` trong lúc Domain
+  Worker còn chạy: bỏ khóa UI theo trạng thái job, thêm lock liên tiến trình và
+  claim theo full URL; worker merge preflight không làm mất claim/evidence,
+  completed manual send không bị re-add, phiên thứ hai bị chặn; file chính:
+  `domain_worker.py`, `pages/6_Domain_Worker.py`, test worker/UI; đã kiểm tra:
+  212/212 full unittest, compileall, pip check, spec và diff check; tài liệu:
+  `README.md`, `03_Technical_Guide.md`, file này và skill dự án; lưu ý: chỉ mock
+  SMTP/browser, không gửi email thật.
+
+- 2026-09-08 — Chuẩn hóa nội dung registrar/registry: web form và email giữ full
+  URL/path, bỏ URLScan và VirusTotal không detection, không tự khẳng định thu
+  OTP/payment; registrar có 5 Subject và không lặp yêu cầu hold; registry không
+  tự nói registrar đã bỏ qua, chỉ nhắc báo cáo trước khi caller xác nhận delivery,
+  không chèn raw WHOIS/ICANN/ClientHold mặc định; Quick Report hiển thị text
+  copy-ready cho registry; file chính: `phishing_toolkit.py`,
+  `pages/7_Quick_Report.py`, test webform/quick report; đã kiểm tra: focused và
+  204/204 full unittest; tài liệu: `README.md`, `03_Technical_Guide.md`, file này
+  và skill dự án; lưu ý: không đọc secret, không gửi SMTP hoặc submit form thật.
+
 - 2026-09-08 — Làm sạch nội dung web form: GSB/Cloudflare/registrar dùng đúng
   full URL/path, không chèn URLScan hoặc screenshot URLScan và không tự khẳng
   định hành vi lấy OTP/payment khi chưa có quan sát; GSB và Cloudflare có pool
@@ -197,7 +232,7 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
   so với infrastructure/origin handling; giữ wording điều tra/xác nhận trước khi
   áp dụng policy; file chính: `phishing_toolkit.py`,
   `pages/1_Check_Domain.py`, `pages/7_Quick_Report.py`, test webform; đã kiểm tra:
-  5 test tập trung, 196/196 full unittest, compileall, pip check, spec và diff
+  6 test tập trung, 198/198 full unittest, compileall, pip check, spec và diff
   check; tài liệu: `README.md`, `03_Technical_Guide.md`,
   file này và skill dự án; lưu ý: không submit web form/API hoặc gửi email thật.
 
@@ -425,7 +460,7 @@ vào phần này.
 
 Nhóm `link_status` đã thống nhất Cloudflare warning/HTTP 403 là `BLOCKED`, không
 phải `LIVE` hay `DIE`; mock response không iterable được xử lý an toàn. Toàn bộ
-test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 196 test.
+test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 212 test.
 Detector cloaking có test thuần cho scoring/profile/path/vantage, fake browser
 cho Playwright và mock attachment worker; không dùng URL nghi ngờ hay SMTP thật
 trong test.

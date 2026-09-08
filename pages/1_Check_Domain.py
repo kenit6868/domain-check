@@ -4,6 +4,7 @@ Gọi thẳng phishing_toolkit.run_check() — không viết lại pipeline SSL/
 VirusTotal/Safe Browsing ở đây, để kết quả luôn khớp với CLI.
 """
 
+import hashlib
 import os
 import sys
 
@@ -55,6 +56,7 @@ if go:
         with st.spinner(f"Đang kiểm tra {target}..."):
             result = pt.run_check(target, submit_vt, cfg)
         st.session_state.pop("check_domain_browser_evidence", None)
+        st.session_state.pop("check_domain_manual_evidence_signature", None)
         st.session_state["check_domain_result"] = result
         st.session_state["check_domain_cfg"] = cfg
 
@@ -352,9 +354,52 @@ if "check_domain_result" in st.session_state:
                     st.error("Không thể gắn Browser Evidence vào toàn bộ draft.")
             else:
                 st.error(captured.get("error") or "Không tạo được Browser Evidence.")
+        if not browser_attachments:
+            st.caption(
+                "Nếu công cụ không chụp được, tải trực tiếp 1–3 ảnh PNG/JPEG. "
+                "Ảnh được kiểm tra và gắn vào draft ngay, không có bước lưu riêng."
+            )
+            manual_files = st.file_uploader(
+                "Ảnh bằng chứng thủ công (1–3 ảnh)",
+                type=["png", "jpg", "jpeg"], accept_multiple_files=True,
+                key=f"check_domain_manual_browser_{domain}",
+                help="Mỗi ảnh tối đa 10 MB; nên để thanh địa chỉ và nội dung vi phạm cùng xuất hiện.",
+            )
+            if manual_files:
+                for item in manual_files[:3]:
+                    st.image(item, caption=item.name, width=220)
+                signature = hashlib.sha256(b"".join(
+                    item.name.encode("utf-8", "ignore") + item.getvalue()
+                    for item in manual_files
+                )).hexdigest()
+                if st.session_state.get("check_domain_manual_evidence_signature") != signature:
+                    try:
+                        captured = browser_evidence.create_manual_browser_evidence(
+                            target_url,
+                            [(item.name, item.getvalue()) for item in manual_files],
+                            pt._runtime_path(os.path.join("evidence", "browser")),
+                            profile_name="check_domain_manual",
+                        )
+                        updated = pt.append_browser_evidence_to_drafts(
+                            result.get("drafts") or [], captured,
+                        )
+                        if len(updated) != len(result.get("drafts") or []):
+                            raise ValueError("Không thể gắn evidence vào toàn bộ draft")
+                        result["browser_evidence"] = captured
+                        st.session_state["check_domain_browser_evidence"] = captured
+                        st.session_state["check_domain_manual_evidence_signature"] = signature
+                        st.session_state["check_domain_result"] = result
+                        st.rerun()
+                    except (OSError, ValueError) as exc:
+                        st.error(f"Ảnh thủ công không hợp lệ: {exc}")
         if browser_capture:
             if browser_attachments:
-                st.image(browser_capture["screenshot_path"], caption="Ảnh sẽ được đính kèm email", width=620)
+                for screenshot_path in (
+                    browser_capture.get("screenshot_paths")
+                    or [browser_capture.get("screenshot_path")]
+                ):
+                    if screenshot_path:
+                        st.image(screenshot_path, caption="Ảnh sẽ được đính kèm email", width=260)
                 with st.container(border=True):
                     st.write(f"**Requested URL:** `{browser_capture.get('requested_url', '')}`")
                     st.write(f"**Landing URL:** `{browser_capture.get('landing_url', '')}`")

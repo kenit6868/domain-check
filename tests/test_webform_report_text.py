@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import phishing_toolkit as pt
@@ -68,6 +70,87 @@ class WebformReportTextTests(unittest.TestCase):
             "phish.example.test", self.cfg, self.url,
         )
         self.assertEqual(first, second)
+
+    def test_registrar_generated_webform_uses_shared_factual_text(self):
+        who = {"registrar": "NameSilo, LLC", "emails": []}
+        vt = {"link": "https://www.virustotal.com/example", "malicious": 0}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(pt, "REPORTS_DIR", tmp):
+            paths = pt.generate_email_drafts(
+                "phish.example.test", {}, who, vt, self.cfg,
+                target_url=self.url,
+            )
+            text = Path(paths[0]).read_text(encoding="utf-8")
+        self.assertIn(self.url, text)
+        self.assertNotIn("URLScan", text)
+        self.assertNotIn("VirusTotal", text)
+        self.assertNotIn("OTP", text)
+        self.assertNotIn("payment", text.lower())
+        self.assertNotIn("serverHold", text)
+
+    def test_registrar_email_is_factual_and_omits_unflagged_vt(self):
+        who = {"registrar": "Example Registrar", "emails": ["abuse@example.test"]}
+        vt = {"link": "https://www.virustotal.com/example", "malicious": 0, "suspicious": 0}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(pt, "REPORTS_DIR", tmp), \
+                patch.object(pt, "get_rdap_abuse_email", return_value={}):
+            paths = pt.generate_email_drafts(
+                "phish.example.test", {}, who, vt, self.cfg,
+                target_url=self.url,
+            )
+            registrar_path = next(path for path in paths if path.endswith("_registrar_report.txt"))
+            text = Path(registrar_path).read_text(encoding="utf-8")
+        self.assertIn(self.url, text)
+        self.assertNotIn("VirusTotal", text)
+        self.assertNotIn("OTP", text)
+        self.assertNotIn("payment", text.lower())
+        self.assertNotIn("serverHold", text)
+        self.assertNotIn("clientHold", text)
+        self.assertNotIn("[NOTE:", text)
+
+    def test_registry_webform_uses_full_url_and_no_scan_links(self):
+        registry = {
+            "source": "static_table", "registry": "Example Registry",
+            "report_webform": "https://registry.example/report", "abuse_email": "",
+        }
+        text = pt.get_registry_webform_draft_text(
+            "phish.example.test", registry, self.cfg, target_url=self.url,
+        )
+        self.assertIn(self.url, text)
+        self.assertIn("Example Brand", text)
+        self.assertNotIn("URLScan", text)
+        self.assertNotIn("VirusTotal", text)
+        self.assertNotIn("OTP", text)
+        self.assertNotIn("payment", text.lower())
+
+    def test_registry_email_does_not_invent_registrar_escalation(self):
+        registry = {
+            "source": "static_table", "registry": "Example Registry",
+            "abuse_email": "abuse@registry.example", "report_webform": "",
+        }
+        with tempfile.TemporaryDirectory() as tmp, patch.object(pt, "REPORTS_DIR", tmp):
+            path = pt.generate_registry_draft(
+                "phish.example.test", registry, self.cfg, target_url=self.url,
+            )
+            text = Path(path).read_text(encoding="utf-8")
+        self.assertIn(self.url, text)
+        self.assertNotIn("already submitted", text)
+        self.assertNotIn("previously reported", text)
+        self.assertNotIn("ClientHold", text)
+        self.assertNotIn("ICANN compliance", text)
+        self.assertNotIn("WHOIS raw", text)
+
+    def test_registry_email_mentions_prior_report_only_when_confirmed(self):
+        registry = {
+            "source": "static_table", "registry": "Example Registry",
+            "abuse_email": "abuse@registry.example", "report_webform": "",
+        }
+        with tempfile.TemporaryDirectory() as tmp, patch.object(pt, "REPORTS_DIR", tmp):
+            path = pt.generate_registry_draft(
+                "phish.example.test", registry, self.cfg, target_url=self.url,
+                registrar_reported=True, registrar_report_date="2026-09-01",
+            )
+            text = Path(path).read_text(encoding="utf-8")
+        self.assertIn("previously reported", text)
+        self.assertIn("2026-09-01", text)
 
 
 if __name__ == "__main__":

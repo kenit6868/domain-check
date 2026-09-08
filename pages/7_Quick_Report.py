@@ -321,6 +321,10 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                         st.caption(f"ℹ️ {registry_info['note']}")
                     st.link_button(f"↗ Form {reg_name[:18]}", registry_info["report_webform"],
                                    type="primary")
+                    registry_text = pt.get_registry_webform_draft_text(
+                        domain, registry_info, cfg, target_url=original_url,
+                    )
+                    st.code(registry_text, language=None)
 
 
 def _run_one_cdn_check(

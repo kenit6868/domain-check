@@ -307,6 +307,19 @@ tồn tại của attachment và đúng một ảnh + một manifest. URLScan v�
 thể chạy để người vận hành xem trong
 UI nhưng không được đưa vào nội dung hoặc attachment gửi ra ngoài.
 
+Nếu capture tự động thất bại, Check Domain nhận 1–3 ảnh PNG/JPEG thủ công, hiện
+thumbnail và commit ngay thành evidence set gồm các ảnh + một manifest SHA-256;
+không có nút lưu riêng. Quality gate xác thực toàn bộ hash trước SMTP.
+
+Domain Worker preflight schema v4 chạy capture Browser Evidence sau lookup email
+và detector cloaking. Domain thường chỉ vào `ready` khi evidence hợp lệ; lỗi
+capture vào `evidence_review`, tách khỏi gửi batch. UI xử lý từng full URL, cho
+upload 1–3 ảnh và gửi trực tiếp sau xác nhận. Kết quả SMTP được ghi ngay; lỗi gửi
+giữ evidence để retry. Nút gửi không bị khóa khi worker còn chạy: case đã tách
+được claim theo full URL, dùng lock liên tiến trình và không ghi đè preflight của
+worker. Nếu lần check đầy đủ phát hiện cloaking, case chuyển sang Cloaking Review
+thay vì gửi report thường.
+
 Text web form là luồng riêng với email draft. `get_webform_draft_text()` không
 đưa URLScan/result screenshot vào mẫu kể cả caller cũ còn truyền dữ liệu này.
 Mẫu GSB và Cloudflare nhận full URL/path, mô tả suspected phishing/brand
@@ -316,6 +329,14 @@ Hai generator giữ pool 5 biến thể riêng và tiếp tục dùng `_draft_rn
 UTC date)`: cùng domain trong ngày không đổi text khi Streamlit rerun, còn domain
 hoặc ngày khác có thể đổi biến thể. Mọi biến thể GSB nhắm tới browser warning;
 mọi biến thể Cloudflare nhắm tới service/origin-provider abuse handling.
+
+Registrar và registry cũng dùng formatter dựa trên dữ kiện: luôn giữ full URL/
+path, không đưa URLScan hoặc VirusTotal không có detection ra ngoài, và không tự
+khẳng định có credential/OTP/payment collection. Registrar được yêu cầu điều tra
+rồi áp dụng biện pháp registrar-level phù hợp. Registry được yêu cầu điều tra và
+phối hợp sponsoring registrar; draft chỉ được nói đã báo registrar khi caller có
+delivery state xác nhận (`registrar_reported=True`, kèm ngày nếu có). Không chèn
+raw WHOIS hoặc câu ICANN/ClientHold chung cho mọi ccTLD vào nội dung gửi.
 
 #### Vận chuyển SMTP cho evidence
 

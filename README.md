@@ -159,14 +159,24 @@ chặn draft thiếu Subject, recipient, sai full Reported URL, còn placeholder
 chứa `NOT flagged`, còn bất kỳ khối URLScan cũ nào hoặc thiếu cặp
 attachment. URLScan vẫn hiển thị để tham khảo nội bộ nhưng không còn
 được tự động hoặc thủ công chèn vào email.
+Nếu Playwright không tạo được ảnh, người vận hành có thể tải trực tiếp 1–3 ảnh
+PNG/JPEG. Ảnh hiện thumbnail ngay, được kiểm tra signature/kích thước và tự tạo
+manifest hash; không có nút lưu trung gian. Nút gửi mở khi bộ ảnh hợp lệ.
 
-Các nội dung dùng để dán vào **web form** (GSB, Cloudflare và registrar) luôn
+Các nội dung dùng để dán vào **web form** (GSB, Cloudflare, registrar và
+registry) luôn
 ghi đúng full URL/path. Mẫu không chèn URLScan hoặc screenshot URLScan và không
 tự khẳng định đã lấy OTP/thông tin thanh toán khi chưa có quan sát chứng minh;
 thay vào đó yêu cầu nhà cung cấp điều tra và áp dụng chính sách nếu xác nhận.
 GSB và Cloudflare có hai pool riêng, mỗi pool 5 biến thể: GSB yêu cầu cảnh báo/
 chặn ở Safe Browsing, còn Cloudflare yêu cầu xử lý dịch vụ liên quan hoặc chuyển
 tiếp tới origin hosting provider. Biến thể được chọn ổn định theo domain + ngày.
+
+Email registrar có pool Subject/nội dung riêng và chỉ đưa VirusTotal vào khi có
+detection. Email registry mặc định yêu cầu điều tra/phối hợp registrar, không tự
+khẳng định registrar đã bỏ qua báo cáo và không yêu cầu ClientHold như một kết
+luận có sẵn. Chỉ truyền trạng thái `registrar_reported` khi có lịch sử delivery
+xác nhận; mọi draft registry đều giữ cả registered domain và full Reported URL.
 
 ## Lưu ý cho Windows
 
@@ -210,9 +220,13 @@ Luồng sử dụng hiện tại:
    sách precheck. Case nghi ngờ cloaking nhưng không tìm được email được ghi vào
    nhóm bỏ qua trong ngày, không tạo queue review. Case đã tách không nằm trong
    danh sách gửi tự động của Domain Worker.
-3. Khi precheck hoàn tất, chỉ danh sách domain thường có email mới có thể chạy
-   **Domain Worker**. Worker vẫn kiểm tra lại trong pipeline đầy đủ để cách ly
-   một case nếu website thay đổi sau precheck.
+3. Từ Browser Evidence Phase 4, precheck còn chụp evidence cho domain thường có
+   email. Chỉ case có evidence hợp lệ vào danh sách worker tự động; capture lỗi
+   được tách sang danh sách cần ảnh thủ công. Chọn từng domain, upload 1–3 ảnh,
+   xem thumbnail, xác nhận recipient rồi bấm gửi trực tiếp. Gửi lỗi giữ evidence
+   để retry; không cần upload lại. Nút này vẫn hoạt động khi worker đang
+   prechecking/running/waiting vì case đã tách khỏi batch; state preflight được
+   khóa và hợp nhất theo URL. Worker vẫn kiểm tra lại cloaking trước SMTP.
 4. Có thể mở **Cloaking Review** ngay trong lúc precheck hoặc Domain Worker thường
    đang chạy. Chọn một case, chọn chế độ/tài khoản, bấm **Tạo / cập nhật draft để
    xem**, đọc đúng nội dung sẽ gửi rồi xác nhận gửi trực tiếp. Trang không tạo hay

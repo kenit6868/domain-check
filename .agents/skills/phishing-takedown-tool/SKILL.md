@@ -44,17 +44,30 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   đúng hash mới được coi là browser evidence hợp lệ; upload/URLScan legacy có thể
   tồn tại làm fallback trong giai đoạn chuyển đổi nhưng không được trộn với
   manifest của capture khác.
-- Check Domain chỉ mở gửi email sau khi Browser Evidence có đúng PNG + manifest
+- Check Domain chỉ mở gửi email sau khi Browser Evidence có 1–3 PNG/JPEG + đúng
+  một manifest
   hợp lệ; cùng artifact đã preview phải đi qua cả gửi đơn và gửi tất cả. Gate
   trước SMTP chặn thiếu Subject/recipient/full Reported URL, placeholder,
   `NOT flagged` và attachment không tồn tại. URLScan có thể còn hiển thị nội bộ
   trong giai đoạn chuyển đổi nhưng không được chèn vào email.
+- Fallback Browser Evidence thủ công cho report thường validate cả batch trước
+  khi ghi, preview ngay và không có nút lưu trung gian. Domain Worker schema v4
+  chỉ đưa domain thường vào `ready` khi có evidence; capture lỗi vào
+  `evidence_review`, upload/gửi từng full URL và giữ evidence để retry SMTP.
+  Nút gửi được phép chạy khi worker còn prechecking/running/waiting vì case đã
+  tách khỏi `ready`; claim theo URL và lock preflight phải ngăn gửi trùng/ghi đè.
+  Không trộn luồng này với ảnh đối chiếu cloaking 2–4 ảnh.
 - Nội dung web form phải giữ full URL/path, không chèn URLScan/screenshot URLScan
   và không khẳng định hành vi thu thập OTP/payment nếu không có bằng chứng quan
   sát tương ứng. Ưu tiên mô tả suspected phishing/impersonation và yêu cầu provider
   điều tra, xác nhận rồi áp dụng chính sách.
   Pool GSB và Cloudflare phải tách riêng theo thẩm quyền xử lý, có ít nhất 5 biến
   thể mỗi nhóm và chọn ổn định theo domain + ngày để rerun không đổi nội dung.
+- Formatter registrar/registry phải dùng dữ kiện quan sát, không đưa VirusTotal
+  không có detection ra ngoài và không tự yêu cầu `serverHold`/`clientHold` như
+  kết luận mặc định. Registry chỉ được nói đã báo registrar khi có delivery state
+  xác nhận; luôn giữ cả registered domain và full Reported URL, không chèn raw
+  WHOIS hoặc câu ICANN chung cho mọi ccTLD.
 - Khác biệt giữa URL gốc và một path probe như `/vi-vn/` chỉ là khám phá đường
   dẫn, không được cộng điểm cloaking. Phân loại nội dung nhạy cảm phải tách khỏi
   verdict cloaking.

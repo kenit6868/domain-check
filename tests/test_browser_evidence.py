@@ -253,6 +253,31 @@ class BrowserEvidenceTests(unittest.TestCase):
             self.assertNotIn("navigation verified", block.lower())
             self.assertEqual([image_path, manifest_path], be.evidence_attachment_paths(result))
 
+    def test_manual_upload_accepts_one_to_three_images_and_hashes_each(self):
+        with tempfile.TemporaryDirectory() as folder:
+            result = be.create_manual_browser_evidence(
+                "https://source.test/path",
+                [
+                    ("one.png", b"\x89PNG\r\n\x1a\none"),
+                    ("two.jpg", b"\xff\xd8\xfftwo"),
+                    ("three.png", b"\x89PNG\r\n\x1a\nthree"),
+                ],
+                folder,
+            )
+            validation = be.validate_evidence_artifacts(result)
+            self.assertTrue(validation["valid"], validation["errors"])
+            self.assertEqual(3, len(validation["manifest"]["screenshots"]))
+            self.assertEqual(4, len(be.evidence_attachment_paths(result)))
+            self.assertIn("Operator-supplied", be.format_email_evidence_block(result))
+
+    def test_manual_upload_rejects_invalid_batch_before_writing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(ValueError):
+                be.create_manual_browser_evidence(
+                    "https://source.test/path", [("fake.png", b"not-image")], folder,
+                )
+            self.assertEqual([], os.listdir(folder))
+
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 
 import phishing_toolkit as pt
+import browser_evidence
 import domain_worker
 import cloaking_review_queue as review_queue
 from domain_worker import stop_job_process
@@ -556,7 +557,7 @@ def _load_preflight(job_dir):
     try:
         with open(os.path.join(job_dir, "preflight.json"), encoding="utf-8") as f:
             data = json.load(f)
-        return data if data.get("version") in {2, 3} else {}
+        return data if data.get("version") in {2, 3, 4} else {}
     except (OSError, ValueError, TypeError):
         return {}
 
@@ -626,7 +627,7 @@ if precheck:
             "allowed_accounts": selected_precheck_accounts,
             "force_precheck": bool(force_precheck),
             "precheck_only": True,
-            "preflight_version": 3,
+            "preflight_version": 4,
         }
         domain_worker._atomic_json(job_path, job)
         launch_job_process(job_path)
@@ -642,6 +643,7 @@ job_dir = st.session_state.get("worker_job_dir") or latest_job_dir()
 status = load_status(job_dir)
 cached_preflight = _load_preflight(job_dir)
 ready_domains = cached_preflight.get("ready") or []
+evidence_review_domains = cached_preflight.get("evidence_review") or []
 all_cloaking_review_domains = cached_preflight.get("cloaking_review") or []
 cloaking_review_domains = [
     item for item in all_cloaking_review_domains
@@ -654,6 +656,7 @@ legacy_cloaking_without_email = [
 display_status = dict(status or {})
 if cached_preflight:
     display_status["cloaking_review_total"] = len(cloaking_review_domains)
+    display_status["evidence_review_total"] = len(evidence_review_domains)
 
 if not job_dir:
     st.info("Chưa có worker job nào.")
@@ -771,6 +774,85 @@ else:
             expanded=status.get("state") == "prechecking",
         ):
             _dataframe_with_copy(cloaking_table)
+    if evidence_review_domains:
+        st.warning(
+            f"Có **{len(evidence_review_domains)}** domain thường có email nhưng công cụ "
+            "không tạo được ảnh. Các domain này đã bị tách khỏi luồng gửi tự động."
+        )
+        evidence_options = {
+            f"{item.get('domain', '')} — {item.get('target_url', '')}": item
+            for item in evidence_review_domains
+        }
+        selected_evidence_label = st.selectbox(
+            "Domain cần bổ sung ảnh", list(evidence_options),
+            key=f"worker_manual_evidence_target_{status.get('job_id', '')}",
+        )
+        selected_evidence = evidence_options[selected_evidence_label]
+        st.caption(
+            "Email nhận: " + ", ".join(
+                recipient.get("email", "")
+                for recipient in selected_evidence.get("recipients", [])
+                if recipient.get("email")
+            )
+        )
+        if selected_evidence.get("browser_evidence_error"):
+            st.caption("Lỗi capture tự động: " + selected_evidence["browser_evidence_error"])
+        existing_manual = selected_evidence.get("browser_evidence") or {}
+        existing_attachments = browser_evidence.evidence_attachment_paths(existing_manual)
+        manual_files = st.file_uploader(
+            "Ảnh bằng chứng thủ công (1–3 ảnh)",
+            type=["png", "jpg", "jpeg"], accept_multiple_files=True,
+            key=f"worker_manual_files_{status.get('job_id', '')}_{selected_evidence.get('domain', '')}",
+            help="Mỗi ảnh tối đa 10 MB; ảnh được đính kèm ngay khi bạn xác nhận gửi.",
+        )
+        if manual_files:
+            for item in manual_files[:3]:
+                st.image(item, caption=item.name, width=220)
+        elif existing_attachments:
+            for image_path in existing_attachments[:-1]:
+                st.image(image_path, caption="Ảnh đã upload — sẵn sàng retry", width=220)
+        confirm_manual_send = st.checkbox(
+            "Tôi đã kiểm tra đúng domain, email nhận và ảnh; xác nhận gửi email report.",
+            key=f"worker_manual_confirm_{status.get('job_id', '')}_{selected_evidence.get('domain', '')}",
+        )
+        send_manual = st.button(
+            "Gửi mail domain này", type="primary",
+            disabled=(
+                selected_evidence.get("manual_send_in_progress", False)
+                or not confirm_manual_send
+                or (not manual_files and not existing_attachments)
+            ),
+            key=f"worker_manual_send_{status.get('job_id', '')}_{selected_evidence.get('domain', '')}",
+        )
+        if active_worker:
+            st.caption(
+                "Worker vẫn đang chạy; case này đã được tách riêng nên có thể gửi thủ công "
+                "độc lập. Các cập nhật preflight được khóa và hợp nhất an toàn."
+            )
+        if send_manual:
+            try:
+                evidence = existing_manual
+                if manual_files:
+                    evidence = browser_evidence.create_manual_browser_evidence(
+                        selected_evidence["target_url"],
+                        [(item.name, item.getvalue()) for item in manual_files],
+                        pt._runtime_path(os.path.join("evidence", "browser")),
+                        profile_name="domain_worker_manual",
+                    )
+                with st.spinner("Đang tạo draft, kiểm tra evidence và gửi email..."):
+                    send_result = domain_worker.send_manual_evidence_item(
+                        job_dir, selected_evidence["target_url"], evidence,
+                        selected_precheck_accounts,
+                    )
+                if int(send_result.get("sent_failed", 0) or 0):
+                    st.error("Gửi chưa hoàn tất; evidence được giữ để bạn retry mà không cần upload lại.")
+                elif send_result.get("skipped") == "manual_review_required":
+                    st.warning("Kết quả check lại nghi cloaking; domain đã chuyển sang Cloaking Review.")
+                else:
+                    st.success("Đã gửi email thành công và loại domain khỏi danh sách chờ ảnh.")
+                st.rerun()
+            except (OSError, ValueError) as exc:
+                st.error(f"Không thể gửi: {exc}")
     if status.get("state") == "ready" and not ready_domains:
         st.subheader("Kết quả precheck")
         _render_job_metrics(display_status)
@@ -856,10 +938,10 @@ else:
                 latest_status = load_status(job_dir) or {}
                 if latest_status.get("state") in ("prechecking", "running", "waiting"):
                     st.warning("Worker đang chạy hoặc đang chờ batch; không thể khởi chạy thêm tiến trình.")
-                elif prepared_job.get("preflight_version") not in {2, 3}:
+                elif prepared_job.get("preflight_version") not in {2, 3, 4}:
                     st.error("Kết quả precheck đã cũ. Hãy check lại danh sách.")
                 elif (
-                    prepared_job.get("preflight_version") == 3
+                    prepared_job.get("preflight_version") in {3, 4}
                     and not cached_preflight.get("complete")
                 ):
                     st.error("Precheck email + cloaking chưa hoàn tất. Hãy chờ xong trước khi chạy worker thường.")

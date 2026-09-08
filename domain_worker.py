@@ -12,9 +12,11 @@ import sys
 import time
 import traceback
 import uuid
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 
 import phishing_toolkit as pt
+import browser_evidence
 import cloaking_review_queue as review_queue
 from domain_utils import extract_domains_from_text
 
@@ -60,6 +62,57 @@ def _atomic_json(path: str, data: dict):
                 os.remove(tmp)
         except OSError:
             pass
+
+
+@contextmanager
+def _exclusive_file_lock(path: str, *, timeout: float = 15.0):
+    """Cross-process advisory lock for small JSON state files on Windows/Unix."""
+    lock_path = f"{path}.lock"
+    os.makedirs(os.path.dirname(os.path.abspath(lock_path)), exist_ok=True)
+    handle = open(lock_path, "a+b")
+    if os.path.getsize(lock_path) == 0:
+        handle.write(b"0")
+        handle.flush()
+    deadline = time.monotonic() + max(0.1, timeout)
+    locked = False
+    try:
+        while time.monotonic() < deadline:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                locked = True
+                break
+            except (BlockingIOError, OSError):
+                time.sleep(0.05)
+        if not locked:
+            raise TimeoutError(f"Không lấy được lock state: {os.path.basename(path)}")
+        yield
+    finally:
+        if locked:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        handle.close()
+
+
+def _read_json(path: str, default):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError, TypeError):
+        return default
 
 
 def launch_job_process(job_path: str):
@@ -415,6 +468,8 @@ def _send_domain_drafts(
     events_path: str, stop_path: str | None = None, prepared_drafts: list | None = None,
     sent_deliveries: set[tuple[str, str, str, str]] | None = None,
     attachments: list[str] | None = None,
+    require_browser_evidence: bool = False,
+    target_url: str = "",
 ) -> tuple[dict, set[str], bool]:
     summary = {"drafts_total": len(drafts), "drafts_sendable": 0, "sent_ok": 0, "sent_failed": 0, "already_sent": 0, "sent_to": []}
     successful_accounts = set()
@@ -438,6 +493,23 @@ def _send_domain_drafts(
                 continue
         if not parsed.get("to"):
             _append_event(events_path, {"type": "draft_skipped", "domain": domain, "draft": filename, "reason": "no_email_recipient"})
+            continue
+
+        delivery_errors = pt.validate_report_delivery(
+            parsed, target_url=target_url, attachments=attachments,
+            require_browser_evidence=require_browser_evidence,
+        )
+        if delivery_errors:
+            summary["sent_failed"] += 1
+            error = "; ".join(delivery_errors)
+            summary["sent_to"].append({
+                "to": parsed.get("to") or "", "draft": filename,
+                "account": "", "ok": False, "status": "failed", "error": error,
+            })
+            _append_event(events_path, {
+                "type": "draft_error", "domain": domain, "draft": filename,
+                "error": error,
+            })
             continue
 
         summary["drafts_sendable"] += 1
@@ -658,9 +730,17 @@ def _precheck_cloaking(target: str, cfg: dict) -> dict:
     return _verify_cloaking_with_browser(target, cloaking, cfg)
 
 
+def _capture_worker_browser_evidence(target: str) -> dict:
+    return browser_evidence.capture_passive_browser_evidence(
+        target, pt._runtime_path(os.path.join("evidence", "browser")),
+        profile_name="domain_worker_desktop", headless=True,
+    )
+
+
 def _write_preflight(
     path: str, *, version: int, ready: list[dict], excluded_no_email: list[dict],
     excluded_already_sent: list[dict], cloaking_review: list[dict], complete: bool,
+    evidence_review: list[dict] | None = None,
 ) -> None:
     payload = {
         "version": version,
@@ -673,7 +753,31 @@ def _write_preflight(
             "cloaking_review": cloaking_review,
             "complete": bool(complete),
         })
-    _atomic_json(path, payload)
+    if version >= 4:
+        payload["evidence_review"] = evidence_review or []
+        payload["manual_evidence_completed"] = {}
+    with _exclusive_file_lock(path):
+        existing = _read_json(path, {})
+        completed = dict(existing.get("manual_evidence_completed") or {})
+        existing_by_target = {
+            str(item.get("target_url")): item
+            for item in (existing.get("evidence_review") or [])
+            if isinstance(item, dict) and item.get("target_url")
+        }
+        if version >= 4:
+            merged_review = []
+            for item in payload["evidence_review"]:
+                if str(item.get("target_url")) in completed:
+                    continue
+                previous = existing_by_target.get(str(item.get("target_url")), {})
+                merged = dict(item)
+                for key in ("manual_send_in_progress", "browser_evidence", "last_send_result"):
+                    if previous.get(key) and not merged.get(key):
+                        merged[key] = previous[key]
+                merged_review.append(merged)
+            payload["evidence_review"] = merged_review
+            payload["manual_evidence_completed"] = completed
+        _atomic_json(path, payload)
 
 
 def _run_prechecked_domain(
@@ -738,6 +842,32 @@ def _run_prechecked_domain(
             ),
             set(), False,
         )
+    require_general_evidence = bool(prepared.get("require_browser_evidence"))
+    browser_capture = prepared.get("browser_evidence") or {}
+    browser_attachments = (
+        [] if approved_cloaking and not force_normal_report
+        else browser_evidence.evidence_attachment_paths(browser_capture)
+    )
+    if (
+        require_general_evidence and not browser_attachments
+        and not (approved_cloaking and not force_normal_report)
+    ):
+        return ({
+            "target_url": target, "domain": domain, "success": False,
+            "duration_seconds": round(time.time() - started, 1),
+            "reputation": result.get("reputation", {}).get("verdict"),
+            "drafts_total": len(result.get("drafts") or []),
+            "drafts_sendable": 0, "sent_ok": 0, "sent_failed": 0,
+            "already_sent": 0, "sent_to": [],
+            "skipped": "browser_evidence_required",
+            "browser_evidence_error": prepared.get("browser_evidence_error") or "Missing valid Browser Evidence",
+        }, set(), False)
+    if browser_attachments:
+        refreshed = pt.append_browser_evidence_to_drafts(
+            result.get("drafts") or [], browser_capture,
+        )
+        if len(refreshed) != len(result.get("drafts") or []):
+            raise ValueError("Browser Evidence could not be appended to every draft")
     if force_normal_report:
         refreshed = pt.remove_cloaking_evidence_from_drafts(result.get("drafts") or [])
         if len(refreshed) != len(result.get("drafts") or []):
@@ -746,7 +876,7 @@ def _run_prechecked_domain(
                 + "; Cloaking evidence could not be removed from every draft"
             ).strip("; ")
     evidence_path = str(cloaking.get("evidence_path") or "").strip()
-    evidence_attachments = (
+    evidence_attachments = list(browser_attachments) + (
         [evidence_path]
         if not force_normal_report
         and cloaking_verdict in {"LIKELY", "POSSIBLE"}
@@ -767,6 +897,11 @@ def _run_prechecked_domain(
         domain, result.get("drafts") or [], send_cfg, include_vncert,
         events_path, stop_path, sent_deliveries=sent_deliveries,
         attachments=evidence_attachments,
+        require_browser_evidence=(
+            require_general_evidence
+            and not (approved_cloaking and not force_normal_report)
+        ),
+        target_url=(target if require_general_evidence else ""),
     )
     domain_result = {
         "target_url": target, "domain": domain, "success": True,
@@ -789,6 +924,121 @@ def _run_prechecked_domain(
     elif mail.get("sent_ok", 0) == 0 and mail.get("sent_failed", 0) == 0 and mail.get("already_sent", 0):
         domain_result["skipped"] = "already_sent"
     return domain_result, successful_accounts, stopped_during_send
+
+
+def send_manual_evidence_item(
+    job_dir: str, target_url: str, evidence: dict, allowed_accounts: list[str],
+) -> dict:
+    """Send one preflight-isolated item directly after operator evidence upload."""
+    job_dir = os.path.abspath(job_dir)
+    preflight_path = os.path.join(job_dir, "preflight.json")
+    status_path = os.path.join(job_dir, "status.json")
+    events_path = os.path.join(job_dir, "events.jsonl")
+    with open(os.path.join(job_dir, "job.json"), encoding="utf-8") as handle:
+        job = json.load(handle)
+    with _exclusive_file_lock(preflight_path):
+        preflight = _read_json(preflight_path, {})
+        items = preflight.get("evidence_review") or []
+        prepared = next(
+            (dict(item) for item in items if item.get("target_url") == target_url), None,
+        )
+        if not prepared:
+            raise ValueError("Domain không còn trong danh sách cần ảnh thủ công")
+        if prepared.get("manual_send_in_progress"):
+            claimed_at = str(prepared.get("manual_send_claimed_at") or "")
+            try:
+                claimed_dt = datetime.fromisoformat(claimed_at.replace("Z", "+00:00"))
+                if claimed_dt.tzinfo is None:
+                    claimed_dt = claimed_dt.replace(tzinfo=timezone.utc)
+                claim_age = (datetime.now(timezone.utc) - claimed_dt.astimezone(timezone.utc)).total_seconds()
+            except (TypeError, ValueError):
+                claim_age = 0
+            if claim_age < 30 * 60:
+                raise ValueError("Domain này đang được gửi ở một phiên khác")
+        prepared["manual_send_in_progress"] = True
+        prepared["manual_send_claimed_at"] = _now()
+        preflight["evidence_review"] = [
+            (prepared if item.get("target_url") == target_url else item)
+            for item in items
+        ]
+        _atomic_json(preflight_path, preflight)
+    def release_claim() -> None:
+        with _exclusive_file_lock(preflight_path):
+            current = _read_json(preflight_path, {})
+            current_items = current.get("evidence_review") or []
+            current["evidence_review"] = [
+                ({**item, "manual_send_in_progress": False, "manual_send_claimed_at": ""}
+                 if item.get("target_url") == target_url else item)
+                for item in current_items
+            ]
+            _atomic_json(preflight_path, current)
+
+    attachments = browser_evidence.evidence_attachment_paths(evidence)
+    if not attachments:
+        release_claim()
+        raise ValueError("Browser Evidence thủ công không hợp lệ")
+    prepared["browser_evidence"] = evidence
+    prepared["require_browser_evidence"] = True
+
+    cfg = pt.load_config()
+    allowed = {str(value).strip().lower() for value in allowed_accounts if str(value).strip()}
+    job_allowed = {
+        str(value).strip().lower() for value in (job.get("allowed_accounts") or [])
+        if str(value).strip()
+    }
+    if job_allowed:
+        allowed &= job_allowed
+    cfg["smtp_accounts"] = [
+        account for account in (cfg.get("smtp_accounts") or [])
+        if str(account.get("username") or "").strip().lower() in allowed
+    ]
+    if not cfg["smtp_accounts"]:
+        release_claim()
+        raise ValueError("Không có tài khoản SMTP hợp lệ được chọn")
+    try:
+        result, _accounts, _stopped = _run_prechecked_domain(
+            prepared, cfg, cfg["smtp_accounts"], bool(job.get("include_vncert", False)),
+            events_path, None, _successfully_sent_deliveries_today(),
+        )
+    except Exception:
+        release_claim()
+        raise
+    if result.get("skipped") == "manual_review_required":
+        review_queue.enqueue_worker_result(
+            job=job, job_dir=job_dir, prepared=prepared, domain_result=result,
+        )
+
+    terminal = bool(
+        result.get("skipped") in {"manual_review_required", "already_sent", "no_sendable_email"}
+        or (int(result.get("sent_ok", 0) or 0) > 0 and not int(result.get("sent_failed", 0) or 0))
+    )
+    with _exclusive_file_lock(preflight_path):
+        preflight = _read_json(preflight_path, {})
+        current_items = preflight.get("evidence_review") or []
+        if terminal:
+            preflight["evidence_review"] = [
+                item for item in current_items if item.get("target_url") != target_url
+            ]
+            completed = dict(preflight.get("manual_evidence_completed") or {})
+            completed[target_url] = {
+                "finished_at": _now(), "status": result.get("skipped") or "sent",
+                "sent_ok": int(result.get("sent_ok", 0) or 0),
+                "sent_failed": int(result.get("sent_failed", 0) or 0),
+            }
+            preflight["manual_evidence_completed"] = completed
+        else:
+            preflight["evidence_review"] = [
+                ({
+                    **item, "browser_evidence": evidence,
+                    "last_send_result": result,
+                    "manual_send_in_progress": False,
+                    "manual_send_claimed_at": "",
+                } if item.get("target_url") == target_url else item)
+                for item in current_items
+            ]
+        _atomic_json(preflight_path, preflight)
+    _append_event(events_path, {"type": "manual_evidence_send_finished", **result})
+    return result
 
 
 def run_job(job_path: str):
@@ -872,6 +1122,7 @@ def run_job(job_path: str):
         "started_at": _now(), "finished_at": None, "total": len(targets), "processed": 0,
         "precheck_total": len(targets), "precheck_processed": 0, "ready_total": 0,
         "precheck_cached": 0, "cloaking_review_total": 0,
+        "evidence_review_total": 0,
         "current_domain": None, "current_batch": 0, "total_batches": 0,
         "next_batch_in_seconds": 0, "results": previous_results, "excluded_no_email": [],
         "excluded_already_sent": [], "error": None,
@@ -896,6 +1147,7 @@ def run_job(job_path: str):
         if reusable_preflight:
             ready = preflight.get("ready") or []
             cloaking_review_items = preflight.get("cloaking_review") or []
+            evidence_review_items = preflight.get("evidence_review") or []
             # Resume cùng job: chỉ giữ các domain chưa có kết quả. Domain đang
             # xử lý lúc bị dừng chưa được append nên vẫn được chạy lại an toàn.
             ready = [item for item in ready if item.get("target_url") not in completed_targets]
@@ -903,9 +1155,11 @@ def run_job(job_path: str):
             status["excluded_already_sent"] = preflight.get("excluded_already_sent") or []
             status["precheck_processed"] = len(targets)
             status["cloaking_review_total"] = len(cloaking_review_items)
+            status["evidence_review_total"] = len(evidence_review_items)
         else:
             ready = []
             cloaking_review_items = []
+            evidence_review_items = []
             configured_accounts = cfg.get("smtp_accounts") or []
             detect_cloaking_early = requested_preflight_version >= 3
             _write_preflight(
@@ -913,6 +1167,7 @@ def run_job(job_path: str):
                 excluded_no_email=status["excluded_no_email"],
                 excluded_already_sent=status["excluded_already_sent"],
                 cloaking_review=cloaking_review_items, complete=False,
+                evidence_review=evidence_review_items,
             )
             for target in targets:
                 if _should_stop(stop_path):
@@ -1058,17 +1313,41 @@ def run_job(job_path: str):
                         "queue_id": queue_item.get("queue_id", ""),
                     })
                 elif recipients:
-                    ready.append(prepared)
+                    if requested_preflight_version >= 4:
+                        prepared["require_browser_evidence"] = True
+                        capture = _capture_worker_browser_evidence(target)
+                        if browser_evidence.evidence_attachment_paths(capture):
+                            prepared["browser_evidence"] = capture
+                            ready.append(prepared)
+                            _append_event(events_path, {
+                                "type": "browser_evidence_captured", "target_url": target,
+                                "domain": target_domain,
+                            })
+                        else:
+                            evidence_review_items.append({
+                                **prepared,
+                                "browser_evidence_error": capture.get("error") or "Automatic capture failed",
+                                "browser_evidence_terminal": bool(capture.get("terminal")),
+                            })
+                            _append_event(events_path, {
+                                "type": "browser_evidence_manual_required",
+                                "target_url": target, "domain": target_domain,
+                                "error": capture.get("error") or "Automatic capture failed",
+                            })
+                    else:
+                        ready.append(prepared)
                 status["precheck_processed"] += 1
                 status["processed"] = status["precheck_processed"]
                 status["ready_total"] = len(ready)
                 status["cloaking_review_total"] = len(cloaking_review_items)
+                status["evidence_review_total"] = len(evidence_review_items)
                 status["current_domain"] = None
                 _write_preflight(
                     preflight_path, version=requested_preflight_version, ready=ready,
                     excluded_no_email=status["excluded_no_email"],
                     excluded_already_sent=status["excluded_already_sent"],
                     cloaking_review=cloaking_review_items, complete=False,
+                    evidence_review=evidence_review_items,
                 )
                 _atomic_json(status_path, status)
                 _append_event(events_path, {"type": "precheck_finished", "target_url": target})
@@ -1080,6 +1359,7 @@ def run_job(job_path: str):
                 excluded_no_email=status["excluded_no_email"],
                 excluded_already_sent=status["excluded_already_sent"],
                 cloaking_review=cloaking_review_items, complete=True,
+                evidence_review=evidence_review_items,
             )
 
         if retry_targets is not None:
@@ -1100,6 +1380,7 @@ def run_job(job_path: str):
             "type": "precheck_completed", "ready": len(ready),
             "excluded_no_email": len(status["excluded_no_email"]),
             "cloaking_review": len(cloaking_review_items),
+            "evidence_review": len(evidence_review_items),
         })
         if precheck_only:
             return
@@ -1161,6 +1442,25 @@ def run_job(job_path: str):
                         "type": "cloaking_review_queue_error",
                         "target_url": target, "error": str(exc),
                     })
+                if domain_result.get("skipped") == "browser_evidence_required":
+                    evidence_review_items = [
+                        item for item in evidence_review_items
+                        if item.get("target_url") != target
+                    ]
+                    evidence_review_items.append({
+                        **prepared,
+                        "browser_evidence_error": domain_result.get("browser_evidence_error")
+                        or "Browser Evidence is no longer valid",
+                    })
+                    ready = [item for item in ready if item.get("target_url") != target]
+                    _write_preflight(
+                        preflight_path, version=requested_preflight_version,
+                        ready=ready, excluded_no_email=status["excluded_no_email"],
+                        excluded_already_sent=status["excluded_already_sent"],
+                        cloaking_review=cloaking_review_items, complete=True,
+                        evidence_review=evidence_review_items,
+                    )
+                    status["evidence_review_total"] = len(evidence_review_items)
                 status["results"].append(domain_result)
                 status["processed"] += 1
                 status["current_domain"] = None

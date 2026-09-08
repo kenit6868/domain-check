@@ -15,6 +15,65 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DomainWorkerUiTests(unittest.TestCase):
+    def test_v4_ui_exposes_manual_evidence_send_flow(self):
+        source = (ROOT / "pages" / "6_Domain_Worker.py").read_text(encoding="utf-8")
+        self.assertIn('"preflight_version": 4', source)
+        self.assertIn('cached_preflight.get("evidence_review")', source)
+        self.assertIn("Ảnh bằng chứng thủ công (1–3 ảnh)", source)
+        self.assertIn("create_manual_browser_evidence", source)
+        self.assertIn("send_manual_evidence_item", source)
+        self.assertIn("Gửi mail domain này", source)
+
+    def test_v4_manual_evidence_case_renders_without_sending(self):
+        with tempfile.TemporaryDirectory() as runtime_dir, tempfile.TemporaryDirectory() as review_dir:
+            runtime = Path(runtime_dir)
+            worker_dir = runtime / "worker_jobs"
+            job_dir = worker_dir / "v4-evidence-ui"
+            job_dir.mkdir(parents=True)
+            (runtime / "cloaking_send_jobs").mkdir()
+            target = "https://manual-ui.example/path"
+            job = {
+                "job_id": "v4-evidence-ui", "domains": [target],
+                "allowed_accounts": ["sender@example.org"],
+                "precheck_only": True, "preflight_version": 4,
+            }
+            (job_dir / "job.json").write_text(json.dumps(job), encoding="utf-8")
+            (job_dir / "status.json").write_text(json.dumps({
+                "job_id": "v4-evidence-ui", "state": "ready", "ready_total": 0,
+                "precheck_total": 1, "precheck_processed": 1, "precheck_cached": 0,
+                "cloaking_review_total": 0, "evidence_review_total": 1,
+                "excluded_no_email": [], "results": [],
+            }), encoding="utf-8")
+            (job_dir / "preflight.json").write_text(json.dumps({
+                "version": 4, "complete": True, "ready": [], "cloaking_review": [],
+                "evidence_review": [{
+                    "target_url": target, "domain": "manual-ui.example",
+                    "recipients": [{"channel": "registrar", "email": "abuse@example.org"}],
+                    "browser_evidence_error": "capture unavailable",
+                }],
+                "excluded_no_email": [], "excluded_already_sent": [],
+            }), encoding="utf-8")
+            with (
+                patch.object(review_queue, "REVIEW_DIR", review_dir),
+                patch.object(domain_worker, "WORKER_DIR", str(worker_dir)),
+                patch.object(domain_worker, "CLOAKING_WORKER_DIR", str(runtime / "cloaking_send_jobs")),
+                patch.object(domain_worker, "NO_EMAIL_LOG_PATH", str(runtime / "no_email.csv")),
+                patch.object(pt, "SENT_LOG_PATH", str(runtime / "sent.csv")),
+                patch.object(pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(domain_worker, "send_manual_evidence_item") as send,
+            ):
+                app = AppTest.from_file(str(ROOT / "streamlit_app.py"), default_timeout=10).run()
+                app = app.switch_page("pages/6_Domain_Worker.py").run()
+            self.assertEqual([], list(app.exception))
+            self.assertTrue(any(
+                uploader.label == "Ảnh bằng chứng thủ công (1–3 ảnh)"
+                for uploader in app.file_uploader
+            ))
+            self.assertIn("Gửi mail domain này", [button.label for button in app.button])
+            send.assert_not_called()
+
     def test_v3_precheck_renders_normal_and_early_cloaking_counts(self):
         with (
             tempfile.TemporaryDirectory() as runtime_dir,

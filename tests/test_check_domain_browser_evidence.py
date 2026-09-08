@@ -27,7 +27,7 @@ class CheckDomainBrowserEvidenceTests(unittest.TestCase):
         self.assertTrue(any("URLScan" in error and "nội bộ" in error for error in errors))
         self.assertTrue(any("placeholder" in error for error in errors))
 
-    def test_quality_gate_requires_exact_browser_attachment_pair(self):
+    def test_quality_gate_accepts_one_to_three_images_with_valid_manifest(self):
         parsed = {
             "to": "abuse@example.test", "subject": "Phishing report",
             "body": "Reported URL: https://source.test/path",
@@ -36,15 +36,16 @@ class CheckDomainBrowserEvidenceTests(unittest.TestCase):
             parsed, target_url="https://source.test/path", attachments=[],
             require_browser_evidence=True,
         )
-        self.assertTrue(any("một ảnh và một manifest" in error for error in errors))
+        self.assertTrue(any("1 đến 3 ảnh" in error for error in errors))
         with tempfile.TemporaryDirectory() as folder:
-            image = os.path.join(folder, "proof.png")
-            manifest = os.path.join(folder, "proof.json")
-            open(image, "wb").close()
-            open(manifest, "wb").close()
+            evidence = pt.browser_evidence.create_manual_browser_evidence(
+                "https://source.test/path",
+                [("proof.png", b"\x89PNG\r\n\x1a\nproof")], folder,
+            )
             self.assertEqual([], pt.validate_report_delivery(
                 parsed, target_url="https://source.test/path",
-                attachments=[image, manifest], require_browser_evidence=True,
+                attachments=pt.browser_evidence.evidence_attachment_paths(evidence),
+                require_browser_evidence=True,
             ))
 
     def test_append_browser_evidence_replaces_previous_block(self):
@@ -71,6 +72,8 @@ class CheckDomainBrowserEvidenceTests(unittest.TestCase):
         email_ui = (ROOT / "email_send_ui.py").read_text(encoding="utf-8")
         toolkit = (ROOT / "phishing_toolkit.py").read_text(encoding="utf-8")
         self.assertIn("capture_passive_browser_evidence", source)
+        self.assertIn("create_manual_browser_evidence", source)
+        self.assertIn("Ảnh bằng chứng thủ công (1–3 ảnh)", source)
         self.assertGreaterEqual(source.count("require_browser_evidence=True"), 2)
         self.assertIn("attachments=browser_attachments", source)
         self.assertNotIn("append_urlscan_evidence_to_drafts(result.get", source)

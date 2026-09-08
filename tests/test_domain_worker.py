@@ -5,9 +5,11 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import domain_worker
 import cloaking_review_queue as review_queue
+import browser_evidence
 
 
 class DomainWorkerTests(unittest.TestCase):
@@ -146,6 +148,155 @@ class DomainWorkerTests(unittest.TestCase):
             self.assertEqual(preflight["ready"][0]["cloaking_verdict"], "NO_SIGNAL")
             cloaking_check.assert_called_once_with("target.example", "full", {"smtp_accounts": [{}]})
             run_check.assert_not_called()
+
+    def test_v4_precheck_isolates_domain_when_browser_capture_fails(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            job_path = os.path.join(job_dir, "job.json")
+            with open(job_path, "w", encoding="utf-8") as handle:
+                json.dump({
+                    "job_id": "evidence-failed", "domains": ["https://target.example/path"],
+                    "precheck_only": True, "preflight_version": 4,
+                    "allowed_accounts": ["sender@example.org"],
+                }, handle)
+            with (
+                patch.object(domain_worker.pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                patch.object(domain_worker, "_precheck_report_recipients", return_value=[{
+                    "channel": "registrar", "email": "abuse@example.org",
+                }]),
+                patch.object(domain_worker.pt, "run_cloaking_check", return_value={
+                    "verdict": "NO_SIGNAL", "score": 0, "signals": [],
+                    "coverage": {"multi_vantage_recommended": False},
+                }),
+                patch.object(domain_worker, "_capture_worker_browser_evidence", return_value={
+                    "success": False, "error": "capture unavailable", "terminal": False,
+                }),
+            ):
+                domain_worker.run_job(job_path)
+            with open(os.path.join(job_dir, "preflight.json"), encoding="utf-8") as handle:
+                preflight = json.load(handle)
+            self.assertEqual([], preflight["ready"])
+            self.assertEqual(1, len(preflight["evidence_review"]))
+            self.assertEqual("capture unavailable", preflight["evidence_review"][0]["browser_evidence_error"])
+
+    def test_v4_precheck_keeps_valid_browser_evidence_with_ready_domain(self):
+        with tempfile.TemporaryDirectory() as job_dir, tempfile.TemporaryDirectory() as evidence_dir:
+            evidence = browser_evidence.create_manual_browser_evidence(
+                "https://target.example/path",
+                [("proof.png", b"\x89PNG\r\n\x1a\nproof")], evidence_dir,
+            )
+            job_path = os.path.join(job_dir, "job.json")
+            with open(job_path, "w", encoding="utf-8") as handle:
+                json.dump({
+                    "job_id": "evidence-ready", "domains": ["https://target.example/path"],
+                    "precheck_only": True, "preflight_version": 4,
+                    "allowed_accounts": ["sender@example.org"],
+                }, handle)
+            with (
+                patch.object(domain_worker.pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                patch.object(domain_worker, "_precheck_report_recipients", return_value=[{
+                    "channel": "registrar", "email": "abuse@example.org",
+                }]),
+                patch.object(domain_worker.pt, "run_cloaking_check", return_value={
+                    "verdict": "NO_SIGNAL", "score": 0, "signals": [],
+                    "coverage": {"multi_vantage_recommended": False},
+                }),
+                patch.object(domain_worker, "_capture_worker_browser_evidence", return_value=evidence),
+            ):
+                domain_worker.run_job(job_path)
+            with open(os.path.join(job_dir, "preflight.json"), encoding="utf-8") as handle:
+                preflight = json.load(handle)
+            self.assertEqual([], preflight["evidence_review"])
+            self.assertEqual(1, len(preflight["ready"]))
+            self.assertTrue(preflight["ready"][0]["require_browser_evidence"])
+            self.assertEqual(evidence["manifest_path"], preflight["ready"][0]["browser_evidence"]["manifest_path"])
+
+    def test_v4_normal_worker_attaches_manual_evidence_and_sends(self):
+        target = "https://target.example/path"
+        with tempfile.TemporaryDirectory() as folder:
+            evidence = browser_evidence.create_manual_browser_evidence(
+                target, [("proof.png", b"\x89PNG\r\n\x1a\nproof")], folder,
+            )
+            draft = os.path.join(folder, "target.example_registrar_report.txt")
+            with open(draft, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "To: abuse@example.org\nSubject: Phishing report\n\n"
+                    f"Reported URL: {target}\n"
+                )
+            events = os.path.join(folder, "events.jsonl")
+            prepared = {
+                "target_url": target, "domain": "target.example",
+                "require_browser_evidence": True, "browser_evidence": evidence,
+            }
+            cfg = {"smtp_accounts": [{"username": "sender@example.org"}]}
+            with (
+                patch.object(domain_worker.pt, "run_check", return_value={
+                    "domain": "target.example", "drafts": [draft], "drafts_error": "",
+                    "reputation": {"verdict": "flagged"},
+                    "cloaking": {"verdict": "NO_SIGNAL", "score": 0, "signals": []},
+                }),
+                patch.object(domain_worker.pt, "send_report_email_single", return_value={
+                    "success": True, "account": "sender@example.org", "error": "",
+                }) as send,
+                patch.object(domain_worker.pt, "log_sent"),
+            ):
+                result, _accounts, _stopped = domain_worker._run_prechecked_domain(
+                    prepared, cfg, cfg["smtp_accounts"], False, events, None, set(),
+                )
+            self.assertEqual(1, result["sent_ok"])
+            self.assertEqual(
+                browser_evidence.evidence_attachment_paths(evidence),
+                send.call_args.kwargs["attachments"],
+            )
+            with open(draft, encoding="utf-8") as handle:
+                self.assertIn("Operator-supplied browser screenshot", handle.read())
+
+    def test_manual_evidence_send_is_allowed_while_job_status_is_running(self):
+        target = "https://running.example/path"
+        with tempfile.TemporaryDirectory() as job_dir, tempfile.TemporaryDirectory() as evidence_dir:
+            evidence = browser_evidence.create_manual_browser_evidence(
+                target, [("proof.png", b"\x89PNG\r\n\x1a\nproof")], evidence_dir,
+            )
+            job = {
+                "job_id": "running-manual", "domains": [target],
+                "allowed_accounts": ["sender@example.org"], "include_vncert": False,
+            }
+            Path(os.path.join(job_dir, "job.json")).write_text(json.dumps(job), encoding="utf-8")
+            Path(os.path.join(job_dir, "status.json")).write_text(
+                json.dumps({"job_id": "running-manual", "state": "running", "results": []}),
+                encoding="utf-8",
+            )
+            Path(os.path.join(job_dir, "preflight.json")).write_text(json.dumps({
+                "version": 4, "evidence_review": [{
+                    "target_url": target, "domain": "running.example",
+                    "recipients": [{"email": "abuse@example.org"}],
+                }], "ready": [], "cloaking_review": [],
+                "manual_evidence_completed": {},
+            }), encoding="utf-8")
+            result = {
+                "target_url": target, "domain": "running.example", "success": True,
+                "sent_ok": 1, "sent_failed": 0, "already_sent": 0,
+                "drafts_total": 1, "drafts_sendable": 1, "sent_to": [],
+            }
+            with (
+                patch.object(domain_worker.pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                patch.object(domain_worker, "_run_prechecked_domain", return_value=(result, set(), False)),
+            ):
+                sent = domain_worker.send_manual_evidence_item(
+                    job_dir, target, evidence, ["sender@example.org"],
+                )
+            self.assertEqual(1, sent["sent_ok"])
+            state = json.loads(Path(os.path.join(job_dir, "preflight.json")).read_text(encoding="utf-8"))
+            self.assertEqual([], state["evidence_review"])
+            self.assertIn(target, state["manual_evidence_completed"])
 
     def test_precheck_runs_recipient_lookup_and_cloaking_detection_concurrently(self):
         with tempfile.TemporaryDirectory() as job_dir:

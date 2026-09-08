@@ -38,6 +38,14 @@ class QuickReportRestoreTests(unittest.TestCase):
         self.assertIn('st.session_state.get("quick_report_runtime_version")', source)
         self.assertIn("cache.clear()", source)
 
+    def test_page_shows_copy_ready_registry_webform_text(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("get_registry_webform_draft_text", source)
+        self.assertIn("target_url=original_url", source)
+        self.assertIn("st.code(registry_text", source)
+
 
 if __name__ == "__main__":
     unittest.main()

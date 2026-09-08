@@ -27,6 +27,7 @@ DEFAULT_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
 )
 MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024
+MAX_MANUAL_SCREENSHOTS = 3
 _SENSITIVE_QUERY_KEYS = {
     "access_token", "apikey", "api_key", "auth", "authorization", "key",
     "password", "proxy_password", "secret", "token",
@@ -182,22 +183,25 @@ def format_http_redirect_chain(http_result: dict) -> str:
 
 
 def validate_evidence_artifacts(result: dict) -> dict:
-    """Validate a PNG/JPEG screenshot and its manifest without changing files."""
-    screenshot_path = os.path.abspath(str((result or {}).get("screenshot_path") or ""))
+    """Validate one automatic or 1-3 manual screenshots and their manifest."""
+    raw_paths = (result or {}).get("screenshot_paths") or []
+    if not raw_paths and (result or {}).get("screenshot_path"):
+        raw_paths = [(result or {}).get("screenshot_path")]
+    screenshot_paths = [os.path.abspath(str(path or "")) for path in raw_paths]
     manifest_path = os.path.abspath(str((result or {}).get("manifest_path") or ""))
     errors = []
-    if not os.path.isfile(screenshot_path):
-        errors.append("Không tìm thấy screenshot")
-    else:
+    if not 1 <= len(screenshot_paths) <= MAX_MANUAL_SCREENSHOTS:
+        errors.append("Evidence phải có từ 1 đến 3 ảnh")
+    for screenshot_path in screenshot_paths:
+        if not os.path.isfile(screenshot_path):
+            errors.append("Không tìm thấy screenshot")
+            continue
         size = os.path.getsize(screenshot_path)
         with open(screenshot_path, "rb") as handle:
             header = handle.read(12)
         if size <= 0 or size > MAX_SCREENSHOT_BYTES:
             errors.append("Screenshot rỗng hoặc vượt quá 10 MB")
-        if not (
-            header.startswith(b"\x89PNG\r\n\x1a\n")
-            or header.startswith(b"\xff\xd8\xff")
-        ):
+        if not (header.startswith(b"\x89PNG\r\n\x1a\n") or header.startswith(b"\xff\xd8\xff")):
             errors.append("Screenshot không phải PNG/JPEG hợp lệ")
     manifest = {}
     try:
@@ -207,8 +211,16 @@ def validate_evidence_artifacts(result: dict) -> dict:
             errors.append("Manifest evidence không đúng phiên bản")
     except (OSError, UnicodeError, json.JSONDecodeError):
         errors.append("Không đọc được manifest evidence")
-    if not errors and manifest.get("screenshot", {}).get("sha256") != _sha256(screenshot_path):
-        errors.append("Hash screenshot không khớp manifest")
+    manifest_screenshots = manifest.get("screenshots") or []
+    if not manifest_screenshots and manifest.get("screenshot"):
+        manifest_screenshots = [manifest.get("screenshot")]
+    if len(manifest_screenshots) != len(screenshot_paths):
+        errors.append("Số ảnh không khớp manifest")
+    elif not errors:
+        for path, item in zip(screenshot_paths, manifest_screenshots):
+            if item.get("sha256") != _sha256(path):
+                errors.append("Hash screenshot không khớp manifest")
+                break
     return {"valid": not errors, "errors": errors, "manifest": manifest}
 
 
@@ -219,7 +231,8 @@ def evidence_attachment_paths(result: dict | None) -> list[str]:
     validation = validate_evidence_artifacts(result)
     if not validation["valid"]:
         return []
-    return [os.path.abspath(result["screenshot_path"]), os.path.abspath(result["manifest_path"])]
+    paths = result.get("screenshot_paths") or [result.get("screenshot_path")]
+    return [os.path.abspath(path) for path in paths if path] + [os.path.abspath(result["manifest_path"])]
 
 
 def format_email_evidence_block(result: dict | None) -> str:
@@ -230,9 +243,14 @@ def format_email_evidence_block(result: dict | None) -> str:
     manifest = validation["manifest"]
     control = manifest.get("control") or {}
     http = manifest.get("http") or {}
+    manual = manifest.get("evidence_type") == "manual_upload"
     lines = [
         "--- Technical Evidence: Read-only Browser Inspection ---",
-        "Evidence type: DOM destination observed (no click or form submission)",
+        (
+            "Evidence type: Operator-supplied browser screenshot(s)"
+            if manual else
+            "Evidence type: DOM destination observed (no click or form submission)"
+        ),
         f"Captured at (UTC): {manifest.get('observed_at', '')}",
         f"Requested URL: {manifest.get('requested_url', '')}",
         f"Landing URL: {manifest.get('landing_url', '')}",
@@ -246,14 +264,85 @@ def format_email_evidence_block(result: dict | None) -> str:
             f"Observed control: {control.get('label', '')}",
             f"Resolved DOM destination: {control.get('resolved_destination', '')}",
         ])
-    else:
+    elif not manual:
         lines.append("Observed control: No matching registration/login control was found")
     lines.extend([
-        f"Screenshot SHA-256: {(manifest.get('screenshot') or {}).get('sha256', '')}",
-        "The attached screenshot and JSON manifest document this observation.",
+        f"Screenshot count: {len(manifest.get('screenshots') or [manifest.get('screenshot')])}",
+        "The attached screenshot(s) and JSON manifest document this observation.",
         "--- End of Browser Evidence ---",
     ])
     return "\n".join(lines)
+
+
+def create_manual_browser_evidence(
+    target_url: str, images: list[tuple[str, bytes]], evidence_root: str,
+    *, profile_name: str = "manual_upload",
+) -> dict:
+    """Atomically persist 1-3 operator screenshots with a hash manifest."""
+    requested_url = _ensure_http_url(target_url)
+    if not 1 <= len(images or []) <= MAX_MANUAL_SCREENSHOTS:
+        raise ValueError("Hãy tải lên từ 1 đến 3 ảnh")
+    validated = []
+    for original_name, content in images:
+        data = bytes(content or b"")
+        if not data or len(data) > MAX_SCREENSHOT_BYTES:
+            raise ValueError("Mỗi ảnh phải có dữ liệu và không vượt quá 10 MB")
+        if data.startswith(b"\x89PNG\r\n\x1a\n"):
+            extension = ".png"
+        elif data.startswith(b"\xff\xd8\xff"):
+            extension = ".jpg"
+        else:
+            raise ValueError(f"{original_name}: chỉ chấp nhận PNG hoặc JPEG hợp lệ")
+        validated.append((original_name, data, extension))
+
+    os.makedirs(evidence_root, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    base = f"{_safe_filename(requested_url)}_{_safe_component(profile_name, 'manual')}_{stamp}"
+    written = []
+    manifest_path = os.path.abspath(os.path.join(evidence_root, base + ".json"))
+    try:
+        screenshot_items = []
+        screenshot_paths = []
+        for index, (original_name, data, extension) in enumerate(validated, start=1):
+            path = os.path.abspath(os.path.join(evidence_root, f"{base}_{index}{extension}"))
+            temp_path = f"{path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+            with open(temp_path, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, path)
+            written.append(path)
+            screenshot_paths.append(path)
+            screenshot_items.append({
+                "path": path, "original_name": os.path.basename(str(original_name)),
+                "size": len(data), "sha256": _sha256(path),
+            })
+        manifest = {
+            "version": EVIDENCE_VERSION, "evidence_type": "manual_upload",
+            "navigation_verified": False, "observed_at": _now(),
+            "profile": {"name": profile_name, "user_agent": "operator supplied"},
+            "requested_url": redact_url(requested_url), "landing_url": "",
+            "http": {}, "page": {"title": ""}, "control": {"found": False},
+            "screenshots": screenshot_items,
+        }
+        _atomic_json(manifest_path, manifest)
+        written.append(manifest_path)
+        return {
+            "success": True, "terminal": False, "error": "",
+            "evidence_type": "manual_upload", "navigation_verified": False,
+            "requested_url": manifest["requested_url"], "landing_url": "",
+            "resolved_destination": "", "control_found": False,
+            "control_label": "", "screenshot_path": screenshot_paths[0],
+            "screenshot_paths": screenshot_paths, "manifest_path": manifest_path,
+            "http": {},
+        }
+    except Exception:
+        for path in written:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        raise
 
 
 def capture_passive_browser_evidence(
