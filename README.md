@@ -81,7 +81,8 @@ Các trang (xem sidebar bên trái):
   bổ sung nội dung và xác nhận gửi; nút tự điền form bằng Playwright đang tạm ẩn.
 - **Domain Worker** — nút precheck kiểm tra email và cloaking đồng thời; case
   cloaking chỉ được tách ngay khi có email nhận, còn domain thường mới đi vào
-  job gửi batch
+  job gửi batch. IP/ASN Cloudflare chỉ được xem là proxy/CDN: tool không gửi
+  `abuse@cloudflare.com` và loại case chỉ có địa chỉ này khỏi job.
 - **Cloaking Review** — hàng đợi bền vững để xem evidence của từng domain, xem
   trước đúng draft/email nhận rồi gửi SMTP trực tiếp; không hiển thị case không
   có email nhận và không tạo worker job gửi. Khi chọn **Không phải cloaking**,

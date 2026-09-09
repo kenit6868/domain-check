@@ -13,6 +13,9 @@
     Hai nút mở form chính thức kèm query `url` của URL đang báo cáo để người vận
     hành kiểm tra, bổ sung nội dung và tự xác nhận; tự điền bằng Playwright tại
     Quick Report đang tạm ẩn.
+*   **Cloudflare**: IP/ASN Cloudflare chỉ chứng minh lớp proxy/CDN, không phải
+    origin hosting. Không gửi `abuse@cloudflare.com`; dùng form chính thức
+    [Cloudflare Abuse](https://www.cloudflare.com/abuse/) khi cần báo cáo lớp này.
 *   **Kênh cộng đồng Việt Nam**: Mở form [Chống Lừa Đảo](https://chongluadao.vn/report/reportphishing) và [Cốc Cốc Safe](https://safe.coccoc.com/) bằng các nút trong **Browser Blocking** của **Check Domain** hoặc **Quick Report**. Đây là bước thủ công; kiểm tra lại URL/bằng chứng trên form trước khi gửi.
 *   **Nội dung mẫu gửi báo cáo (tiếng Anh)**:
     ```

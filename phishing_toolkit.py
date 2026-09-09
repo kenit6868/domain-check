@@ -46,7 +46,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from email.message import EmailMessage
-from email.utils import formatdate, make_msgid
+from email.utils import formatdate, getaddresses, make_msgid
 from urllib.parse import urlparse
 
 import cloaking_detector
@@ -197,7 +197,7 @@ CA_ABUSE_NOTES = {
 # không vẫn do is_cloudflare() (tra nameserver) đảm nhiệm, không phải detect_cdn().
 CDN_ABUSE_CONTACTS = {
     "cloudflare": {
-        "report_url": "https://abuse.cloudflare.com",
+        "report_url": "https://www.cloudflare.com/abuse/",
         "note": "Chọn mục \"Phishing & Malware\" khi report — có thể chặn proxy hoặc gắn interstitial cảnh báo.",
     },
     "fastly": {
@@ -571,6 +571,32 @@ WEB_FORM_REGISTRARS = {
     "network solutions":    "https://www.networksolutions.com/support/aup/",
     "web.com":              "https://www.web.com/legal/abuse",
 }
+
+
+_CLOUDFLARE_UNMONITORED_RECIPIENTS = {"abuse@cloudflare.com"}
+
+
+def is_cloudflare_proxy_contact(ip_whois: dict | None) -> bool:
+    """Identify a Cloudflare proxy/CDN IP, not an origin hosting provider."""
+    info = ip_whois or {}
+    email = str(info.get("abuse_email") or "").strip().lower()
+    org = str(info.get("org") or "").lower()
+    asn = str(info.get("asn") or "").lower().replace("as", "").strip()
+    return (
+        email in _CLOUDFLARE_UNMONITORED_RECIPIENTS
+        or "cloudflare" in org
+        or asn == "13335"
+    )
+
+
+def is_blocked_report_recipient(value: str) -> bool:
+    """Reject known unmonitored provider inboxes before SMTP."""
+    addresses = {
+        address.strip().lower()
+        for _name, address in getaddresses([str(value or "")])
+        if address.strip()
+    }
+    return bool(addresses & _CLOUDFLARE_UNMONITORED_RECIPIENTS)
 
 
 def get_webform_draft_text(
@@ -2119,6 +2145,8 @@ VirusTotal report: {vt.get('link', 'N/A')}
 
 
 def generate_hosting_draft(domain, ip, ip_whois, cfg):
+    if is_cloudflare_proxy_contact(ip_whois):
+        return None
     """Sinh draft DMCA/AUP takedown gửi ISP/hosting sở hữu IP gốc."""
     contact_name = cfg.get("contact_name") or ""
     contact_email = cfg.get("contact_email") or ""
@@ -2667,6 +2695,13 @@ def _send_via_account(
     Không raise — trả về dict {"account", "proxy", "success", "error"}.
     """
     username = account.get("username", "")
+    if is_blocked_report_recipient(to):
+        return {
+            "account": username, "proxy": proxy_str or "—", "success": False,
+            "error": "Recipient abuse@cloudflare.com is not monitored; use Cloudflare Abuse web form instead.",
+            "stage": "recipient_validation", "attempts": 0,
+            "transport": "not_started", "message_id": "", "sent_at": "",
+        }
     password = account.get("password", "")
     proxy_label = proxy_str or "—"
     attempts = 0
@@ -2914,6 +2949,8 @@ def validate_report_delivery(
     body = str((parsed or {}).get("body") or "")
     if not recipient:
         errors.append("Draft không có email nhận hợp lệ")
+    if recipient and is_blocked_report_recipient(recipient):
+        errors.append("Recipient abuse@cloudflare.com không được Cloudflare theo dõi; hãy dùng form Cloudflare Abuse")
     if not subject:
         errors.append("Draft không có Subject")
     if target_url and f"Reported URL: {target_url}" not in body:
@@ -3702,7 +3739,8 @@ def run_check(target: str, submit: bool, cfg: dict) -> dict:
             first_ip = sorted(candidate_ips)[0]
             origin_ip_whois = {first_ip: get_ip_whois(first_ip)}
             hosting_draft = generate_hosting_draft(domain, first_ip, origin_ip_whois[first_ip], cfg)
-            drafts.append(hosting_draft)
+            if hosting_draft:
+                drafts.append(hosting_draft)
         except Exception as e:
             drafts_error = (drafts_error + "; " if drafts_error else "") + f"Hosting draft: {e}"
 

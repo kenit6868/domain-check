@@ -32,6 +32,47 @@ class DomainWorkerTests(unittest.TestCase):
         cached = domain_worker._load_precheck_cache(local_day=now.date(), local_tz=timezone.utc)
         self.assertEqual(set(cached), {"fresh.example"})
 
+    def test_cloudflare_proxy_contact_is_excluded_from_email_recipients(self):
+        with (
+            patch.object(domain_worker.pt, "get_whois_info", return_value={"registrar": "Example", "emails": []}),
+            patch.object(domain_worker.pt, "get_rdap_abuse_email", return_value={}),
+            patch.object(domain_worker.pt, "lookup_registry_contact", return_value={"source": "not_found"}),
+            patch.object(domain_worker.pt, "get_cert_info", return_value={"ip": "198.51.100.1"}),
+            patch.object(domain_worker.pt, "scan_common_subdomains", return_value={"www": "203.0.113.1"}),
+            patch.object(domain_worker.pt, "get_ip_whois", return_value={"org": "Cloudflare, Inc.", "asn": "13335", "abuse_email": "abuse@cloudflare.com"}),
+        ):
+            recipients = domain_worker._precheck_report_recipients("target.example")
+
+        self.assertEqual(recipients, [])
+
+    def test_cloudflare_recipient_is_blocked_at_delivery_validation(self):
+        errors = domain_worker.pt.validate_report_delivery({
+            "to": "abuse@cloudflare.com", "subject": "Report", "body": "Reported URL: https://target.example/",
+        }, target_url="https://target.example/")
+        self.assertTrue(any("Cloudflare" in error for error in errors))
+
+    def test_precheck_cache_migrates_unmonitored_cloudflare_recipient(self):
+        now = datetime.now(timezone.utc)
+        with open(domain_worker.PRECHECK_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump({"version": 1, "entries": {
+                "target.example": {
+                    "checked_at": now.isoformat(),
+                    "recipients": [
+                        {"channel": "hosting", "email": "abuse@cloudflare.com"},
+                        {"channel": "registrar", "email": "abuse@example.org"},
+                    ],
+                },
+            }}, f)
+
+        cached = domain_worker._load_precheck_cache(local_day=now.date(), local_tz=timezone.utc)
+
+        entry = cached["target.example"]
+        self.assertEqual(entry["recipients"], [{"channel": "registrar", "email": "abuse@example.org"}])
+        self.assertNotIn("manual_forms", entry)
+        with open(domain_worker.PRECHECK_CACHE_PATH, encoding="utf-8") as f:
+            persisted = json.load(f)
+        self.assertNotIn("abuse@cloudflare.com", str(persisted))
+
     def test_email_body_uses_each_sender_account_address(self):
         cfg = {"contact_name": "Byc", "contact_email": "byc@camellrp.com"}
         body = "Regards,\nByc\nbyc@camellrp.com"

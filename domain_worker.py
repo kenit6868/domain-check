@@ -299,22 +299,40 @@ def _load_precheck_cache(local_day: date | None = None, local_tz=None) -> dict[s
     if not isinstance(entries, dict):
         return {}
     valid = {}
+    changed = False
     for domain, entry in entries.items():
         try:
             checked_at = datetime.fromisoformat(str(entry.get("checked_at", "")).replace("Z", "+00:00"))
             if checked_at.tzinfo is None:
                 checked_at = checked_at.replace(tzinfo=timezone.utc)
             if checked_at.astimezone(local_tz).date() == local_day:
-                valid[domain] = entry
+                cleaned = dict(entry)
+                if "manual_forms" in cleaned:
+                    cleaned.pop("manual_forms", None)
+                    changed = True
+                    entries[domain] = cleaned
+                recipients = cleaned.get("recipients") or []
+                kept = [
+                    item for item in recipients
+                    if isinstance(item, dict)
+                    and not pt.is_blocked_report_recipient(str(item.get("email") or ""))
+                ]
+                if len(kept) != len(recipients):
+                    changed = True
+                    cleaned["recipients"] = kept
+                    entries[domain] = cleaned
+                valid[domain] = cleaned
         except (AttributeError, TypeError, ValueError):
             continue
+    if changed:
+        _atomic_json(PRECHECK_CACHE_PATH, {"version": 2, "entries": entries})
     return valid
 
 
 def _save_precheck_cache(entries: dict[str, dict]):
     """Persist the current in-memory daily cache atomically."""
     os.makedirs(os.path.dirname(PRECHECK_CACHE_PATH), exist_ok=True)
-    _atomic_json(PRECHECK_CACHE_PATH, {"version": 1, "entries": entries})
+    _atomic_json(PRECHECK_CACHE_PATH, {"version": 2, "entries": entries})
 
 
 def _interruptible_wait(seconds: int, stop_path: str, status_path: str, status: dict) -> bool:
@@ -766,13 +784,13 @@ def _precheck_report_recipients(domain: str) -> list[dict]:
     candidate_ips = sorted({ip for ip in origin_scan.values() if ip and ip != primary_ip})
     if candidate_ips:
         hosting = pt.get_ip_whois(candidate_ips[0])
-        if hosting.get("abuse_email"):
+        if not pt.is_cloudflare_proxy_contact(hosting) and hosting.get("abuse_email"):
             recipients.append({"channel": "hosting", "email": hosting["abuse_email"]})
 
     unique = []
     seen = set()
     for recipient in recipients:
-        key = recipient["email"].strip().lower()
+        key = str(recipient.get("email") or "").strip().lower()
         if key and key not in seen:
             seen.add(key)
             unique.append(recipient)

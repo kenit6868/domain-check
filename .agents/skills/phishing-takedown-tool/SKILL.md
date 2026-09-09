@@ -12,6 +12,11 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
 
 ## Invariant cần giữ
 
+- `abuse@cloudflare.com` là inbox không được Cloudflare theo dõi: không được
+  tạo recipient/draft SMTP mới hoặc gửi lại từ job legacy. IP, ASN hay contact
+  Cloudflare chỉ xác nhận proxy/CDN, không phải origin hosting đã xác minh.
+  Domain Worker phải loại recipient này khỏi job, vẫn giữ các recipient hợp lệ
+  khác và không hiển thị form/action thủ công trong workflow Worker.
 - `run_check()` là pipeline dùng chung giữa CLI và UI. Không tạo một pipeline
   kiểm tra domain khác trong page Streamlit.
 - Một lỗi provider bên ngoài, log hoặc sinh draft phải được cô lập để kết quả

@@ -243,6 +243,15 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-09 — Chặn `abuse@cloudflare.com` ở precheck, draft và ranh giới SMTP:
+  địa chỉ này không được Cloudflare theo dõi và IP/ASN Cloudflare chỉ là proxy/CDN,
+  không phải origin hosting đã xác minh. Domain Worker nhận diện contact/ASN/tổ
+  chức Cloudflare, không tạo hosting draft/email và loại case chỉ có recipient
+  này khỏi Worker; cache precheck trong ngày được làm sạch. Guard SMTP cũng chặn
+  draft/job legacy. File chính: `phishing_toolkit.py`,
+  `domain_worker.py`, `pages/6_Domain_Worker.py`, test worker; tài liệu:
+  `README.md`, `03_Technical_Guide.md`, file này.
+
 - 2026-09-09 — Quick Report dùng hai link chính thức **Mở Google Safe
   Browsing** và **Mở Microsoft SmartScreen** trong Browser Blocking để người
   vận hành kiểm tra/bổ sung nội dung và xác nhận trước khi submit; link mang
