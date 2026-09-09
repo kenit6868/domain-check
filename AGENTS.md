@@ -243,6 +243,15 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-09 — Quick Report dùng hai link chính thức **Mở Google Safe
+  Browsing** và **Mở Microsoft SmartScreen** trong Browser Blocking để người
+  vận hành kiểm tra/bổ sung nội dung và xác nhận trước khi submit; link mang
+  query `url` của đúng URL đang báo cáo. Hai action tự mở/tự điền form bằng
+  Playwright được giữ lại trong lõi nhưng tạm ẩn qua feature flag UI; không ảnh
+  hưởng nút Playwright thụ động dùng riêng để xác minh cloaking. File chính:
+  `pages/7_Quick_Report.py`, test Quick Report; tài liệu:
+  `README.md`, `03_Technical_Guide.md`, file này.
+
 - 2026-09-09 — Gộp analytics email về hai menu rõ vai trò: **Thống kê email**
   chỉ mở/hiển thị tổng Inbox/Thư rác trong ngày; bỏ menu Sent Mail Evidence và
   thay bằng **Thống kê tổng quát**. Một nút sync theo account + khoảng ngày đọc

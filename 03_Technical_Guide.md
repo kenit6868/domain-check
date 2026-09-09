@@ -6,8 +6,13 @@
 ### I. PHA 1: THU THẬP CHỨNG CỨ & CHẶN NHANH ĐẦU CUỐI (TỐC ĐỘ < 1 GIỜ)
 
 #### 1. Chặn trình duyệt người dùng (Safe Browsing & SmartScreen)
-*   **Google Safe Browsing Form**: [Báo cáo Google](https://safebrowsing.google.com/safebrowsing/report_phish/)
-*   **Microsoft SmartScreen Form**: [Báo cáo Microsoft](https://www.microsoft.com/wdsi/support/report-unsafe-site-guest)
+*   **Google Safe Browsing Form**: dùng nút **Mở Google Safe Browsing** trong
+    Quick Report (hoặc [Báo cáo Google](https://safebrowsing.google.com/safebrowsing/report_phish/)).
+*   **Microsoft SmartScreen Form**: dùng nút **Mở Microsoft SmartScreen** trong
+    Quick Report (hoặc [Báo cáo Microsoft](https://www.microsoft.com/wdsi/support/report-unsafe-site-guest)).
+    Hai nút mở form chính thức kèm query `url` của URL đang báo cáo để người vận
+    hành kiểm tra, bổ sung nội dung và tự xác nhận; tự điền bằng Playwright tại
+    Quick Report đang tạm ẩn.
 *   **Kênh cộng đồng Việt Nam**: Mở form [Chống Lừa Đảo](https://chongluadao.vn/report/reportphishing) và [Cốc Cốc Safe](https://safe.coccoc.com/) bằng các nút trong **Browser Blocking** của **Check Domain** hoặc **Quick Report**. Đây là bước thủ công; kiểm tra lại URL/bằng chứng trên form trước khi gửi.
 *   **Nội dung mẫu gửi báo cáo (tiếng Anh)**:
     ```

@@ -12,6 +12,7 @@ import sys
 import json
 from html import escape
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlencode
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -25,6 +26,16 @@ from community_report_ui import render_community_report_buttons
 _MAX_CHECK_WORKERS = 1
 _FILTER_CACHE_PATH = pt._runtime_path("quick_report_filter_cache.json")
 _QUICK_REPORT_RUNTIME_VERSION = 2
+# Quick Report is a manual web-form workflow. Keep the legacy automation code in
+# the core for now, but do not expose it here until it is explicitly enabled.
+_ENABLE_PLAYWRIGHT_FORM_AUTOMATION = False
+_GSB_REPORT_URL = "https://safebrowsing.google.com/safebrowsing/report_phish/"
+_MICROSOFT_REPORT_URL = "https://www.microsoft.com/wdsi/support/report-unsafe-site-guest"
+
+
+def _report_form_url(base_url: str, target_url: str) -> str:
+    """Build an official manual-form link with the exact reported URL."""
+    return f"{base_url}?{urlencode({'url': target_url})}"
 
 
 def _render_copy_domain_button(displayed_url: str) -> None:
@@ -238,19 +249,31 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
         category = dc2.selectbox("", categories, index=categories.index(default_cat),
                                  key=f"cat_{idx}", label_visibility="collapsed")
 
-        # Nút action — không dùng use_container_width để trông nhỏ hơn
+        # Quick Report opens official forms only. The operator pastes the URL and
+        # prepared description, then reviews and submits each form manually.
         bc1, bc2, bc3, _bsp = st.columns([2, 2, 2, 6])
-        if bc1.button("🤖 GSB", key=f"gsb_{idx}", type="primary",
-                      help="Google Safe Browsing — tự điền form bằng Playwright"):
-            res = pt.open_gsb_form_playwright(original_url, gsb_text,
-                                              threat_type=threat, threat_category=category,
-                                              dark_mode=dark_mode)
-            st.success("✅ Đã mở Chrome và tự điền GSB.") if "error" not in res else st.error(res["error"])
+        bc1.link_button(
+            "🛡️ Mở Google Safe Browsing",
+            _report_form_url(_GSB_REPORT_URL, original_url),
+            type="primary",
+            help="Mở form Google Safe Browsing chính thức với URL đang báo cáo.",
+        )
+        bc2.link_button(
+            "🛡️ Mở Microsoft SmartScreen",
+            _report_form_url(_MICROSOFT_REPORT_URL, original_url),
+            type="primary",
+            help="Mở form Microsoft SmartScreen chính thức với URL đang báo cáo.",
+        )
 
-        if bc2.button("🤖 SmartScreen", key=f"ms_{idx}", type="primary",
-                      help="Microsoft SmartScreen — tự điền form"):
-            res = pt.open_microsoft_form_playwright(original_url, dark_mode=dark_mode)
-            st.success("✅ Đã mở SmartScreen.") if "error" not in res else st.error(res["error"])
+        if _ENABLE_PLAYWRIGHT_FORM_AUTOMATION:
+            if bc1.button("🤖 Tự điền GSB", key=f"gsb_{idx}", help="Tự điền form bằng Playwright"):
+                res = pt.open_gsb_form_playwright(original_url, gsb_text,
+                                                   threat_type=threat, threat_category=category,
+                                                   dark_mode=dark_mode)
+                st.success("✅ Đã mở Chrome và tự điền GSB.") if "error" not in res else st.error(res["error"])
+            if bc2.button("🤖 Tự điền SmartScreen", key=f"ms_{idx}", help="Tự điền form bằng Playwright"):
+                res = pt.open_microsoft_form_playwright(original_url, dark_mode=dark_mode)
+                st.success("✅ Đã mở SmartScreen.") if "error" not in res else st.error(res["error"])
 
         if bc3.button("📡 Netcraft", key=f"nc_{idx}", type="primary",
                       help="Gửi thẳng qua Netcraft API"):
@@ -353,8 +376,8 @@ st.set_page_config(page_title="Quick Report", page_icon="⚡", layout="wide")
 st.title("⚡ Quick Report")
 st.caption("Nhập danh sách domain → check CDN/Cloudflare → hiện form báo cáo từng cái. Không gọi VirusTotal hay GSB API.")
 
-# Banner hướng dẫn cài Playwright (chỉ hiện khi chưa cài)
-if not pt.playwright_available():
+# Banner này chỉ dành cho form automation đã tạm ẩn.
+if _ENABLE_PLAYWRIGHT_FORM_AUTOMATION and not pt.playwright_available():
     with st.expander("⚠️ Playwright chưa được cài — các nút tự động điền form chưa hoạt động", expanded=True):
         st.markdown("""
 Playwright dùng để **tự động mở Chrome và điền sẵn** form Google Safe Browsing / Microsoft SmartScreen.
@@ -401,7 +424,9 @@ with st.expander("🧹 Lọc domain từ nội dung thô (tùy chọn)", expande
         else:
             st.warning("Không tìm thấy domain hợp lệ.")
 
-chrome_dark = st.toggle("🌙 Mở Chrome ở chế độ tối", value=True, key="chrome_dark_mode")
+chrome_dark = True
+if _ENABLE_PLAYWRIGHT_FORM_AUTOMATION:
+    chrome_dark = st.toggle("🌙 Mở Chrome ở chế độ tối", value=True, key="chrome_dark_mode")
 
 with st.form("quick_report_form"):
     raw_domains = st.text_area(

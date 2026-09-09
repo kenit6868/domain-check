@@ -1,6 +1,8 @@
 import unittest
+import ast
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlencode
 
 import phishing_toolkit as pt
 
@@ -45,6 +47,37 @@ class QuickReportRestoreTests(unittest.TestCase):
         self.assertIn("get_registry_webform_draft_text", source)
         self.assertIn("target_url=original_url", source)
         self.assertIn("st.code(registry_text", source)
+
+    def test_page_uses_official_manual_browser_blocking_forms_by_default(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("_ENABLE_PLAYWRIGHT_FORM_AUTOMATION = False", source)
+        self.assertIn("_GSB_REPORT_URL", source)
+        self.assertIn("_MICROSOFT_REPORT_URL", source)
+        self.assertIn("def _report_form_url", source)
+        self.assertIn("urlencode({'url': target_url})", source)
+        self.assertIn("Mở Google Safe Browsing", source)
+        self.assertIn("Mở Microsoft SmartScreen", source)
+
+    def test_manual_form_link_encodes_the_full_reported_url(self):
+        page_path = Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"
+        tree = ast.parse(page_path.read_text(encoding="utf-8"))
+        helper = next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_report_form_url"
+        )
+        namespace = {"urlencode": urlencode}
+        exec(compile(ast.Module(body=[helper], type_ignores=[]), str(page_path), "exec"), namespace)
+
+        result = namespace["_report_form_url"](
+            "https://example.test/report",
+            "https://phish.example/vi-vn/?campaign=1&source=tool",
+        )
+        self.assertEqual(
+            "https://example.test/report?url=https%3A%2F%2Fphish.example%2Fvi-vn%2F%3Fcampaign%3D1%26source%3Dtool",
+            result,
+        )
 
 
 if __name__ == "__main__":

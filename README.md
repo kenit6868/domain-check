@@ -75,7 +75,10 @@ Các trang (xem sidebar bên trái):
 - **Case Log** — xem/lọc/sửa `case_log.csv`
 - **Report Drafts** — xem, copy, tải các email báo cáo đã sinh sẵn
 - **Quick Report** — kiểm tra nhanh nhiều URL, hiển thị cloaking và cho phép xác
-  minh thụ động bằng Playwright khi HTTP chưa đủ kết luận
+  minh thụ động bằng Playwright khi HTTP chưa đủ kết luận. Trong **Browser
+  Blocking**, Google Safe Browsing và Microsoft SmartScreen mở form chính thức
+  ở tab mới kèm query `url` của đúng URL đang báo cáo để người vận hành kiểm tra,
+  bổ sung nội dung và xác nhận gửi; nút tự điền form bằng Playwright đang tạm ẩn.
 - **Domain Worker** — nút precheck kiểm tra email và cloaking đồng thời; case
   cloaking chỉ được tách ngay khi có email nhận, còn domain thường mới đi vào
   job gửi batch
