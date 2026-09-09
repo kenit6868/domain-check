@@ -21,6 +21,11 @@ class StreamlitNavigationTests(unittest.TestCase):
             f"Internal page links missing from st.navigation: {sorted(internal_links - registered)}",
         )
 
+    def test_general_statistics_replaces_the_separate_sent_evidence_menu(self):
+        entrypoint = (ROOT / "streamlit_app.py").read_text(encoding="utf-8")
+        self.assertIn('pages/13_General_Statistics.py', entrypoint)
+        self.assertNotIn('pages/13_Sent_Mail_Evidence.py', entrypoint)
+
 
 if __name__ == "__main__":
     unittest.main()

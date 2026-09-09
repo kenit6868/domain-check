@@ -143,6 +143,23 @@ class MailStatisticsTests(unittest.TestCase):
         self.assertTrue(fake.logged_out)
         connect.assert_called_once_with("mail.example.test", 993, timeout=30)
 
+    def test_counts_all_three_mailboxes_over_a_local_date_range(self):
+        fake = FakeImap()
+        account = {
+            "imap_host": "mail.example.test", "imap_port": 993,
+            "username": "sender@example.test", "password": "secret",
+        }
+        with patch.object(stats.imaplib, "IMAP4_SSL", return_value=fake):
+            result = stats.count_account_mail_range(
+                account,
+                date(2026, 8, 31),
+                date(2026, 9, 1),
+                timezone(timedelta(hours=7)),
+            )
+        self.assertEqual((result["received"], result["sent"], result["junk"]), (2, 2, 1))
+        self.assertEqual(result["date_from"], "2026-08-31")
+        self.assertEqual(result["date_to"], "2026-09-01")
+
     def test_incoming_count_matches_statistics_but_never_selects_sent(self):
         fake = FakeImap()
         account = {
@@ -182,8 +199,8 @@ class MailStatisticsTests(unittest.TestCase):
         good["imap_host"] = "mail.example.test"
         bad = {"username": "bad@example.test", "imap_host": "mail.example.test"}
         with patch.object(
-            stats, "count_account_mail",
-            side_effect=[{"account": "good@example.test", "received": 3, "sent": 2, "junk": 1, "status": "ok", "error": ""}, RuntimeError("offline")],
+            stats, "count_account_incoming",
+            side_effect=[{"account": "good@example.test", "received": 3, "junk": 1, "status": "ok", "error": ""}, RuntimeError("offline")],
         ):
             result = stats.daily_mail_statistics([good, bad], date.today(), datetime.now().astimezone().tzinfo)
         self.assertEqual(result[0]["received"], 3)
@@ -191,13 +208,26 @@ class MailStatisticsTests(unittest.TestCase):
 
     def test_account_without_explicit_imap_host_is_reported_without_connection(self):
         account = {"host": "smtp.gmail.com", "username": "smtp-only@gmail.com", "password": "secret"}
-        with patch.object(stats, "count_account_mail") as counter:
+        with patch.object(stats, "count_account_incoming") as counter:
             result = stats.daily_mail_statistics(
                 [account], date.today(), datetime.now().astimezone().tzinfo,
             )
         counter.assert_not_called()
         self.assertEqual(result[0]["status"], "not_configured")
         self.assertEqual(result[0]["error"], "")
+
+    def test_daily_statistics_never_opens_sent_mailbox(self):
+        fake = FakeImap()
+        account = {
+            "imap_host": "mail.example.test", "imap_port": 993,
+            "username": "sender@example.test", "password": "secret",
+        }
+        with patch.object(stats.imaplib, "IMAP4_SSL", return_value=fake):
+            result = stats.daily_mail_statistics(
+                [account], date(2026, 9, 1), timezone(timedelta(hours=7)),
+            )
+        self.assertEqual((result[0]["received"], result[0]["junk"], result[0]["sent"]), (1, 1, 0))
+        self.assertNotIn('"[Gmail]/Sent Mail"', fake.select_arguments)
 
 
 if __name__ == "__main__":

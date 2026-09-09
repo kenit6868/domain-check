@@ -415,55 +415,52 @@ thời được mở kết nối mới và retry tối đa một lần với cù
 thực `535`, sender hoặc recipient không retry. Không kiểm tra thay đổi này bằng
 SMTP thật trong test tự động; dùng mock để tránh gửi báo cáo ngoài ý muốn.
 
-## Thống kê số lượng email theo ngày
+## Thống kê email hằng ngày
 
-Menu **Thống kê email** chỉ kết nối IMAP sau khi người vận hành chọn ngày và bấm
-**Kiểm tra**. Mặc định là ngày hiện tại của máy chạy ứng dụng. Với từng tài khoản,
-tool mở Inbox cùng thư mục có cờ `\\Sent` và `\\Junk` ở chế độ chỉ đọc, tìm UID trong khoảng
-ngày mở rộng rồi lấy `INTERNALDATE` để đổi sang múi giờ địa phương và lọc chính
-xác. Kết quả gồm tổng thư nhận, tổng thư gửi, tổng thư rác và chi tiết từng
-account; tên mailbox được quote để hỗ trợ đường dẫn Gmail có khoảng trắng. Lỗi một
-account không làm mất số liệu account khác. Luồng này không tải body, không đổi
-cờ `Seen`, không gửi email và không lưu credential vào cache/log.
-Response `FETCH (INTERNALDATE)` được đọc ở cả dạng bytes metadata-only và tuple;
-kết quả UI cũ khác schema bị bỏ qua sau hot reload để tránh số 0/trạng thái sai.
-Account chỉ có cấu hình SMTP và không khai báo `imap_host` vẫn được liệt kê nhưng
-hiển thị **Không có trong IMAP**; tool không thử kết nối IMAP bằng SMTP `host`.
-Kiểm tra chạy trong tiến trình nền nên có thể chuyển menu hoặc F5. Khi quay lại,
-trạng thái job được đọc từ disk và kết quả hoàn tất được nạp từ cache ngày.
+Menu **Thống kê email** chỉ phục vụ một việc: xem tổng mail nhận của đúng một
+tài khoản trong một ngày địa phương (Inbox, Thư rác và tổng hai thư mục). Mặc
+định là hôm nay. Nút **Kiểm tra mail nhận** tạo job nền bền vững; có thể chuyển
+menu/F5, rồi quay lại để nạp cache `data/mail_statistics_cache.json`.
 
-Tại **Phản hồi NCC**, thao tác đồng bộ đọc cả Inbox và Junk/Spam trong cùng
-khoảng ngày. Bảng thống kê theo thư mục dùng cùng phép đếm ngày địa phương với
-menu Thống kê email, cho biết tổng Inbox và Thư rác; thư Đã gửi bị loại trừ.
-Kết quả mỗi lần check được ghi atomic vào `data/mail_statistics_cache.json`, tách
-theo ngày địa phương và tự nạp lại khi mở trang. Nút **Xóa cache ngày đã chọn**
-không ảnh hưởng ngày khác. Cache chỉ có account/count/status/error, không có
-credential hoặc nội dung email.
+Collector dùng `INTERNALDATE`, mở rộng IMAP SEARCH rồi đổi sang múi giờ địa
+phương trước khi lọc chính xác. Job này chỉ mở Inbox và Junk/Spam, không mở
+Sent. Không tải body, không đổi cờ `Seen`, không gửi email và không lưu
+credential. Account không có `imap_host` vẫn hiện rõ trạng thái **Không có
+trong IMAP**, không bao giờ thử dùng SMTP host thay cho IMAP.
 
-### Thống kê hiệu quả report theo account
+## Thống kê tổng quát theo account/khoảng ngày
 
-Trong cùng menu, người vận hành chọn một **Tài khoản cần thống kê**. Job
-Inbox/Sent/Junk chỉ được tạo cho account đó; bộ lọc cache và trạng thái job cũng
-được áp dụng theo account, vì vậy số liệu của mail A không trộn với mail B.
+Menu **Thống kê tổng quát** thay cho menu Sent Mail Evidence riêng. Người vận
+hành chọn **một account** và một khoảng ngày, sau đó bấm **Đồng bộ & tính thống
+kê**. Chỉ lúc đó tool mới đọc IMAP theo ba lớp độc lập:
 
-Khối **Hiệu quả report** là phân tích cục bộ, không tự mở IMAP và không gửi
-email. Nó đọc `data/sent_log.csv` (các delivery mới có account, Message-ID,
-recipient, kênh, draft/subject và metadata evidence) và cache Provider Replies
-đã đồng bộ ở page **Phản hồi NCC**. Có thể chọn khoảng ngày report riêng. Mỗi
-report được nối với một reply theo thứ tự ưu tiên Message-ID/ticket, sau đó
-full domain và provider trong cùng khoảng thời gian; một reply chỉ được dùng
-một lần.
+1. Đếm Inbox, Sent và Thư rác trong cùng một kết nối, theo `INTERNALDATE` và
+   khoảng ngày địa phương chính xác.
+2. Đọc thư Sent trong bộ nhớ để lập index Message-ID, URL, Subject và metadata
+   attachment evidence. Cache `data/sent_mail_evidence_cache.json` chỉ có
+   metadata đã sanitize; không lưu body, credential hoặc bytes ảnh. Một thư
+   Sent quan sát được không tự trở thành report: chỉ record khớp delivery rõ
+   ràng trong `sent_log.csv` mới được tính vào hiệu quả/tỷ lệ, còn record chưa
+   khớp chỉ có thể enrich evidence của delivery đó.
+3. Đọc Inbox + Junk/Spam cùng phạm vi để ghép phản hồi NCC với report. Luồng
+   **Phản hồi NCC** không bị thay đổi: page đó vẫn dành cho lọc, xem và phản hồi
+   từng email. Thống kê tổng quát chỉ lấy email từ NCC đã nhận diện kèm domain/
+   ticket, yêu cầu/kết quả rõ ràng hoặc delivery failure làm dữ liệu analytics; mail thường
+   vẫn ở Provider Replies nhưng không làm sai tỷ lệ. Tool chỉ đọc/phân tích,
+   không gửi reply.
 
-UI hiển thị tổng report thành công/thất bại, ảnh Browser Evidence tự động,
-upload thủ công hoặc không có ảnh, hiệu quả theo registrar/registry/hosting/CDN,
-provider/recipient, Subject/draft, outcome (acknowledged, action required,
-delivery failed, resolved) và bảng đối chiếu Sent Mail → Provider Replies →
-kết quả xử lý. Delivery cũ không có metadata evidence được giữ ở nhóm
-**unknown**, không suy đoán. Reply cache thiếu account bị loại khỏi báo cáo để
-tránh gán nhầm sang mailbox đang chọn. Các nguồn đều chỉ lưu metadata, không
-ghi credential hoặc nội dung thư vào thống kê.
-Cache đếm mail của cùng một ngày được merge theo username account; chạy lại cho
-mail B không ghi đè kết quả mail A. Nút xóa cache vẫn xóa toàn bộ ngày đang chọn.
+`report_statistics.py` ghép delivery với reply ưu tiên Message-ID/ticket, rồi
+full domain + provider/sender trong thời gian hợp lệ; một reply chỉ dùng một
+lần. Domain trùng một mình không đủ để ghép. UI
+hiển thị Inbox/Sent/Junk, tỷ lệ thư rác, report/gửi thành công, phản hồi,
+takedown và tỷ lệ report có ảnh; cùng bảng evidence, kênh, provider/recipient,
+subject/draft, outcome và Sent Mail → Provider Replies. Snapshot đã sanitize
+được lưu tại `data/general_statistics_cache.json` theo account + khoảng ngày,
+để mở lại không phải đồng bộ lần nữa. Lỗi một lớp (ví dụ Sent hoặc Junk) tạo
+snapshot `partial` và giữ số liệu các lớp còn lại thay vì làm mất toàn bộ kết
+quả. Snapshot chỉ giữ các aggregate/table field đã whitelist và lỗi đã redact,
+không giữ body, credential, bytes ảnh hay raw IMAP exception. Delivery legacy
+thiếu metadata evidence luôn là **unknown**, không suy đoán có hay không có ảnh.
 
 Chạy script Python Playwright dưới đây để tự động hóa việc chụp ảnh toàn trang, trích xuất HTML nguồn, HAR log mạng và tính mã băm SHA256 để gửi báo cáo lạm dụng:
 

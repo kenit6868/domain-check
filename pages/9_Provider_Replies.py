@@ -13,7 +13,7 @@ import mail_statistics
 if getattr(mail_statistics, "MODULE_VERSION", 0) < 5:
     mail_statistics = importlib.reload(mail_statistics)
 import provider_replies
-if getattr(provider_replies, "MODULE_VERSION", 0) < 5:
+if getattr(provider_replies, "MODULE_VERSION", 0) < 6:
     provider_replies = importlib.reload(provider_replies)
 from provider_replies import (
     ACTION_REQUIRED_TYPES, browser_evidence_attachment_paths, build_reply, build_reply_vi, capture_dom_link_evidence, clear_mail_cache,

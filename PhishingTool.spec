@@ -84,6 +84,8 @@ app_datas = [
     ("provider_replies.py", "."),
     ("mail_statistics.py", "."),
     ("report_statistics.py", "."),
+    ("sent_mail_evidence.py", "."),
+    ("general_statistics.py", "."),
     ("pages",               "pages"),
     ("config.example.ini",  "."),
 ]

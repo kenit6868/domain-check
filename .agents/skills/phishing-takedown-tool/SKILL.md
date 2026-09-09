@@ -174,13 +174,21 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   sử dụng trực tiếp label/detail tiếng Việt của UI trong draft; dữ liệu quan sát
   nguyên gốc như page title hoặc matched keyword có thể giữ nguyên làm bằng chứng.
 - Thống kê hiệu quả report phải có phạm vi một account + khoảng ngày rõ ràng.
-  `pages/11_Mail_Statistics.py` chỉ tạo job/cache Inbox/Sent/Junk cho mailbox
-  đang chọn; `report_statistics.py` chỉ đọc `sent_log.csv` và Provider Replies
-  cache, không mở IMAP hay gửi mail. Delivery mới phải ghi metadata không bí mật
-  (account, Message-ID, recipient, kênh, draft/subject, evidence source/count),
-  không ghi body/credential. Reply chỉ được nối với report cùng account theo
-  Message-ID/ticket/domain/provider; record reply thiếu account bị loại. Evidence
-  legacy thiếu metadata phải hiển thị `unknown`, không suy đoán có/không có ảnh.
+  `pages/11_Mail_Statistics.py` chỉ đếm Inbox + Junk/Spam của một ngày và không
+  mở Sent; không đặt analytics report ở page này.
+  `pages/13_General_Statistics.py` là menu analytics duy nhất: sau một thao tác
+  explicit, `general_statistics.py` đọc Inbox/Sent/Junk, Sent attachment metadata
+  và phản hồi NCC cùng phạm vi rồi lưu snapshot sanitize. Không có menu Sent Mail
+  Evidence riêng. `sent_mail_evidence.py` chỉ lưu header/URL/metadata attachment,
+  không lưu body, credential hoặc bytes ảnh; một thư Sent quan sát được chỉ
+  enrich report khi khớp mạnh delivery log, không tự tăng report metric.
+  `report_statistics.py` vẫn phân tích local và không tự mở IMAP/gửi mail. Page
+  Provider Replies giữ riêng workflow lọc/xem/trả lời; mail không liên quan
+  không vào analytics. Reply chỉ được nối với report cùng account theo
+  Message-ID/ticket hoặc domain + provider/sender, không chỉ domain; record reply
+  thiếu account bị loại. Snapshot phải whitelist field hiển thị và redact lỗi.
+  Evidence legacy thiếu metadata phải hiển thị `unknown`, không suy đoán có/không
+  có ảnh.
 
 ## Tài liệu và kiểm tra
 

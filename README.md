@@ -88,14 +88,19 @@ Các trang (xem sidebar bên trái):
   không capture được ảnh; upload 1–3 ảnh, xem thumbnail và tạo preview draft
   trước khi gửi trực tiếp khi worker và các batch khác vẫn đang chạy. Mỗi
   delivery hiển thị rõ account/email nhận/draft; retry chỉ gửi lượt còn thiếu.
-- **Thống kê email** — chọn ngày (mặc định hôm nay) và đếm toàn bộ thư nhận, đã
-  gửi và thư rác của từng tài khoản IMAP. Công cụ dùng `INTERNALDATE`, đổi sang múi giờ địa
-  phương rồi mới lọc ngày; chỉ đọc khi bấm **Kiểm tra** và không đổi cờ đã đọc.
-  Tài khoản chỉ cấu hình SMTP, không có `imap_host`, vẫn hiện trong bảng với trạng
-  thái **Không có trong IMAP** và không bị thử kết nối.
-  KPI và bảng chi tiết có thêm **Tổng nhận + rác** = Mail nhận + Thư rác.
-  Nút Kiểm tra chạy bằng job nền bền vững: có thể chuyển menu/F5 trong lúc chạy;
-  khi quay lại, trang đọc trạng thái và kết quả đã cache sau khi hoàn tất.
+- **Thống kê email** — menu gọn để xem **tổng mail nhận trong ngày** của đúng
+  một tài khoản: Inbox, Thư rác và tổng hai thư mục. Mặc định là hôm nay; nút
+  kiểm tra chạy nền chỉ mở Inbox + Thư rác, dùng `INTERNALDATE`, không tải body
+  và không đổi cờ đã đọc. Số Mail Sent/report không xuất hiện và không bị đọc ở đây
+  để tránh trùng chức năng.
+- **Thống kê tổng quát** — chọn một account và khoảng ngày, rồi bấm một nút
+  **Đồng bộ & tính thống kê**. Menu tự đọc Inbox, Sent, Thư rác, metadata
+  evidence của Sent và phản hồi NCC cùng phạm vi; hiển thị tỷ lệ thư rác, gửi
+  thành công, phản hồi, takedown và evidence, kèm bảng theo kênh/provider/
+  subject/draft. Chỉ delivery đã có trong `sent_log.csv` mới tính là report;
+  thư Sent quan sát được nhưng chưa khớp log chỉ dùng để bổ sung evidence và bị
+  loại khỏi tỷ lệ. Mail Inbox/Junk không liên quan cũng không được tính là phản
+  hồi NCC. Không cần mở menu khác trước.
 - **Phản hồi NCC** — khi đồng bộ sẽ đọc cả Inbox và thư mục có cờ IMAP `\\Junk`
   (fallback theo tên Junk/Spam), gộp các phản hồi tìm được và hiển thị tổng số
   thư Inbox/Thư rác theo đúng bộ đếm ngày địa phương của menu Thống kê email;
@@ -105,15 +110,12 @@ Các trang (xem sidebar bên trái):
   Sau mỗi lần **Kiểm tra**, kết quả được lưu theo ngày vào
   `data/mail_statistics_cache.json` và tự hiện lại khi mở trang; nút **Xóa cache
   ngày đã chọn** chỉ xóa ngày đang chọn. Cache không chứa password hay body thư.
-  Chọn **Tài khoản cần thống kê** để chỉ xem Inbox/Sent/Junk và hiệu quả report
-  của đúng mailbox đó. Phần **Hiệu quả report** chỉ đọc `data/sent_log.csv` cùng
-  cache Provider Replies (không mở IMAP thêm), lọc theo khoảng ngày riêng và
-  đối chiếu từng report với reply bằng Message-ID/ticket/domain/provider; hiển
-  thị evidence tự động/thủ công, registrar/registry/hosting, subject/draft,
-  outcome và bảng Sent Mail → Provider Replies → kết quả xử lý. Delivery cũ
-  thiếu metadata evidence được giữ là **chưa phân loại**, không suy đoán.
-  Cache số lượng trong cùng một ngày được merge theo account, nên kiểm tra mail
-  B sau mail A không làm mất số liệu mail A.
+  Thống kê tổng quát lưu snapshot đã sanitize theo account/khoảng ngày tại
+  `data/general_statistics_cache.json`; cache Sent chỉ giữ header, URL và
+  metadata attachment ở `data/sent_mail_evidence_cache.json`. Cả hai không lưu
+  body, credential hoặc bytes ảnh; snapshot tổng quát còn whitelist dữ liệu
+  hiển thị và redact lỗi IMAP trước khi ghi. Delivery cũ thiếu metadata
+  evidence luôn ở nhóm **chưa phân loại**, không suy đoán có hay không có ảnh.
 
 Trong khu vực **Browser Blocking** của **Check Domain** và **Quick Report** có
 thêm nút mở form báo cáo của **Chống Lừa Đảo** và **Cốc Cốc Safe**. Các nút chỉ
@@ -139,6 +141,8 @@ cloaking_review_queue.py  - Hàng đợi review cloaking bền vững giữa cá
 cloaking_review_sender.py - Chuẩn bị preview và gửi trực tiếp case Cloaking Review
 domain_worker.py          - Precheck email/cloaking và worker batch cho domain thường
 report_statistics.py      - Phân tích hiệu quả report theo account/khoảng ngày từ metadata local
+sent_mail_evidence.py     - Đồng bộ Sent Mail theo account và lập chỉ mục MIME evidence
+general_statistics.py     - Điều phối đồng bộ Inbox/Sent/Junk và snapshot Thống kê tổng quát
 domain_check.py           - Bản đơn giản chỉ check SSL + WHOIS (không cần API key)
 streamlit_app.py           - Trang chủ giao diện web (streamlit run streamlit_app.py)
 pages/                      - Các trang còn lại của giao diện web (multipage app)

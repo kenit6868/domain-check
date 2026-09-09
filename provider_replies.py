@@ -18,7 +18,7 @@ from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr, parsedate_to_datetime
 from html import unescape
 
-MODULE_VERSION = 5
+MODULE_VERSION = 6
 
 # Proxy support — tái dùng từ phishing_toolkit để tránh duplicate code
 try:
@@ -364,10 +364,10 @@ def parse_message(uid, account, raw_message):
                         "" if is_bounce else _ticket(f"{subject}\n{body}"), channel, risk)
 
 
-def fetch_provider_mail(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None, include_unrelated=False):
+def fetch_provider_mail(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None, include_unrelated=False, timeout: int = 60):
     host = account.get("imap_host") or account.get("host")
     if not host or not account.get("username") or not account.get("password"): raise ValueError("Tài khoản thiếu cấu hình IMAP")
-    conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)))
+    conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)), timeout=timeout)
     try:
         conn.login(account["username"], account["password"]); status, _ = conn.select(account.get("imap_mailbox", "INBOX"), readonly=True)
         if status != "OK": raise RuntimeError("Không mở được INBOX")
@@ -418,7 +418,7 @@ def _read_cache_file():
         return {}
 
 
-def discover_junk_mailbox(account):
+def discover_junk_mailbox(account, timeout: int = 60):
     """Find the account's Junk/Spam mailbox without changing message state."""
     configured = account.get("imap_junk_mailbox", "")
     if configured:
@@ -426,7 +426,7 @@ def discover_junk_mailbox(account):
     host = account.get("imap_host") or account.get("host")
     if not host or not account.get("username") or not account.get("password"):
         return ""
-    conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)))
+    conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)), timeout=timeout)
     try:
         conn.login(account["username"], account["password"])
         status, lines = conn.list()
@@ -446,10 +446,10 @@ def discover_junk_mailbox(account):
         except Exception: pass
 
 
-def fetch_provider_mail_all_folders(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None):
+def fetch_provider_mail_all_folders(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None, timeout: int = 60):
     """Fetch relevant provider mail from Inbox and Junk, with per-folder counts."""
     inbox = account.get("imap_mailbox", "INBOX")
-    junk = discover_junk_mailbox(account)
+    junk = discover_junk_mailbox(account, timeout=timeout)
     folders = [("Inbox", inbox)]
     if junk and junk.lower() != inbox.lower():
         folders.append(("Thư rác", junk))
@@ -464,6 +464,7 @@ def fetch_provider_mail_all_folders(account, limit=None, unread_only=False, date
             found = fetch_provider_mail(
                 folder_account, limit, unread_only, date_from, date_to,
                 folder_progress if progress_callback else None, include_unrelated=True,
+                timeout=timeout,
             )
             for mail in found:
                 mail.source_mailbox = mailbox

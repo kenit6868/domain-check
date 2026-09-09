@@ -17,11 +17,17 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
   domain thường; job lưu tại `data/worker_jobs/`.
 - `provider_replies.py`: đọc IMAP, phân loại phản hồi NCC, tạo reply theo
   thread và xử lý evidence.
-- `mail_statistics.py`, `pages/11_Mail_Statistics.py`: đếm Inbox/Sent/Junk chỉ đọc
-  theo ngày địa phương từ IMAP `INTERNALDATE` và trang thống kê theo tài khoản.
+- `mail_statistics.py`, `pages/11_Mail_Statistics.py`: đếm mailbox theo
+  `INTERNALDATE`; page Thống kê email chỉ hiển thị tổng Inbox/Thư rác trong ngày.
 - `report_statistics.py`: phân tích hiệu quả report theo đúng account và khoảng
-  ngày, chỉ đọc `sent_log.csv` cùng cache Provider Replies để nối delivery → reply
-  → outcome; không mở IMAP, không gửi mail và không lưu body/credential.
+  ngày; dùng `sent_log.csv` làm nguồn delivery, cache Sent Mail chỉ enrich
+  evidence khi khớp mạnh và cache Provider Replies chỉ đưa reply liên quan vào
+  delivery → reply → outcome; không mở IMAP trong bước phân tích, không gửi
+  mail và không lưu body/credential.
+- `sent_mail_evidence.py`, `general_statistics.py`,
+  `pages/13_General_Statistics.py`: đồng bộ Sent metadata trong bộ nhớ và điều
+  phối một lần sync Inbox/Sent/Junk + phản hồi NCC cho Thống kê tổng quát; cache
+  chỉ chứa index/snapshot đã sanitize để thống kê/backfill delivery cũ.
 - `link_status.py`, `domain_utils.py`: tiện ích kiểm tra link/domain.
 - `cloaking_detector.py`, `cloaking_ui.py`: detector HTTP đa profile, xác minh
   Playwright thụ động, manifest/ảnh bằng chứng và UI dùng chung.
@@ -164,20 +170,28 @@ Không tự khởi động Streamlit nếu người dùng chưa yêu cầu. Buil
 - Draft/email gửi nhà cung cấp phải dùng tiếng Anh; formatter external không
   được lấy nguyên label/detail tiếng Việt từ UI. Chỉ dữ liệu chứng cứ nguyên gốc
   như title hoặc matched keyword được phép giữ ngôn ngữ của website.
-- Thống kê hiệu quả report phải chọn đúng một account và khoảng ngày. Job/cache
-  Inbox/Sent/Junk chỉ đọc mailbox đang chọn; `report_statistics.py` chỉ đọc
-  `sent_log.csv` và cache Provider Replies, không mở IMAP/gửi mail. Delivery mới
-  ghi metadata không bí mật (account, Message-ID, recipient, kênh, draft/subject,
-  evidence source/count), không ghi body/credential. Reply chỉ nối cùng account
-  theo Message-ID/ticket/domain/provider; record thiếu account bị loại. Evidence
-  legacy thiếu metadata hiển thị `unknown`, không suy đoán.
+- Thống kê hiệu quả report phải chọn đúng một account và khoảng ngày. Page
+  `pages/13_General_Statistics.py` là menu duy nhất đồng bộ dữ liệu analytics:
+  một thao tác explicit đọc Inbox/Sent/Junk, Sent attachment metadata và phản
+  hồi NCC cùng phạm vi, rồi lưu snapshot sanitize theo account + khoảng ngày.
+  `report_statistics.py` vẫn là lớp phân tích local, không tự mở IMAP/gửi mail.
+  Page `pages/9_Provider_Replies.py` giữ riêng workflow lọc/xem/trả lời NCC.
+  Thư Sent chưa khớp delivery log và mail Inbox/Junk không liên quan không được
+  tính vào tỷ lệ; snapshot phải whitelist field cần hiển thị và redact lỗi trước
+  khi ghi.
+  Delivery mới ghi metadata không bí mật (account, Message-ID, recipient, kênh,
+  draft/subject, evidence source/count), không ghi body/credential. Reply chỉ
+  nối cùng account theo Message-ID/ticket/domain/provider; record thiếu account
+  bị loại. Evidence legacy chỉ có thể backfill khi tìm thấy bản copy trong Sent;
+  nếu không thì hiển thị `unknown`, không suy đoán.
 - Khi làm Streamlit, phải đọc `.agents/skills/developing-with-streamlit/SKILL.md`.
   Không thêm `streamlit.components.v1` mới; ưu tiên native widgets/component v2.
 - Khi làm nghiệp vụ takedown, dùng skill
   `.agents/skills/phishing-takedown-tool/SKILL.md`.
 - Sau khi sửa `phishing_toolkit.py`, `domain_worker.py`,
-  `provider_replies.py`, `link_status.py` hoặc `domain_utils.py`, chạy toàn bộ
-  `unittest`.
+  `provider_replies.py`, `report_statistics.py`, `sent_mail_evidence.py`,
+  `general_statistics.py`,
+  `link_status.py` hoặc `domain_utils.py`, chạy toàn bộ `unittest`.
 
 ## Chọn skill đúng phạm vi
 
@@ -228,6 +242,24 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-09-09 — Gộp analytics email về hai menu rõ vai trò: **Thống kê email**
+  chỉ mở/hiển thị tổng Inbox/Thư rác trong ngày; bỏ menu Sent Mail Evidence và
+  thay bằng **Thống kê tổng quát**. Một nút sync theo account + khoảng ngày đọc
+  Inbox/Sent/Junk, metadata evidence của Sent và phản hồi NCC, rồi tính tỷ lệ
+  spam, gửi thành công, phản hồi, gỡ domain và evidence; không đổi workflow
+  lọc/trả lời thủ công của Provider Replies, không gửi SMTP và không lưu body,
+  credential hoặc bytes ảnh. Chỉ delivery trong `sent_log.csv` mới tính report;
+  Sent chưa khớp chỉ enrich evidence, reply Inbox/Junk không liên quan bị loại,
+  domain trùng một mình không nối reply, và snapshot whitelist/redact mọi field
+  trước khi ghi cache. Thêm bộ đếm IMAP theo khoảng ngày và timeout cho provider
+  sync; file chính: `general_statistics.py`, `mail_statistics.py`,
+  `sent_mail_evidence.py`, `report_statistics.py`, `provider_replies.py`,
+  `pages/11_Mail_Statistics.py`, `pages/13_General_Statistics.py`,
+  `streamlit_app.py`, `PhishingTool.spec`, test analytics/AppTest; đã kiểm tra:
+  265/265 full unittest, compileall, pip check và diff check; tài liệu:
+  `README.md`, `03_Technical_Guide.md`, file này và skill dự án; lưu ý: chỉ mock
+  IMAP/SMTP, không đồng bộ mailbox thật trong test.
 
 - 2026-09-08 — Bổ sung thống kê hiệu quả report theo mailbox: mọi luồng gửi
   ghi metadata delivery không bí mật vào `data/sent_log.csv` (account,
@@ -621,7 +653,7 @@ vào phần này.
 
 Nhóm `link_status` đã thống nhất Cloudflare warning/HTTP 403 là `BLOCKED`, không
 phải `LIVE` hay `DIE`; mock response không iterable được xử lý an toàn. Toàn bộ
-test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 248 test.
+test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại là 265 test.
 Detector cloaking có test thuần cho scoring/profile/path/vantage, fake browser
 cho Playwright và mock attachment worker; không dùng URL nghi ngờ hay SMTP thật
 trong test.

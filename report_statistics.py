@@ -8,6 +8,7 @@ has synchronized the selected mailbox in Provider Replies.
 from __future__ import annotations
 
 import csv
+import importlib
 import os
 import re
 from datetime import date, datetime, timezone
@@ -15,13 +16,19 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
 
 import provider_replies
+import sent_mail_evidence
 from phishing_toolkit import SENT_LOG_PATH
 
 
-MODULE_VERSION = 1
+if getattr(sent_mail_evidence, "MODULE_VERSION", 0) < 2:
+    sent_mail_evidence = importlib.reload(sent_mail_evidence)
+
+
+MODULE_VERSION = 3
 TICKET_UPDATE_ACCOUNT = "[ticket-update]"
 REPORT_DELIVERY_KIND = "report"
 PROVIDER_REPLY_DELIVERY_KIND = "provider_reply"
+OBSERVED_SENT_KIND = "observed_sent"
 
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 _CHANNEL_LABELS = {
@@ -238,6 +245,14 @@ def _delivery_kind(row: dict) -> str:
         return PROVIDER_REPLY_DELIVERY_KIND
     if value in {"ticket_update", "ticket"} or _account_key(row.get("account")) == TICKET_UPDATE_ACCOUNT:
         return "ticket_update"
+    if value in {OBSERVED_SENT_KIND, "unclassified", "imap_sent"}:
+        return OBSERVED_SENT_KIND
+    # Legacy IMAP Sent cache records were incorrectly labelled ``report``.
+    # They are only observations until they match a sent_log delivery below.
+    if str(row.get("source") or "").strip().lower() == "imap_sent" or str(
+        row.get("send_mode") or ""
+    ).strip().lower() == "imap_sent_sync":
+        return OBSERVED_SENT_KIND
     return REPORT_DELIVERY_KIND
 
 
@@ -270,6 +285,79 @@ def _normalize_sent_row(row: dict, local_tz=None) -> dict:
         "provider_label": provider_label,
         "evidence": evidence,
     }
+
+
+def _address_key(value) -> str:
+    """Normalize a recipient/header value for conservative source matching."""
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    # Keep only the address portion when a display name is present. Multiple
+    # recipients remain comparable as a normalized comma-separated set.
+    from email.utils import getaddresses
+    addresses = sorted({address.lower() for _, address in getaddresses([text]) if address})
+    return ",".join(addresses) if addresses else text
+
+
+def _sent_sources_match(log_row: dict, cache_row: dict) -> tuple[int, float]:
+    """Score one Sent IMAP record against a legacy/local delivery-log row."""
+    if log_row.get("message_id") and cache_row.get("message_id"):
+        if log_row["message_id"].lower() == cache_row["message_id"].lower():
+            return 200, 0.0
+        return 0, 0.0
+    score = 0
+    if log_row.get("domain") and cache_row.get("domain"):
+        if log_row["domain"] != cache_row["domain"]:
+            return 0, 0.0
+        score += 60
+    if _address_key(log_row.get("to")) and _address_key(log_row.get("to")) == _address_key(cache_row.get("to")):
+        score += 30
+    log_subject = " ".join(str(log_row.get("subject") or "").lower().split())
+    cache_subject = " ".join(str(cache_row.get("subject") or "").lower().split())
+    if log_subject and cache_subject and log_subject == cache_subject:
+        score += 30
+    delta = 0.0
+    log_dt = log_row.get("datetime")
+    cache_dt = cache_row.get("datetime")
+    if log_dt and cache_dt:
+        delta = abs((cache_dt - log_dt).total_seconds())
+        if delta <= 3 * 86400:
+            score += 15
+        elif delta > 14 * 86400:
+            return 0, delta
+    return score, delta
+
+
+def _merge_sent_sources(log_rows: list[dict], cache_rows: list[dict]) -> list[dict]:
+    """Enrich sent_log rows from IMAP Sent records without double counting."""
+    merged = [dict(row) for row in log_rows]
+    used_log = set()
+    for cache_row in cache_rows:
+        best_index = None
+        best_score = 0
+        best_delta = float("inf")
+        for index, log_row in enumerate(merged):
+            if index in used_log or log_row.get("account_key") != cache_row.get("account_key"):
+                continue
+            score, delta = _sent_sources_match(log_row, cache_row)
+            if score > best_score or (score == best_score and score > 0 and delta < best_delta):
+                best_index, best_score, best_delta = index, score, delta
+        # Exact Message-ID always scores 200. Without it, require a strong
+        # recipient/domain correlation before a Sent observation can enrich an
+        # explicit delivery log; ordinary outbound mail must not become a
+        # phishing report in the statistics.
+        if best_index is None or best_score < 90:
+            merged.append(dict(cache_row))
+            continue
+        used_log.add(best_index)
+        destination = merged[best_index]
+        # IMAP Sent is the source of truth for evidence and sent Message-ID;
+        # preserve the richer draft/channel fields from sent_log when present.
+        destination["evidence"] = cache_row.get("evidence", destination.get("evidence"))
+        for key in ("message_id", "thread_message_id", "target_url", "timestamp", "datetime"):
+            if not destination.get(key) and cache_row.get(key):
+                destination[key] = cache_row[key]
+    return merged
 
 
 def read_sent_log(path: str | None = None) -> tuple[list[dict], str]:
@@ -343,6 +431,8 @@ def normalize_reply(mail, local_tz=None) -> dict:
         "domain": domain,
         "provider_key": provider_key,
         "provider_label": provider_label,
+        "sender": str(_mail_value(mail, "sender") or "").strip(),
+        "reply_to": str(_mail_value(mail, "reply_to") or "").strip(),
         "message_id": str(_mail_value(mail, "message_id") or "").strip(),
         "ticket": str(_mail_value(mail, "ticket") or "").strip(),
         "subject": str(_mail_value(mail, "subject") or "").strip(),
@@ -352,6 +442,49 @@ def normalize_reply(mail, local_tz=None) -> dict:
         "outcome": outcome,
         "outcome_label": outcome_label,
     }
+
+
+def is_relevant_provider_reply(mail) -> bool:
+    """Return whether one inbound message belongs in report effectiveness.
+
+    The Provider Replies page intentionally retains unrelated mail for its
+    manual inbox workflow. Analytics must be narrower: an explicit provider
+    request/outcome, a delivery failure, or a recognised provider with a
+    domain/ticket clue is a candidate response to a takedown report.
+    """
+    provider_key = str(_mail_value(mail, "provider") or "").strip().lower()
+    request_type = str(_mail_value(mail, "request_type") or "").strip().lower()
+    sender = str(_mail_value(mail, "sender") or "")
+    subject = str(_mail_value(mail, "subject") or "")
+    if request_type == "delivery_failed" or provider_replies.is_delivery_failure(sender, subject):
+        return True
+    if request_type in {
+        "acknowledgement", "resolved", *provider_replies.ACTION_REQUIRED_TYPES,
+    }:
+        return True
+    # A recognisable provider by itself is not enough: newsletters and account
+    # notices can come from the same sender. For an otherwise manual message,
+    # keep it in Provider Replies but require a reported-domain or ticket clue
+    # before it reaches effectiveness analytics.
+    if provider_key and provider_key != "unknown":
+        return bool(_mail_value(mail, "domain") or _mail_value(mail, "ticket"))
+    return False
+
+
+def _address_set(value: str) -> set[str]:
+    from email.utils import getaddresses
+
+    return {
+        address.strip().lower()
+        for _, address in getaddresses([str(value or "")])
+        if address and "@" in address
+    }
+
+
+def _reply_sender_matches(sent: dict, reply: dict) -> bool:
+    recipients = _address_set(sent.get("to") or "")
+    senders = _address_set(reply.get("sender") or reply.get("reply_to") or "")
+    return bool(recipients and senders and recipients.intersection(senders))
 
 
 def _provider_matches(sent: dict, reply: dict) -> bool:
@@ -376,20 +509,34 @@ def _match_reply(sent: dict, replies: list[dict], used: set[int]) -> tuple[int |
             continue
         reply_domain = _domain(reply.get("domain"))
         score = 0
-        if sent.get("ticket_ref") and reply.get("ticket") and sent["ticket_ref"].lower() == reply["ticket"].lower():
+        ticket_match = bool(
+            sent.get("ticket_ref") and reply.get("ticket")
+            and sent["ticket_ref"].lower() == reply["ticket"].lower()
+        )
+        message_match = bool(
+            sent.get("message_id") and sent["message_id"] in str(reply.get("message_id") or "")
+        )
+        if ticket_match:
             score += 120
-        if sent.get("message_id") and sent["message_id"] in str(reply.get("message_id") or ""):
+        if message_match:
             score += 120
         if sent_domain and reply_domain:
             if sent_domain != reply_domain:
                 continue
             score += 60
-        elif not (sent.get("ticket_ref") and reply.get("ticket")):
+        elif not (ticket_match or message_match):
             continue
-        if _provider_matches(sent, reply):
+        provider_match = _provider_matches(sent, reply)
+        sender_match = _reply_sender_matches(sent, reply)
+        if provider_match:
+            score += 30
+        elif sender_match:
             score += 30
         elif sent.get("provider_key") and reply.get("provider_key"):
             score -= 15
+        elif not (ticket_match or message_match):
+            # A matching domain alone may be an unrelated mailbox message.
+            continue
         reply_dt = reply.get("datetime")
         if sent_dt and reply_dt:
             delta = (reply_dt - sent_dt).total_seconds()
@@ -399,7 +546,7 @@ def _match_reply(sent: dict, replies: list[dict], used: set[int]) -> tuple[int |
                 continue
             if 0 <= delta <= 90 * 86400:
                 score += 15
-        if score <= 0:
+        if score < 90:
             continue
         if best is None or score > best[0]:
             best = (score, index, reply)
@@ -435,6 +582,7 @@ def build_account_report(
     date_to: date | None = None,
     *,
     sent_rows: list[dict] | None = None,
+    sent_mail_records: list[dict] | None = None,
     provider_mails: list | None = None,
     reply_log: dict | None = None,
     local_tz=None,
@@ -443,14 +591,34 @@ def build_account_report(
     """Build a report for exactly one sending mailbox and local date range."""
     account_key = _account_key(account)
     raw_rows, sent_error = read_sent_log(sent_log_path) if sent_rows is None else (sent_rows, "")
-    normalized_sent = []
+    normalized_log = []
     for raw in raw_rows:
         row = _normalize_sent_row(raw, local_tz)
         if row["account_key"] != account_key or row["delivery_kind"] == "ticket_update":
             continue
         if not _in_date_range(row.get("datetime") or row.get("timestamp"), date_from, date_to, local_tz):
             continue
-        normalized_sent.append(row)
+        normalized_log.append(row)
+    cache_loaded = sent_mail_records is not None
+    if sent_mail_records is None and sent_rows is None:
+        try:
+            sent_mail_records = sent_mail_evidence.load_cached_records(
+                account, date_from, date_to, local_tz,
+            )
+            cache_loaded = bool(sent_mail_records)
+        except (OSError, TypeError, ValueError):
+            sent_mail_records = []
+    normalized_cache = []
+    for raw in sent_mail_records or []:
+        if not isinstance(raw, dict):
+            continue
+        row = _normalize_sent_row(raw, local_tz)
+        if row["account_key"] != account_key or row["delivery_kind"] == "ticket_update":
+            continue
+        if not _in_date_range(row.get("datetime") or row.get("timestamp"), date_from, date_to, local_tz):
+            continue
+        normalized_cache.append(row)
+    normalized_sent = _merge_sent_sources(normalized_log, normalized_cache)
     reports = [row for row in normalized_sent if row["delivery_kind"] == REPORT_DELIVERY_KIND]
     followups = [row for row in normalized_sent if row["delivery_kind"] == PROVIDER_REPLY_DELIVERY_KIND]
 
@@ -458,6 +626,8 @@ def build_account_report(
         provider_mails = provider_replies.load_mail_cache(account)
     replies = []
     for mail in provider_mails or []:
+        if not is_relevant_provider_reply(mail):
+            continue
         reply = normalize_reply(mail, local_tz)
         # A mailbox-scoped report must never borrow a reply whose cache record
         # has no account identity. Provider Replies writes the account on all
@@ -519,6 +689,9 @@ def build_account_report(
     channel_rows = _summary_rows(reports, "channel_label")
     subject_rows = _summary_rows(reports, "subject")
     draft_rows = _summary_rows(reports, "draft")
+    observed_sent_unmatched = sum(
+        row["delivery_kind"] == OBSERVED_SENT_KIND for row in normalized_sent
+    )
     warnings = []
     if sent_error:
         warnings.append(f"Không đọc được sent_log.csv: {sent_error}")
@@ -529,9 +702,13 @@ def build_account_report(
         warnings.append(
             f"{legacy_unknown} delivery cũ chưa có evidence metadata; không suy đoán là có hoặc không có ảnh."
         )
+    if observed_sent_unmatched:
+        warnings.append(
+            f"{observed_sent_unmatched} thư trong Sent chưa khớp delivery log nên bị loại khỏi tỷ lệ report."
+        )
     if not replies:
         warnings.append(
-            "Chưa có Provider Replies trong cache của tài khoản này; hãy đồng bộ Inbox + Thư rác ở page Phản hồi NCC."
+            "Chưa có phản hồi NCC trong phạm vi này; hãy đồng bộ ở Thống kê tổng quát hoặc page Phản hồi NCC."
         )
     return {
         "version": MODULE_VERSION,
@@ -566,6 +743,9 @@ def build_account_report(
         "warnings": warnings,
         "source": {
             "sent_log": sent_log_path or SENT_LOG_PATH,
+            "sent_mail_cache": cache_loaded,
+            "sent_mail_records": len(normalized_cache),
+            "observed_sent_unmatched": observed_sent_unmatched,
             "provider_cache": True,
             "reply_log_entries": sum(
                 1 for value in (reply_log or {}).values()

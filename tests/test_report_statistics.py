@@ -121,6 +121,63 @@ class ReportStatisticsTests(unittest.TestCase):
         self.assertEqual(report["linked_reply_total"], 0)
         self.assertEqual(report["unmatched_reply_total"], 0)
 
+    def test_unrelated_inbound_message_is_excluded_from_effectiveness_metrics(self):
+        unrelated = SimpleNamespace(
+            account="a@example.test", sender="friend@example.test", provider="unknown",
+            provider_label="Khác / Chưa nhận diện", domain="phish.example", ticket="",
+            subject="Normal conversation", body="No abuse report here.",
+            request_type="manual_review", request_label="Cần đọc thủ công",
+            message_id="<ordinary@example.test>", date="02 Sep 2026 10:00 +0000",
+            server_date="", source_mailbox="INBOX",
+        )
+        report = stats.build_account_report(
+            "a@example.test", date(2026, 9, 1), date(2026, 9, 3),
+            sent_rows=[{
+                "timestamp": "2026-09-01T09:00:00+00:00", "domain": "phish.example",
+                "account": "a@example.test", "success": "True", "to": "abuse@example.test",
+                "report_channel": "hosting", "evidence_source": "none", "evidence_images": "0",
+            }],
+            provider_mails=[unrelated], reply_log={}, local_tz=timezone.utc,
+        )
+        self.assertEqual(report["reply_total"], 0)
+        self.assertEqual(report["linked_reply_total"], 0)
+        self.assertEqual(report["unmatched_reply_total"], 0)
+
+    def test_known_provider_newsletter_without_case_clue_is_excluded(self):
+        newsletter = SimpleNamespace(
+            account="a@example.test", sender="news@cloudflare.com", provider="cloudflare",
+            provider_label="Cloudflare", domain="", ticket="", subject="Product news",
+            body="Monthly product update", request_type="manual_review",
+            request_label="Cần đọc thủ công", message_id="<newsletter@example.test>",
+            date="02 Sep 2026 10:00 +0000", server_date="", source_mailbox="INBOX",
+        )
+        report = stats.build_account_report(
+            "a@example.test", date(2026, 9, 1), date(2026, 9, 3),
+            sent_rows=[], provider_mails=[newsletter], reply_log={}, local_tz=timezone.utc,
+        )
+        self.assertEqual(report["reply_total"], 0)
+
+    def test_same_domain_reply_needs_provider_or_sender_correlation(self):
+        unrelated = SimpleNamespace(
+            account="a@example.test", sender="other@example.test", provider="unknown",
+            provider_label="Khác / Chưa nhận diện", domain="phish.example", ticket="",
+            subject="Report received", body="We received your report.",
+            request_type="acknowledgement", request_label="Đã tiếp nhận",
+            message_id="<unrelated@example.test>", date="02 Sep 2026 10:00 +0000",
+            server_date="", source_mailbox="INBOX",
+        )
+        report = stats.build_account_report(
+            "a@example.test", date(2026, 9, 1), date(2026, 9, 3),
+            sent_rows=[{
+                "timestamp": "2026-09-01T09:00:00+00:00", "domain": "phish.example",
+                "account": "a@example.test", "success": "True", "to": "abuse@example.test",
+                "report_channel": "hosting", "evidence_source": "none", "evidence_images": "0",
+            }],
+            provider_mails=[unrelated], reply_log={}, local_tz=timezone.utc,
+        )
+        self.assertEqual(report["reply_total"], 1)
+        self.assertEqual(report["linked_reply_total"], 0)
+
     def test_reply_received_before_delivery_is_not_linked(self):
         mail = SimpleNamespace(
             account="a@example.test", sender="abuse@example.test", provider="", provider_label="Example",

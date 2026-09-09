@@ -21,7 +21,7 @@ _KNOWN_SENT_FOLDERS = ("Sent", "Sent Items", "Sent Messages", "INBOX.Sent")
 _KNOWN_JUNK_FOLDERS = ("Junk", "Spam", "Junk Email", "INBOX.Junk", "INBOX.Spam", "[Gmail]/Spam")
 CACHE_PATH = _runtime_path("mail_statistics_cache.json")
 CACHE_VERSION = 1
-MODULE_VERSION = 7
+MODULE_VERSION = 9
 JOB_DIR = _runtime_path("mail_statistics_jobs")
 ACTIVE_JOB_STATES = {"queued", "running"}
 
@@ -313,6 +313,81 @@ def count_account_mail(account: dict, selected_day: date, local_tz, timeout: int
             pass
 
 
+def _count_mailbox_range(conn, mailbox, date_from, date_to, local_tz):
+    """Count one mailbox over an inclusive local-date range.
+
+    IMAP SEARCH uses the server calendar, so the query is widened and each
+    INTERNALDATE is converted to the operator timezone before filtering.
+    """
+    if date_from > date_to:
+        raise ValueError("Date range is invalid")
+    status, _ = conn.select(_quoted_mailbox(mailbox), readonly=True)
+    if status != "OK":
+        raise RuntimeError(f"Could not open mailbox {mailbox}")
+    since = (date_from - timedelta(days=1)).strftime("%d-%b-%Y")
+    before = (date_to + timedelta(days=2)).strftime("%d-%b-%Y")
+    status, data = conn.uid("search", None, "SINCE", since, "BEFORE", before)
+    if status != "OK":
+        raise RuntimeError(f"Could not search mailbox {mailbox}")
+    count = 0
+    for uid in (data[0].split() if data and data[0] else []):
+        status, payload = conn.uid("fetch", uid, "(INTERNALDATE)")
+        if status != "OK" or not payload:
+            continue
+        message_day = next((
+            parsed for parsed in (
+                _message_local_date(item, local_tz)
+                for item in payload if isinstance(item, (bytes, tuple))
+            ) if parsed is not None
+        ), None)
+        if message_day is not None and date_from <= message_day <= date_to:
+            count += 1
+    return count
+
+
+def count_account_mail_range(
+    account: dict,
+    date_from: date,
+    date_to: date,
+    local_tz,
+    timeout: int = 30,
+) -> dict:
+    """Count Inbox, Sent and Junk once over an inclusive local-date range."""
+    host = account.get("imap_host")
+    username = str(account.get("username") or "").strip()
+    if not host or not username or not account.get("password"):
+        raise ValueError("Tài khoản thiếu cấu hình IMAP")
+    if date_from > date_to:
+        raise ValueError("Date range is invalid")
+    conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)), timeout=timeout)
+    try:
+        conn.login(username, account["password"])
+        sent_mailbox = _sent_mailbox(conn, account)
+        junk_mailbox = _junk_mailbox(conn, account)
+        inbox_mailbox = str(account.get("imap_mailbox") or "INBOX")
+        received = _count_mailbox_range(conn, inbox_mailbox, date_from, date_to, local_tz)
+        sent = _count_mailbox_range(conn, sent_mailbox, date_from, date_to, local_tz)
+        junk = _count_mailbox_range(conn, junk_mailbox, date_from, date_to, local_tz)
+        return {
+            "account": username,
+            "received": received,
+            "sent": sent,
+            "junk": junk,
+            "status": "ok",
+            "error": "",
+            "inbox_mailbox": inbox_mailbox,
+            "sent_mailbox": sent_mailbox,
+            "junk_mailbox": junk_mailbox,
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+        }
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            pass
+
+
 def count_account_incoming(account: dict, date_from: date, date_to: date, local_tz, timeout: int = 30) -> dict:
     """Count only Inbox and Junk over an inclusive local-date range."""
     host = account.get("imap_host")
@@ -326,12 +401,8 @@ def count_account_incoming(account: dict, date_from: date, date_to: date, local_
         conn.login(username, account["password"])
         inbox_mailbox = str(account.get("imap_mailbox") or "INBOX")
         junk_mailbox = _junk_mailbox(conn, account)
-        received = junk = 0
-        current_day = date_from
-        while current_day <= date_to:
-            received += _count_mailbox(conn, inbox_mailbox, current_day, local_tz)
-            junk += _count_mailbox(conn, junk_mailbox, current_day, local_tz)
-            current_day += timedelta(days=1)
+        received = _count_mailbox_range(conn, inbox_mailbox, date_from, date_to, local_tz)
+        junk = _count_mailbox_range(conn, junk_mailbox, date_from, date_to, local_tz)
         return {
             "account": username, "received": received, "junk": junk,
             "status": "ok", "error": "", "inbox_mailbox": inbox_mailbox,
@@ -345,7 +416,13 @@ def count_account_incoming(account: dict, date_from: date, date_to: date, local_
 
 
 def daily_mail_statistics(accounts: list[dict], selected_day: date, local_tz) -> list[dict]:
-    """Return isolated per-account results so one broken mailbox cannot hide others."""
+    """Return Inbox/Junk counts per account without opening the Sent mailbox.
+
+    This is intentionally the lightweight collector behind the daily
+    ``Thống kê email`` page.  The broader ``Thống kê tổng quát`` flow owns
+    Sent inspection, evidence metadata and report-effectiveness analytics.
+    ``sent`` remains a zero compatibility field for the existing cache schema.
+    """
     results = []
     for account in accounts:
         username = str(account.get("username") or "Tài khoản chưa đặt tên")
@@ -356,7 +433,10 @@ def daily_mail_statistics(accounts: list[dict], selected_day: date, local_tz) ->
             })
             continue
         try:
-            results.append(count_account_mail(account, selected_day, local_tz))
+            incoming = count_account_incoming(
+                account, selected_day, selected_day, local_tz,
+            )
+            results.append({**incoming, "sent": 0})
         except Exception as exc:
             results.append({
                 "account": username, "received": 0, "sent": 0, "junk": 0,
