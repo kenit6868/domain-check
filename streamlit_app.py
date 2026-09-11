@@ -25,6 +25,7 @@ _pages = st.navigation([
     st.Page("streamlit_home.py",              title="Trang chủ",        icon="🏠"),
     st.Page("pages/1_Check_Domain.py",        title="Check Domain",     icon="🔍"),
     st.Page("pages/7_Quick_Report.py",        title="Quick Report",     icon="⚡"),
+    st.Page("pages/14_Cloudflare_Form_Worker.py", title="Cloudflare Form Worker", icon=":material/cloud:"),
 #     st.Page("pages/2_Related_Domains.py",     title="Related Domains",  icon="🕸️"),
 #     st.Page("pages/3_Brand_Scan.py",          title="Brand Scan",       icon="🛡️"),
     st.Page("pages/6_Domain_Worker.py",       title="Domain Worker",    icon="⚙️"),

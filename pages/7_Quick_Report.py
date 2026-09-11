@@ -20,6 +20,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import phishing_toolkit as pt
+import cloudflare_form_worker as cfw
 from cloaking_ui import render_cloaking_details
 from community_report_ui import render_community_report_buttons
 
@@ -314,10 +315,17 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                     st.markdown(f"##### ☁️ CDN")
                     st.caption(", ".join(cdn_names))
                     if cf:
-                        info_cf = pt.CDN_ABUSE_CONTACTS["cloudflare"]
                         cf_text = pt.generate_cloudflare_report_text(domain, cfg, original_url)
-                        st.link_button("↗ Cloudflare Abuse", info_cf["report_url"],
-                                       type="primary")
+                        if st.button(
+                            "↗ Mở & tự điền Cloudflare Abuse", type="primary",
+                            key=f"quick_cf_autofill_{idx}",
+                            help="Mở form trên Chrome profile hiện tại và tự điền; Quick Report không tự submit.",
+                        ):
+                            opened = cfw.open_quick_report_form(original_url, cf_text, cfg)
+                            if opened.get("error"):
+                                st.error(opened["error"])
+                            else:
+                                st.success("Đã mở form trên Chrome. Extension sẽ tự điền, không tự submit.")
                         st.code(cf_text, language=None)
                     for name in cdn_detected:
                         info = pt.CDN_ABUSE_CONTACTS.get(name)

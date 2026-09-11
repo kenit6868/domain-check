@@ -40,6 +40,9 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
   SMTP trực tiếp và trang duyệt riêng cho case cloaking do worker cách ly.
 - `pages/12_Domain_Evidence_Review.py`: page review riêng cho domain thường thiếu
   Browser Evidence, đọc preflight v4 theo ngày/full URL và gửi ảnh thủ công trực tiếp.
+- `cloudflare_form_worker.py`, `cloudflare_profile_bridge.py`,
+  `chrome_extension/cloudflare-profile-worker/`, `pages/14_Cloudflare_Form_Worker.py`:
+  worker form Cloudflare, ledger ngày và extension chạy trên Chrome profile thật.
 - `tests/`: bộ kiểm thử `unittest`.
 - `README.md`: hướng dẫn người dùng; `CLAUDE.md`: ghi chú triển khai;
   `03_Technical_Guide.md` và `plan_phishing_takedown.md`: playbook vận hành.
@@ -242,6 +245,31 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-09-11 — Thêm **Cloudflare Form Worker** độc lập Domain Worker email:
+  dùng phép phát hiện Cloudflare và draft chung với Quick Report, preview URL đã
+  chọn rồi mở Chrome hiển thị để chỉ điền hoặc submit sau xác nhận. Ledger JSON
+  dedupe ngày địa phương + full URL. Form được điền bởi extension MV3 cục bộ trên
+  đúng Chrome profile đang mở qua task localhost one-time; không dùng profile ảo,
+  remote debugging hoặc đọc cookie. CAPTCHA/form không xác minh được chuyển
+  manual/failed, không bypass. File chính: `cloudflare_form_worker.py`,
+  `pages/14_Cloudflare_Form_Worker.py`, navigation, spec và test core/UI; tài liệu:
+  `README.md`, `03_Technical_Guide.md`, `CLAUDE.md`, file này và skill dự án.
+  Extension v1.0.1 xử lý tải trắng bằng một lần reload, điền confirm email và
+  company từ brand, đặt draft đúng trường public evidence thay vì Comments;
+  auto-submit fail closed nếu CAPTCHA/required field/success chưa xác minh được.
+  Extension v1.0.2 chuyển localhost bridge sang MV3 service worker để không bị
+  CSP/CORS của trang chặn; record không nhận callback sau 45 giây chuyển `FAILED`
+  với hướng dẫn reload extension thay vì treo ở `OPENING_PROFILE`.
+  Extension v1.0.3 hiển thị badge chẩn đoán trên form và worker phải chờ callback
+  từng URL trước khi mở URL tiếp theo để tránh challenge/trang trắng do mở dồn tab.
+  Extension v1.0.4 không giả định caption Cloudflare là thẻ label: chọn field theo
+  vùng DOM gần nhất, loại Comments và hiển thị input/textarea count khi chờ.
+  Extension v1.0.5 phải điền/kiểm tra lại cả Email và Confirm email sau React
+  rerender. Không tích hợp dịch vụ hay logic tự giải/vượt Cloudflare Turnstile;
+  chỉ chờ operator hoàn tất rồi mới tiếp tục submit đã được xác nhận.
+  Quick Report dùng cùng profile bridge cho nút Cloudflare duy nhất nhưng luôn
+  `fill_only`; không giữ song song link mở form cũ và không cho submit tại page này.
 
 - 2026-09-11 — Sửa build Browser Evidence cho bản Windows share: `build_app.bat`
   cài rõ Chromium + Chromium Headless Shell với `PLAYWRIGHT_BROWSERS_PATH=0`

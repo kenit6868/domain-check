@@ -129,6 +129,9 @@ app_datas = [
     ("report_statistics.py", "."),
     ("sent_mail_evidence.py", "."),
     ("general_statistics.py", "."),
+    ("cloudflare_form_worker.py", "."),
+    ("cloudflare_profile_bridge.py", "."),
+    ("chrome_extension", "chrome_extension"),
     ("pages",               "pages"),
     ("config.example.ini",  "."),
 ]

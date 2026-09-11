@@ -26,6 +26,10 @@ class StreamlitNavigationTests(unittest.TestCase):
         self.assertIn('pages/13_General_Statistics.py', entrypoint)
         self.assertNotIn('pages/13_Sent_Mail_Evidence.py', entrypoint)
 
+    def test_cloudflare_form_worker_is_registered(self):
+        entrypoint = (ROOT / "streamlit_app.py").read_text(encoding="utf-8")
+        self.assertIn('pages/14_Cloudflare_Form_Worker.py', entrypoint)
+
 
 if __name__ == "__main__":
     unittest.main()

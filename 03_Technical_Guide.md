@@ -15,7 +15,20 @@
     Quick Report đang tạm ẩn.
 *   **Cloudflare**: IP/ASN Cloudflare chỉ chứng minh lớp proxy/CDN, không phải
     origin hosting. Không gửi `abuse@cloudflare.com`; dùng form chính thức
-    [Cloudflare Abuse](https://www.cloudflare.com/abuse/) khi cần báo cáo lớp này.
+    [Cloudflare Phishing Abuse](https://abuse.cloudflare.com/phishing) khi cần báo cáo lớp này.
+    Với danh sách nhiều URL, dùng **Cloudflare Form Worker**: lọc Cloudflare,
+    chọn dòng, xem draft rồi mở Chrome. Mặc định chỉ điền; submit phải được xác
+    nhận. Cài extension unpacked trong `chrome_extension/cloudflare-profile-worker`
+    trên đúng Chrome profile cần dùng; extension nhận task một lần qua localhost.
+    CAPTCHA không được tự động vượt qua. Trạng thái checkpoint theo URL để
+    retry/resume; tool không đọc hoặc sao chép cookie/profile.
+    Extension tự reload form tối đa một lần nếu lần tải đầu bị trắng; điền email
+    xác nhận, company từ `brand_name` và đặt draft vào trường evidence công khai,
+    không đặt vào Comments nội bộ. Auto-submit chỉ click khi CAPTCHA đã xong và
+    HTML form không còn trường required thiếu; nếu không thì dừng manual review.
+    Với một URL ở Quick Report, nút Cloudflare đăng ký cùng loại task extension
+    nhưng khóa `fill_only`: vẫn mở form thật trên profile hiện tại, không tạo
+    batch ledger và không bao giờ submit từ Quick Report.
 *   **Bản Windows đóng gói**: `build_app.bat` cài Chromium vào thư mục hermetic
     của Playwright, còn spec copy nó vào đường dẫn browser của runtime frozen
     trước khi PyInstaller thu thập dữ liệu. Vì vậy phải chia sẻ

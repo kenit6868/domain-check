@@ -79,6 +79,12 @@ class QuickReportRestoreTests(unittest.TestCase):
             result,
         )
 
+    def test_cloudflare_button_uses_profile_extension_without_legacy_link(self):
+        source = (Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py").read_text(encoding="utf-8")
+        self.assertIn("open_quick_report_form(original_url, cf_text, cfg)", source)
+        self.assertIn("Mở & tự điền Cloudflare Abuse", source)
+        self.assertNotIn('st.link_button("↗ Cloudflare Abuse"', source)
+
 
 if __name__ == "__main__":
     unittest.main()

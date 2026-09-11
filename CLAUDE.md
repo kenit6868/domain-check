@@ -484,6 +484,24 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
 
 ## Chỉ dẫn bảo trì (quan trọng)
 
+### Cloudflare Form Worker — form web độc lập
+
+- `cloudflare_form_worker.py` dùng lõi check/draft chung với Quick Report nhưng
+  chỉ enqueue URL Cloudflare được chọn; không nhập vào Domain Worker email.
+- Ledger `data/cloudflare_form_worker.json` dedupe ngày địa phương + full URL,
+  checkpoint từng trạng thái và không ghi cookie, CAPTCHA, HTML/browser profile.
+- Page 14 preview rồi mở form bằng browser mặc định. Extension MV3 giới hạn ở
+  `abuse.cloudflare.com` nhận task one-time qua localhost và chạy trong đúng
+  profile Chrome đã cài extension; không attach DevTools hoặc đọc cookie. Submit
+  cần xác nhận; CAPTCHA/success không xác minh được thì chuyển manual.
+  Selector ưu tiên label `Logs or other evidence of abuse`, `Confirm email
+  address`, `Company name`; cấm generic textarea fallback để không ghi nhầm vào
+  Comments. Trang trắng được reload đúng một lần bằng marker trong sessionStorage.
+  Bridge fetch phải chạy trong `background.js` MV3 service worker; content script
+  nhắn qua `chrome.runtime.sendMessage`, không fetch localhost trực tiếp.
+- Quick Report gọi `open_quick_report_form()` cho Cloudflare, tạo task one-time
+  `fill_only` không ledger/submit và thay hoàn toàn link form thủ công cũ.
+
 ### Domain Worker — chọn nhiều tài khoản và cache theo delivery
 
 - Trang `pages/6_Domain_Worker.py` có một bộ chọn tài khoản SMTP duy nhất nằm trước cả bước lọc nội dung thô,

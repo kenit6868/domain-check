@@ -197,7 +197,7 @@ CA_ABUSE_NOTES = {
 # không vẫn do is_cloudflare() (tra nameserver) đảm nhiệm, không phải detect_cdn().
 CDN_ABUSE_CONTACTS = {
     "cloudflare": {
-        "report_url": "https://www.cloudflare.com/abuse/",
+        "report_url": "https://abuse.cloudflare.com/phishing",
         "note": "Chọn mục \"Phishing & Malware\" khi report — có thể chặn proxy hoặc gắn interstitial cảnh báo.",
     },
     "fastly": {
@@ -546,7 +546,7 @@ WHOIS_PRIVACY_DOMAINS = {
 # Registrars CHỈ nhận report qua web form, KHÔNG nhận email.
 # Khi registrar khớp 1 key trong dict này, sinh file hướng dẫn web form thay vì email.
 WEB_FORM_REGISTRARS = {
-    "godaddy":              "https://supportcenter.godaddy.com/abusereport/phishing",
+    "godaddy":              "https://legalportal.godaddy.com/abuse/phishing",
     "dynadot":              "https://www.dynadot.com/report-abuse",
     "tucows":               "https://www.tucowsdomains.com/report-abuse",
     "opensrs":              "https://www.tucowsdomains.com/report-abuse",

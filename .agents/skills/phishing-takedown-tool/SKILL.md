@@ -17,6 +17,12 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Cloudflare chỉ xác nhận proxy/CDN, không phải origin hosting đã xác minh.
   Domain Worker phải loại recipient này khỏi job, vẫn giữ các recipient hợp lệ
   khác và không hiển thị form/action thủ công trong workflow Worker.
+- Cloudflare web-form automation phải độc lập với Domain Worker email, chỉ nhận
+  full URL Cloudflare do operator chọn và luôn preview draft. Submit cần xác nhận
+  explicit, không bypass CAPTCHA. Dedupe theo ngày + full URL, checkpoint từng
+  dòng để retry/resume. Muốn dùng profile Chrome đang mở phải dùng extension cục
+  bộ giới hạn origin + task one-time qua localhost; không dùng remote debugging
+  trên default profile, không đọc/sao chép cookie, CAPTCHA hay HTML.
 - `run_check()` là pipeline dùng chung giữa CLI và UI. Không tạo một pipeline
   kiểm tra domain khác trong page Streamlit.
 - Bản PyInstaller phải bundle Chromium cùng Playwright, không dựa vào browser

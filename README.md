@@ -95,6 +95,26 @@ Các trang (xem sidebar bên trái):
   Blocking**, Google Safe Browsing và Microsoft SmartScreen mở form chính thức
   ở tab mới kèm query `url` của đúng URL đang báo cáo để người vận hành kiểm tra,
   bổ sung nội dung và xác nhận gửi; nút tự điền form bằng Playwright đang tạm ẩn.
+  Riêng Cloudflare dùng một nút **Mở & tự điền Cloudflare Abuse**: mở form bằng
+  Chrome profile có extension và tự điền URL/draft/contact/company. Quick Report
+  chỉ điền, không submit; nút mở form Cloudflare thủ công cũ đã được thay thế.
+- **Cloudflare Form Worker** — dùng cùng phép kiểm tra nameserver Cloudflare của
+  Quick Report, chỉ đưa URL được người vận hành chọn vào hàng chờ trong ngày,
+  hiển thị full URL và draft trước khi chạy. **Chỉ điền** mở Chrome để kiểm tra;
+  submit chỉ bật sau xác nhận. Form được điền bởi extension cục bộ cài trên đúng
+  Chrome profile cá nhân đang mở (không dùng profile Playwright). Ledger checkpoint
+  theo URL để retry/resume và không sao chép/lưu cookie, CAPTCHA hay HTML.
+  Extension điền `Confirm email address`, lấy `Company name` từ `brand_name` và
+  đưa draft vào đúng `Logs or other evidence of abuse`, không dùng `Comments`.
+  Từ extension v1.0.2, mọi request localhost đi qua MV3 service worker thay vì
+  content script để không bị CSP/CORS của form Cloudflare chặn.
+  Worker xử lý tuần tự từng tab; extension v1.0.3 hiển thị badge chẩn đoán ngay
+  trên form và chỉ mở URL tiếp theo sau khi URL hiện tại đã callback hoặc timeout.
+  Extension v1.0.4 nhận diện field theo vùng DOM React gần nhất và loại textarea
+  Comments, đồng thời badge hiển thị số input/textarea trong lúc chờ form.
+  Extension v1.0.5 điền cả hai input email theo thứ tự hiển thị và kiểm tra lại
+  giá trị sau React rerender. Turnstile chỉ hỗ trợ chờ người vận hành xác minh;
+  tool không tự giải hoặc vượt CAPTCHA.
 - **Domain Worker** — nút precheck kiểm tra email và cloaking đồng thời; case
   cloaking chỉ được tách ngay khi có email nhận, còn domain thường mới đi vào
   job gửi batch. IP/ASN Cloudflare chỉ được xem là proxy/CDN: tool không gửi
