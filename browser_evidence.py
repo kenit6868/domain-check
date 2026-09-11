@@ -15,11 +15,24 @@ import hashlib
 import json
 import os
 import re
+import sys
 import uuid
 from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
+
+
+def configure_playwright_runtime() -> None:
+    """Use the browser bundled beside Playwright when running a frozen app."""
+    if getattr(sys, "frozen", False):
+        # ``0`` is Playwright's hermetic browser location inside its driver
+        # package.  ``build_app.bat`` installs Chromium there before PyInstaller
+        # collects it, so shared dist folders do not rely on each user's profile.
+        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
+
+
+configure_playwright_runtime()
 
 
 EVIDENCE_VERSION = 1

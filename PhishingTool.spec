@@ -8,6 +8,7 @@ Output: dist/PhishingTool/ (folder)
 import os
 import sys
 import importlib.metadata
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 streamlit_datas = collect_data_files("streamlit", include_py_files=True)
@@ -34,9 +35,51 @@ except Exception:
     certifi_datas = []
 
 try:
-    playwright_datas = collect_data_files("playwright")
+    import playwright
+    _playwright_root = Path(playwright.__file__).resolve().parent
+    # `PLAYWRIGHT_BROWSERS_PATH=0` installs into the Node driver package, but a
+    # frozen Playwright runtime resolves its hermetic directory as the sibling
+    # `driver/package.local-browsers` (without `/package/`).  Copy every browser
+    # file explicitly to that runtime destination instead of relying on the
+    # generic package-data collector.
+    _local_browsers = _playwright_root / "driver" / "package" / ".local-browsers"
+    _has_chromium = any(_local_browsers.glob("chromium-*/chrome-win*/chrome.exe"))
+    _has_headless_shell = any(
+        _local_browsers.glob(
+            "chromium_headless_shell-*/chrome-headless-shell-win*/chrome-headless-shell.exe"
+        )
+    )
+    if not (_has_chromium and _has_headless_shell):
+        raise SystemExit(
+            "Playwright Chromium is missing from package.local-browsers. "
+            "Run build_app.bat, or set PLAYWRIGHT_BROWSERS_PATH=0 then run "
+            "python -m playwright install chromium chromium-headless-shell before PyInstaller."
+        )
+    # `collect_data_files()` still picks up hidden `.local-browsers` on Windows
+    # even when an exclude glob is supplied. Filter its resolved tuples so the
+    # 700 MB source tree is not bundled a second time at `package/.local-browsers`.
+    playwright_datas = [
+        (source, destination)
+        for source, destination in collect_data_files("playwright")
+        if ".local-browsers" not in Path(source).parts
+        and ".local-browsers" not in Path(destination).parts
+    ]
+    playwright_browser_datas = [
+        (
+            str(source),
+            str(
+                Path("playwright") / "driver" / "package.local-browsers"
+                / source.relative_to(_local_browsers).parent
+            ),
+        )
+        for source in _local_browsers.rglob("*")
+        if source.is_file()
+    ]
+except SystemExit:
+    raise
 except Exception:
     playwright_datas = []
+    playwright_browser_datas = []
 
 # Bundle .dist-info metadata - Streamlit doc importlib.metadata lay version khi runtime
 def _distinfo_data(pkg_name):
@@ -94,7 +137,7 @@ a = Analysis(
     ["launcher.py"],
     pathex=["."],
     binaries=[],
-    datas=streamlit_datas + altair_datas + whois_datas + dns_datas + certifi_datas + playwright_datas + metadata_datas + app_datas,
+    datas=streamlit_datas + altair_datas + whois_datas + dns_datas + certifi_datas + playwright_datas + playwright_browser_datas + metadata_datas + app_datas,
     hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},

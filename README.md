@@ -32,6 +32,22 @@ tạm thời, tool tạo kết nối mới và thử lại tối đa một lần
 lỗi xác thực, sender hoặc recipient không được retry. Kết quả lỗi ghi rõ bước
 `connect`, `starttls`, `authenticate` hoặc `send` để dễ chẩn đoán.
 
+### Build và chia sẻ bản Windows
+
+Chạy `build_app.bat` trên máy build. Script tự tải Chromium đúng phiên bản của
+Playwright, rồi spec copy browser vào đúng đường dẫn mà bản `.exe` sử dụng trước
+khi chạy PyInstaller. Spec loại thư mục browser nguồn khỏi data collector để
+Chromium không bị đóng gói hai lần. Sau khi build, chia sẻ
+**toàn bộ** thư mục `dist/PhishingTool/`; người nhận chỉ cần cấu hình `config.ini`
+và chạy `PhishingTool.exe`, không cần cài Python hoặc chạy `playwright install`.
+Nếu build bằng lệnh PyInstaller trực tiếp, chạy trước:
+
+```powershell
+$env:PLAYWRIGHT_BROWSERS_PATH = "0"
+python -m playwright install chromium chromium-headless-shell
+python -m PyInstaller PhishingTool.spec -y --clean
+```
+
 ## Sử dụng
 
 ```bash

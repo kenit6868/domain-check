@@ -26,6 +26,17 @@ if errorlevel 1 (
 echo [INFO] Kiem tra dependencies...
 pip install -r requirements.txt -q
 
+:: Playwright browser khong nam trong Python wheel. Cai Chromium vao dung thu muc
+:: hermetic cua package de PyInstaller bundle no vao dist\PhishingTool.
+echo [INFO] Tai Playwright Chromium de bundle vao app...
+set "PLAYWRIGHT_BROWSERS_PATH=0"
+python -m playwright install chromium chromium-headless-shell --no-progress
+if errorlevel 1 (
+    echo [LOI] Khong the tai Playwright Chromium. Kiem tra mang roi build lai.
+    pause
+    exit /b 1
+)
+
 :: Xóa build cũ (phải close PhishingTool.exe trước nếu đang chạy)
 echo [INFO] Xoa build cu...
 if exist "dist\PhishingTool" rmdir /s /q "dist\PhishingTool" 2>nul
@@ -35,7 +46,7 @@ if exist "build\PhishingTool" rmdir /s /q "build\PhishingTool" 2>nul
 echo.
 echo [INFO] Dang build... (co the mat 5-10 phut)
 echo.
-python -m PyInstaller PhishingTool.spec -y
+python -m PyInstaller PhishingTool.spec -y --clean
 
 if errorlevel 1 (
     echo.
@@ -68,6 +79,7 @@ echo   Chia se toan bo folder dist\PhishingTool\ cho dong doi.
 echo   Dong doi can:
 echo     1. Mo file config.ini, dien thong tin SMTP + API key
 echo     2. Double-click PhishingTool.exe de chay
+echo   Chromium da duoc bundle; khong can chay playwright install tren may nhan.
 echo ================================================
 echo.
 pause

@@ -16,6 +16,11 @@
 *   **Cloudflare**: IP/ASN Cloudflare chỉ chứng minh lớp proxy/CDN, không phải
     origin hosting. Không gửi `abuse@cloudflare.com`; dùng form chính thức
     [Cloudflare Abuse](https://www.cloudflare.com/abuse/) khi cần báo cáo lớp này.
+*   **Bản Windows đóng gói**: `build_app.bat` cài Chromium vào thư mục hermetic
+    của Playwright, còn spec copy nó vào đường dẫn browser của runtime frozen
+    trước khi PyInstaller thu thập dữ liệu. Vì vậy phải chia sẻ
+    nguyên thư mục `dist/PhishingTool/`, không chỉ file `.exe`; máy nhận không
+    cần cài Python hay chạy `playwright install` để tạo Browser Evidence.
 *   **Kênh cộng đồng Việt Nam**: Mở form [Chống Lừa Đảo](https://chongluadao.vn/report/reportphishing) và [Cốc Cốc Safe](https://safe.coccoc.com/) bằng các nút trong **Browser Blocking** của **Check Domain** hoặc **Quick Report**. Đây là bước thủ công; kiểm tra lại URL/bằng chứng trên form trước khi gửi.
 *   **Nội dung mẫu gửi báo cáo (tiếng Anh)**:
     ```

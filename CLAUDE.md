@@ -13,8 +13,23 @@ trình vận hành viết tay mà cả 2 giao diện đều hỗ trợ.
 
 ## Lệnh chạy
 
-Không có build step, không có test suite (ngoài các script `streamlit.testing.v1.AppTest` chạy tay
-để verify UI — xem bên dưới), không cấu hình linter trong repo này.
+### Build Windows để chia sẻ
+
+Chạy `build_app.bat`. Script đặt `PLAYWRIGHT_BROWSERS_PATH=0`, tải Chromium vào
+package Playwright; spec copy browser sang `playwright/driver/package.local-browsers`
+đúng đường dẫn mà runtime frozen tìm rồi mới gọi PyInstaller. Chromium headless
+hiện dùng layout `chrome-headless-shell-win64/chrome-headless-shell.exe`; không
+được kiểm tra theo tên legacy `headless_shell.exe`. Phải lọc `.local-browsers`
+khỏi kết quả `collect_data_files("playwright")` để không bundle thêm bản nguồn
+701 MB tại `driver/package/.local-browsers`. Không được chia sẻ
+riêng `.exe`, phải chia sẻ toàn bộ `dist/PhishingTool/`. Runtime frozen cũng đặt
+biến này để Browser Evidence luôn dùng Chromium đã bundle, không phụ thuộc browser
+trong profile của người nhận. PyInstaller phải chạy với `--clean`; `-y` một mình
+có thể tái sử dụng Analysis/TOC cũ và đưa browser nguồn trở lại output.
+
+Có build Windows qua `build_app.bat`/`PhishingTool.spec`. Bộ kiểm thử chính là
+`python -m unittest discover -s tests -v`; các test Streamlit dùng
+`streamlit.testing.v1.AppTest`. Không cấu hình linter riêng trong repo này.
 
 ```bash
 # Setup

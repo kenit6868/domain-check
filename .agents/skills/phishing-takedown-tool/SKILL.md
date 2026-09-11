@@ -19,6 +19,13 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   khác và không hiển thị form/action thủ công trong workflow Worker.
 - `run_check()` là pipeline dùng chung giữa CLI và UI. Không tạo một pipeline
   kiểm tra domain khác trong page Streamlit.
+- Bản PyInstaller phải bundle Chromium cùng Playwright, không dựa vào browser
+  đã cài trong profile của người nhận. Build Windows đặt
+  `PLAYWRIGHT_BROWSERS_PATH=0`, chạy `python -m playwright install chromium
+  chromium-headless-shell` trước PyInstaller và runtime frozen giữ cùng biến để Browser Evidence dùng
+  `package.local-browsers` đã đóng gói. Phải lọc cây nguồn `.local-browsers`
+  khỏi generic Playwright data collection để không bundle browser hai lần, và
+  chạy PyInstaller với `--clean` để không tái sử dụng Analysis/TOC cũ.
 - Một lỗi provider bên ngoài, log hoặc sinh draft phải được cô lập để kết quả
   điều tra còn lại vẫn được trả về.
 - Worker phải giữ tính resume, chống gửi trùng và trạng thái job có thể đọc lại.

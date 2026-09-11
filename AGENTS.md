@@ -243,6 +243,20 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-11 — Sửa build Browser Evidence cho bản Windows share: `build_app.bat`
+  cài rõ Chromium + Chromium Headless Shell với `PLAYWRIGHT_BROWSERS_PATH=0`
+  trước PyInstaller; spec copy chúng vào `package.local-browsers`, kiểm tra đủ
+  browser runtime theo layout hiện tại (`chrome-win64/chrome.exe` và
+  `chrome-headless-shell-win64/chrome-headless-shell.exe`), còn bản frozen dùng
+  browser đã bundle. Kết quả generic `collect_data_files("playwright")` phải lọc
+  `.local-browsers` để tránh đóng gói trùng cây browser nguồn khoảng 701 MB.
+  PyInstaller phải chạy với `--clean` để không tái sử dụng Analysis/TOC cũ.
+  Phải phân phối toàn bộ
+  `dist/PhishingTool/`, không chỉ
+  `.exe`; máy nhận không cần cài Playwright/Python. File chính:
+  `build_app.bat`, `PhishingTool.spec`, `browser_evidence.py`; tài liệu:
+  `README.md`, `CLAUDE.md`, `03_Technical_Guide.md`, file này và skill dự án.
+
 - 2026-09-09 — Chặn `abuse@cloudflare.com` ở precheck, draft và ranh giới SMTP:
   địa chỉ này không được Cloudflare theo dõi và IP/ASN Cloudflare chỉ là proxy/CDN,
   không phải origin hosting đã xác minh. Domain Worker nhận diện contact/ASN/tổ
