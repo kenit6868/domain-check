@@ -35,6 +35,8 @@ class PlaywrightPackagingTests(unittest.TestCase):
         self.assertIn("playwright_browser_datas", source)
         self.assertIn('if ".local-browsers" not in Path(source).parts', source)
         self.assertIn('and ".local-browsers" not in Path(destination).parts', source)
+        self.assertIn("a.datas = _without_source_playwright_browsers(a.datas)", source)
+        self.assertIn("a.binaries = _without_source_playwright_browsers(a.binaries)", source)
         self.assertIn("chromium-*/chrome-win*/chrome.exe", source)
         self.assertIn(
             "chromium_headless_shell-*/chrome-headless-shell-win*/chrome-headless-shell.exe",

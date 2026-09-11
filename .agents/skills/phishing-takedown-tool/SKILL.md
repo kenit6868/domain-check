@@ -43,7 +43,8 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   `PLAYWRIGHT_BROWSERS_PATH=0`, chạy `python -m playwright install chromium
   chromium-headless-shell` trước PyInstaller và runtime frozen giữ cùng biến để Browser Evidence dùng
   `package.local-browsers` đã đóng gói. Phải lọc cây nguồn `.local-browsers`
-  khỏi generic Playwright data collection để không bundle browser hai lần, và
+  khỏi generic Playwright data collection và lọc lại cả `Analysis.datas` lẫn
+  `Analysis.binaries` để hook PyInstaller không bundle browser hai lần, và
   chạy PyInstaller với `--clean` để không tái sử dụng Analysis/TOC cũ.
 - Một lỗi provider bên ngoài, log hoặc sinh draft phải được cô lập để kết quả
   điều tra còn lại vẫn được trả về.

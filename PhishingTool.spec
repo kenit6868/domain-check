@@ -150,6 +150,21 @@ a = Analysis(
     optimize=0,
 )
 
+# PyInstaller 6 may add and reclassify Playwright's package data while Analysis runs.
+# Keep only the explicit frozen-runtime copy at driver/package.local-browsers;
+# otherwise COLLECT creates a second hard-linked browser tree. Hard links save
+# local disk blocks, but ZIP tools store both paths and add about 700 MB.
+def _without_source_playwright_browsers(toc):
+    return type(toc)(
+        entry
+        for entry in toc
+        if ".local-browsers" not in Path(entry[0]).parts
+    )
+
+
+a.datas = _without_source_playwright_browsers(a.datas)
+a.binaries = _without_source_playwright_browsers(a.binaries)
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

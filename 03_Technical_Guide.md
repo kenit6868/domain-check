@@ -37,9 +37,12 @@
     giới hạn quyền extension đúng ba origin chính thức cùng localhost.
 *   **Bản Windows đóng gói**: `build_app.bat` cài Chromium vào thư mục hermetic
     của Playwright, còn spec copy nó vào đường dẫn browser của runtime frozen
-    trước khi PyInstaller thu thập dữ liệu. Vì vậy phải chia sẻ
+    trước khi PyInstaller thu thập dữ liệu. Spec lọc datas/binaries cả trước và
+    sau Analysis để hook không đóng gói trùng cây browser nguồn. Vì vậy phải chia sẻ
     nguyên thư mục `dist/PhishingTool/`, không chỉ file `.exe`; máy nhận không
     cần cài Python hay chạy `playwright install` để tạo Browser Evidence.
+    Extension đi kèm có icon PNG 16/32/48/128; sau khi cập nhật bản build cần
+    Reload extension tại trang quản lý extension của Chrome.
 *   **Kênh cộng đồng Việt Nam**: Trong **Quick Report**, Web Form Assistant v2.2.1
     mở và tự điền form [Chống Lừa Đảo](https://chongluadao.vn/report/reportphishing)
     hoặc [Cốc Cốc Safe](https://safe.coccoc.com/) bằng full URL, email liên hệ,

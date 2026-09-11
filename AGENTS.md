@@ -246,6 +246,25 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-11 — Thêm bộ icon lá chắn cho Web Form Assistant: manifest extension
+  v2.2.2 khai báo icon PNG 16/32/48/128 và icon action; source chất lượng cao
+  lưu tại `assets/phishingtool-extension-icon-source.png`, còn bản runtime ở
+  `chrome_extension/cloudflare-profile-worker/icons/`. Extension đã nạp cần
+  Reload trong trang quản lý extension của Chrome; thêm test bảo đảm manifest
+  chỉ tới các file tồn tại. Tài liệu: `README.md`, `CLAUDE.md`,
+  `03_Technical_Guide.md` và file này.
+
+- 2026-09-11 — Sửa build Windows bị phình do Playwright Chromium đóng gói
+  hai đường dẫn: ngoài filter `collect_data_files`, spec lọc lại
+  `Analysis.datas` và `Analysis.binaries` sau khi PyInstaller hook chèn rồi
+  phân loại lại package data, chỉ giữ
+  `driver/package.local-browsers` mà runtime frozen sử dụng. Bản trùng
+  `driver/package/.local-browsers` khoảng 701 MB không còn làm ZIP tăng kích
+  thước; Chromium và Headless Shell vẫn được bundle để Browser Evidence chạy
+  offline trên máy nhận. File chính: `PhishingTool.spec`, test packaging;
+  tài liệu: `README.md`, `CLAUDE.md`, `03_Technical_Guide.md`, file này và
+  skill dự án.
+
 - 2026-09-11 — Thêm **Cloudflare Form Worker** độc lập Domain Worker email:
   dùng phép phát hiện Cloudflare và draft chung với Quick Report, preview URL đã
   chọn rồi mở Chrome hiển thị để chỉ điền hoặc submit sau xác nhận. Ledger JSON

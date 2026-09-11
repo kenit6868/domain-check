@@ -34,7 +34,17 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
     def test_extension_is_restricted_to_supported_forms_and_localhost(self):
         root = Path(__file__).resolve().parents[1]
         manifest = json.loads((root / "chrome_extension/cloudflare-profile-worker/manifest.json").read_text())
-        self.assertEqual(manifest["version"], "2.2.1")
+        self.assertEqual(manifest["version"], "2.2.2")
+        expected_icons = {
+            "16": "icons/icon16.png",
+            "32": "icons/icon32.png",
+            "48": "icons/icon48.png",
+            "128": "icons/icon128.png",
+        }
+        self.assertEqual(manifest["icons"], expected_icons)
+        self.assertEqual(manifest["action"]["default_icon"]["16"], expected_icons["16"])
+        for relative_path in expected_icons.values():
+            self.assertTrue((root / "chrome_extension/cloudflare-profile-worker" / relative_path).is_file())
         self.assertEqual(manifest["content_scripts"][0]["matches"], [
             "https://abuse.cloudflare.com/*",
             "https://safebrowsing.google.com/*",

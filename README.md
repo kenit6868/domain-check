@@ -37,7 +37,8 @@ lỗi xác thực, sender hoặc recipient không được retry. Kết quả l�
 Chạy `build_app.bat` trên máy build. Script tự tải Chromium đúng phiên bản của
 Playwright, rồi spec copy browser vào đúng đường dẫn mà bản `.exe` sử dụng trước
 khi chạy PyInstaller. Spec loại thư mục browser nguồn khỏi data collector để
-Chromium không bị đóng gói hai lần. Sau khi build, chia sẻ
+Chromium không bị đóng gói hai lần; spec cũng lọc lại Analysis datas/binaries vì hook
+PyInstaller có thể chèn lại cây browser sau bước collect ban đầu. Sau khi build, chia sẻ
 **toàn bộ** thư mục `dist/PhishingTool/`; người nhận chỉ cần cấu hình `config.ini`
 và chạy `PhishingTool.exe`, không cần cài Python hoặc chạy `playwright install`.
 Nếu build bằng lệnh PyInstaller trực tiếp, chạy trước:
@@ -47,6 +48,10 @@ $env:PLAYWRIGHT_BROWSERS_PATH = "0"
 python -m playwright install chromium chromium-headless-shell
 python -m PyInstaller PhishingTool.spec -y --clean
 ```
+
+Chrome hiển thị icon lá chắn của Web Form Assistant sau khi người dùng chọn
+**Load unpacked** với thư mục extension. Nếu extension đã được nạp từ trước,
+vào trang quản lý extension của Chrome và bấm **Reload** để nhận icon mới.
 
 ## Sử dụng
 

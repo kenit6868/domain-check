@@ -21,7 +21,9 @@ package Playwright; spec copy browser sang `playwright/driver/package.local-brow
 hiện dùng layout `chrome-headless-shell-win64/chrome-headless-shell.exe`; không
 được kiểm tra theo tên legacy `headless_shell.exe`. Phải lọc `.local-browsers`
 khỏi kết quả `collect_data_files("playwright")` để không bundle thêm bản nguồn
-701 MB tại `driver/package/.local-browsers`. Không được chia sẻ
+701 MB tại `driver/package/.local-browsers`; sau Analysis phải lọc cả
+`a.datas` và `a.binaries` vì hook có thể chèn rồi phân loại lại package data.
+Không được chia sẻ
 riêng `.exe`, phải chia sẻ toàn bộ `dist/PhishingTool/`. Runtime frozen cũng đặt
 biến này để Browser Evidence luôn dùng Chromium đã bundle, không phụ thuộc browser
 trong profile của người nhận. PyInstaller phải chạy với `--clean`; `-y` một mình
@@ -30,6 +32,9 @@ có thể tái sử dụng Analysis/TOC cũ và đưa browser nguồn trở lạ
 Có build Windows qua `build_app.bat`/`PhishingTool.spec`. Bộ kiểm thử chính là
 `python -m unittest discover -s tests -v`; các test Streamlit dùng
 `streamlit.testing.v1.AppTest`. Không cấu hình linter riêng trong repo này.
+
+Extension Web Form Assistant khai báo bộ icon PNG 16/32/48/128 trong manifest
+và action; thay đổi icon/manifest yêu cầu người dùng Reload extension đã nạp.
 
 ```bash
 # Setup
