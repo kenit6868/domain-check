@@ -307,7 +307,10 @@ def open_profile_form(provider: str, form_url: str, target_url: str, draft: str,
     from urllib.parse import urlencode
     from cloudflare_profile_bridge import profile_bridge
 
-    if provider not in {"cloudflare", "google_gsb", "microsoft_smartscreen"}:
+    if provider not in {
+        "cloudflare", "google_gsb", "microsoft_smartscreen",
+        "chongluadao", "coccoc_safe",
+    }:
         return {"error": "Provider form không được hỗ trợ."}
 
     bridge = profile_bridge()
@@ -326,7 +329,7 @@ def open_profile_form(provider: str, form_url: str, target_url: str, draft: str,
         "_brand_name": cfg.get("brand_name", ""),
     }
     payload.update({key: str(value or "") for key, value in provider_fields.items()
-                    if key in {"threat_type", "threat_category", "language"}})
+                    if key in {"threat_type", "threat_category", "language", "report_type"}})
     token = bridge.register(payload, checkpoint)
     _QUICK_TASKS[token] = task_status
     fragment = urlencode({"ptask": token, "port": bridge.port})

@@ -114,6 +114,22 @@ class CloudflareFormWorkerTests(unittest.TestCase):
         result = cfw.open_profile_form("unknown", "https://example.test", "example.test", "", {})
         self.assertIn("error", result)
 
+    def test_community_form_passes_only_whitelisted_report_type(self):
+        captured = {}
+        bridge = Mock(port=45678)
+        bridge.register.side_effect = lambda payload, callback: captured.update(payload=payload) or "token"
+        with patch("cloudflare_profile_bridge.profile_bridge", return_value=bridge), patch.object(
+            cfw, "open_in_installed_chrome", return_value=True
+        ):
+            result = cfw.open_profile_form(
+                "coccoc_safe", "https://safe.coccoc.com/", "https://example.test/path",
+                "Evidence", {"contact_email": "r@example.test"},
+                report_type="Trang web lừa đảo", unexpected="blocked",
+            )
+        self.assertEqual(result["status"], "opened")
+        self.assertEqual(captured["payload"]["report_type"], "Trang web lừa đảo")
+        self.assertNotIn("unexpected", captured["payload"])
+
 
 if __name__ == "__main__":
     unittest.main()

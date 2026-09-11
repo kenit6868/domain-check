@@ -62,6 +62,9 @@ class QuickReportRestoreTests(unittest.TestCase):
         self.assertIn("Mở & tự điền Google", source)
         self.assertIn("Mở & tự điền Microsoft", source)
         self.assertIn("threat_type=threat, threat_category=category", source)
+        self.assertIn("render_community_report_buttons(", source)
+        self.assertIn("generate_community_report_text", source)
+        self.assertIn("draft=community_text", source)
 
     def test_manual_form_link_encodes_the_full_reported_url(self):
         page_path = Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"

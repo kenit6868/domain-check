@@ -282,6 +282,17 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
   whitelist provider/field, không nhận dữ liệu browser nhạy cảm. Đã kiểm tra
   syntax toàn bộ JavaScript adapter/coordinator, 288/288 unittest, compileall,
   pip check và diff check; không mở form hoặc submit báo cáo thật trong test.
+  Phase adapter 2.1 hoàn tất ở extension v2.2.0: Quick Report thay hai link cộng
+  đồng bằng nút tự điền Chống Lừa Đảo và Cốc Cốc Safe; truyền full URL, email,
+  draft community trung lập và loại phishing tương ứng. Hai adapter luôn
+  `fill_only`, không giải reCAPTCHA/submit; Check Domain vẫn giữ link thủ công.
+  Đã đối chiếu DOM read-only của hai form chính thức, chạy syntax check toàn bộ
+  adapter, 291/291 unittest, Quick Report AppTest, compileall, pip check và diff
+  check; không nhập dữ liệu hoặc submit form thật trong kiểm thử.
+  Extension v2.2.1 sửa adapter Cốc Cốc: Material UI Select phải mở bằng
+  `mousedown`, chọn option phishing `data-value="1"`, rồi xác minh hidden input
+  `name="type"` thực sự là `1` mới được báo `FILLED`. Đã kiểm tra 22 test tập
+  trung và 292/292 toàn bộ unittest.
 
 - 2026-09-11 — Sửa build Browser Evidence cho bản Windows share: `build_app.bat`
   cài rõ Chromium + Chromium Headless Shell với `PLAYWRIGHT_BROWSERS_PATH=0`

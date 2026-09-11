@@ -1,25 +1,31 @@
 {
   "manifest_version": 3,
   "name": "PhishingTool Web Form Assistant",
-  "version": "2.1.0",
+  "version": "2.2.1",
   "description": "Fills supported official abuse forms from local, operator-approved tasks.",
   "background": {"service_worker": "background.js"},
   "host_permissions": [
     "https://abuse.cloudflare.com/*",
     "https://safebrowsing.google.com/*",
     "https://www.microsoft.com/*",
+    "https://chongluadao.vn/*",
+    "https://safe.coccoc.com/*",
     "http://127.0.0.1/*"
   ],
   "content_scripts": [{
     "matches": [
       "https://abuse.cloudflare.com/*",
       "https://safebrowsing.google.com/*",
-      "https://www.microsoft.com/*"
+      "https://www.microsoft.com/*",
+      "https://chongluadao.vn/*",
+      "https://safe.coccoc.com/*"
     ],
     "js": [
       "adapters/cloudflare.js",
       "adapters/google_gsb.js",
       "adapters/microsoft_smartscreen.js",
+      "adapters/chongluadao.js",
+      "adapters/coccoc_safe.js",
       "content.js"
     ],
     "run_at": "document_idle"

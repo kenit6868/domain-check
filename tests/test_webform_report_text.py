@@ -28,12 +28,20 @@ class WebformReportTextTests(unittest.TestCase):
         for text in (
             pt.generate_safebrowsing_report_text("phish.example.test", self.cfg, self.url),
             pt.generate_cloudflare_report_text("phish.example.test", self.cfg, self.url),
+            pt.generate_community_report_text("phish.example.test", self.cfg, self.url),
         ):
             self.assertIn(self.url, text)
             self.assertIn("Example Brand", text)
             self.assertNotIn("URLScan", text)
             self.assertNotIn("harvest OTP", text)
             self.assertNotIn("collect payment", text)
+
+    def test_community_text_is_not_addressed_to_google_or_cloudflare(self):
+        text = pt.generate_community_report_text("phish.example.test", self.cfg, self.url)
+        self.assertIn(self.url, text)
+        self.assertIn("Example Brand", text)
+        self.assertNotIn("Google", text)
+        self.assertNotIn("Cloudflare", text)
 
     def test_gsb_and_cloudflare_keep_separate_random_variant_pools(self):
         pools = []

@@ -16,6 +16,25 @@ class CommunityReportUiTests(unittest.TestCase):
         self.assertEqual(rendered, list(community_report_ui.COMMUNITY_REPORT_FORMS))
         self.assertEqual(streamlit.link_button.call_count, 2)
 
+    def test_quick_report_mode_renders_two_fill_only_actions(self):
+        streamlit = MagicMock()
+        streamlit.button.return_value = False
+        streamlit.container.return_value.__enter__.return_value = streamlit.container.return_value
+        with patch.object(community_report_ui, "st", streamlit):
+            community_report_ui.render_community_report_buttons(
+                target_url="https://example.test/login",
+                draft="Report details",
+                cfg={"contact_email": "r@example.test"},
+                key_scope="quick_0",
+            )
+
+        labels = [call.args[0] for call in streamlit.button.call_args_list]
+        self.assertEqual(labels, [
+            "Mở & tự điền Chống Lừa Đảo",
+            "Mở & tự điền Cốc Cốc Safe",
+        ])
+        streamlit.link_button.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

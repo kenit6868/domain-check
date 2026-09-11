@@ -1350,6 +1350,21 @@ def generate_cloudflare_report_text(
     return _pick(rng, variants)
 
 
+def generate_community_report_text(
+    domain: str, cfg: dict, target_url: str = "",
+) -> str:
+    """Return provider-neutral text for community phishing report forms."""
+    reported_url = target_url or f"https://{domain}"
+    brand = cfg.get("brand_name") or "our brand"
+    return (
+        f"The reported URL {reported_url} appears to be a suspected phishing page "
+        f"impersonating {brand}. Its deceptive branding and login-related content "
+        "may mislead visitors into providing account credentials or personal "
+        "information. Please review this exact URL and add an appropriate unsafe-site "
+        "warning or blocklist entry if the violation is confirmed."
+    )
+
+
 
 # --------------------------------------------------------------------------
 # A1 — HTTP check: page còn sống không, title, redirect, login form

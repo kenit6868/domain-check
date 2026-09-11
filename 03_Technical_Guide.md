@@ -40,7 +40,15 @@
     trước khi PyInstaller thu thập dữ liệu. Vì vậy phải chia sẻ
     nguyên thư mục `dist/PhishingTool/`, không chỉ file `.exe`; máy nhận không
     cần cài Python hay chạy `playwright install` để tạo Browser Evidence.
-*   **Kênh cộng đồng Việt Nam**: Mở form [Chống Lừa Đảo](https://chongluadao.vn/report/reportphishing) và [Cốc Cốc Safe](https://safe.coccoc.com/) bằng các nút trong **Browser Blocking** của **Check Domain** hoặc **Quick Report**. Đây là bước thủ công; kiểm tra lại URL/bằng chứng trên form trước khi gửi.
+*   **Kênh cộng đồng Việt Nam**: Trong **Quick Report**, Web Form Assistant v2.2.1
+    mở và tự điền form [Chống Lừa Đảo](https://chongluadao.vn/report/reportphishing)
+    hoặc [Cốc Cốc Safe](https://safe.coccoc.com/) bằng full URL, email liên hệ,
+    nội dung report trung lập và loại phishing tương ứng. Hai adapter luôn
+    `fill_only`; CAPTCHA và submit vẫn do người vận hành thực hiện. **Check
+    Domain** tiếp tục dùng hai link mở thủ công.
+    Cốc Cốc là Material UI Select: adapter mở dropdown bằng `mousedown`, chọn
+    option `data-value="1"` và xác minh `input[name="type"] == "1"` trước khi
+    trả trạng thái `FILLED`.
 *   **Nội dung mẫu gửi báo cáo (tiếng Anh)**:
     ```
     The domain [DOMAIN_GIẢ_MẠO] is actively cloning our official website login panel to harvest customer passwords and OTP tokens. Please add this phishing URL to your browser security filters to safeguard users.

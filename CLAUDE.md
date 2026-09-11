@@ -511,6 +511,15 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
 - Quick Report gọi task one-time `fill_only` cho cả ba provider: Cloudflare điền
   URL/draft/contact, GSB điền URL/draft/taxonomy và Microsoft điền URL. Không có
   adapter GSB/Microsoft nào submit hoặc xử lý CAPTCHA.
+- Extension v2.2.0 thêm `adapters/chongluadao.js` và
+  `adapters/coccoc_safe.js`. Quick Report truyền nội dung community trung lập,
+  full URL, contact email và taxonomy cố định `Phishing`/`Trang web lừa đảo`;
+  hai adapter chỉ điền, không submit hoặc giải reCAPTCHA. Helper community giữ
+  link thủ công khi được gọi từ Check Domain mà không có task context.
+- Extension v2.2.1 sửa Cốc Cốc Material UI Select: không gọi `click()` trên
+  control để mở menu; phải phát `mousedown`, chọn option `data-value="1"` và
+  xác minh hidden input `name="type"` thực sự bằng `1`. Không được trả `FILLED`
+  chỉ vì đã tìm thấy text option.
 
 ### Domain Worker — chọn nhiều tài khoản và cache theo delivery
 

@@ -166,10 +166,13 @@ Các trang (xem sidebar bên trái):
   hiển thị và redact lỗi IMAP trước khi ghi. Delivery cũ thiếu metadata
   evidence luôn ở nhóm **chưa phân loại**, không suy đoán có hay không có ảnh.
 
-Trong khu vực **Browser Blocking** của **Check Domain** và **Quick Report** có
-thêm nút mở form báo cáo của **Chống Lừa Đảo** và **Cốc Cốc Safe**. Các nút chỉ
-mở trang chính thức ở tab mới để người vận hành tự điền/xác nhận; công cụ không
-tự gửi dữ liệu sang hai dịch vụ này.
+Trong khu vực **Browser Blocking**, **Quick Report** dùng Web Form Assistant
+v2.2.1 để mở và tự điền form **Chống Lừa Đảo** và **Cốc Cốc Safe** trên Chrome
+profile hiện tại. Adapter điền full URL, email liên hệ, nội dung trung lập và
+loại `Phishing`/`Trang web lừa đảo`; không tự giải CAPTCHA hoặc submit. **Check
+  Domain** vẫn giữ hai link mở form thủ công.
+  Riêng Cốc Cốc dùng sự kiện `mousedown` của Material UI và chỉ báo điền thành
+  công khi hidden field `type` có giá trị `1` tương ứng **Trang web lừa đảo**.
 
 Web UI gọi thẳng cùng các hàm trong `phishing_toolkit.py` mà CLI dùng (không viết
 lại logic riêng), nên kết quả giữa CLI và web luôn khớp nhau.

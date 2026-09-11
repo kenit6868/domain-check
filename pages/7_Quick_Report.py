@@ -198,6 +198,7 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
     registrar = result.get("registrar") or ""
     original_url = result.get("_original_url", f"https://{domain}")
     gsb_text = pt.generate_safebrowsing_report_text(domain, cfg, original_url)
+    community_text = pt.generate_community_report_text(domain, cfg, original_url)
 
     # Chỉ hiện khi có web form
     r_lower = registrar.lower()
@@ -307,7 +308,12 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
             else:
                 st.error(f"❌ Netcraft {status_text}")
 
-        render_community_report_buttons()
+        render_community_report_buttons(
+            target_url=original_url,
+            draft=community_text,
+            cfg=cfg,
+            key_scope=f"quick_{idx}",
+        )
         st.caption("Nội dung dán vào ô Additional details:")
         st.code(gsb_text, language=None)
 

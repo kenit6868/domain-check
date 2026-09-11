@@ -30,6 +30,12 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Adapter Google Safe Browsing và Microsoft SmartScreen từ Quick Report luôn
   `fill_only`, không tự giải CAPTCHA/submit; task chỉ được mang các field provider
   đã whitelist và extension chỉ có quyền trên các origin form chính thức.
+  Adapter Chống Lừa Đảo và Cốc Cốc Safe cũng chỉ `fill_only`, dùng nội dung
+  community trung lập thay vì draft gọi đích danh Google/Cloudflare, chọn đúng
+  loại phishing và không thao tác reCAPTCHA hoặc nút gửi.
+  Với Cốc Cốc, loại vi phạm là Material UI Select: phải phát `mousedown`, chọn
+  option `data-value="1"` và xác minh hidden `input[name="type"]` bằng `1`; chỉ
+  tìm thấy text option chưa đủ để báo `FILLED`.
 - `run_check()` là pipeline dùng chung giữa CLI và UI. Không tạo một pipeline
   kiểm tra domain khác trong page Streamlit.
 - Bản PyInstaller phải bundle Chromium cùng Playwright, không dựa vào browser
