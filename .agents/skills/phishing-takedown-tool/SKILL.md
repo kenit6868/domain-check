@@ -23,6 +23,13 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   dòng để retry/resume. Muốn dùng profile Chrome đang mở phải dùng extension cục
   bộ giới hạn origin + task one-time qua localhost; không dùng remote debugging
   trên default profile, không đọc/sao chép cookie, CAPTCHA hay HTML.
+- Web Form Assistant extension phải giữ coordinator không chứa selector provider;
+  mỗi adapter riêng tuân theo contract `matches`, `waitUntilReady`, `fill`,
+  `validate`, `captchaPending`, `submit`, `detectSuccess`. Thêm provider không
+  được làm thay đổi hành vi adapter Cloudflare đã kiểm thử.
+  Adapter Google Safe Browsing và Microsoft SmartScreen từ Quick Report luôn
+  `fill_only`, không tự giải CAPTCHA/submit; task chỉ được mang các field provider
+  đã whitelist và extension chỉ có quyền trên các origin form chính thức.
 - `run_check()` là pipeline dùng chung giữa CLI và UI. Không tạo một pipeline
   kiểm tra domain khác trong page Streamlit.
 - Bản PyInstaller phải bundle Chromium cùng Playwright, không dựa vào browser

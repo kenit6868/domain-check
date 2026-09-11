@@ -93,8 +93,9 @@ Các trang (xem sidebar bên trái):
 - **Quick Report** — kiểm tra nhanh nhiều URL, hiển thị cloaking và cho phép xác
   minh thụ động bằng Playwright khi HTTP chưa đủ kết luận. Trong **Browser
   Blocking**, Google Safe Browsing và Microsoft SmartScreen mở form chính thức
-  ở tab mới kèm query `url` của đúng URL đang báo cáo để người vận hành kiểm tra,
-  bổ sung nội dung và xác nhận gửi; nút tự điền form bằng Playwright đang tạm ẩn.
+  trên Chrome profile hiện tại qua Web Form Assistant. Google được điền URL,
+  nội dung và taxonomy đã chọn; Microsoft được điền URL. Cả hai chỉ `fill_only`,
+  người vận hành vẫn kiểm tra form và tự xác nhận gửi; Playwright vẫn tạm ẩn.
   Riêng Cloudflare dùng một nút **Mở & tự điền Cloudflare Abuse**: mở form bằng
   Chrome profile có extension và tự điền URL/draft/contact/company. Quick Report
   chỉ điền, không submit; nút mở form Cloudflare thủ công cũ đã được thay thế.
@@ -115,6 +116,14 @@ Các trang (xem sidebar bên trái):
   Extension v1.0.5 điền cả hai input email theo thứ tự hiển thị và kiểm tra lại
   giá trị sau React rerender. Turnstile chỉ hỗ trợ chờ người vận hành xác minh;
   tool không tự giải hoặc vượt CAPTCHA.
+  Extension v1.0.6 ánh xạ Confirm email từ caption DOM và fallback input ngay sau
+  email chính; badge `email fields=2/2` xác nhận cả hai giá trị đã bám vào form.
+  Extension v2.0.0 tách Cloudflare thành adapter chuẩn (`matches`, `waitUntilReady`,
+  `fill`, `validate`, `captchaPending`, `submit`, `detectSuccess`); coordinator
+  chỉ nhận task và điều phối, không chứa selector riêng của provider.
+  Extension v2.1.0 thêm adapter Google Safe Browsing và Microsoft SmartScreen;
+  quyền host chỉ giới hạn ở ba form chính thức và localhost. Hai adapter mới
+  chỉ tự điền từ Quick Report, không tự xử lý CAPTCHA hoặc submit.
 - **Domain Worker** — nút precheck kiểm tra email và cloaking đồng thời; case
   cloaking chỉ được tách ngay khi có email nhận, còn domain thường mới đi vào
   job gửi batch. IP/ASN Cloudflare chỉ được xem là proxy/CDN: tool không gửi

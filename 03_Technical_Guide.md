@@ -6,13 +6,14 @@
 ### I. PHA 1: THU THẬP CHỨNG CỨ & CHẶN NHANH ĐẦU CUỐI (TỐC ĐỘ < 1 GIỜ)
 
 #### 1. Chặn trình duyệt người dùng (Safe Browsing & SmartScreen)
-*   **Google Safe Browsing Form**: dùng nút **Mở Google Safe Browsing** trong
+*   **Google Safe Browsing Form**: dùng nút **Mở & tự điền Google** trong
     Quick Report (hoặc [Báo cáo Google](https://safebrowsing.google.com/safebrowsing/report_phish/)).
-*   **Microsoft SmartScreen Form**: dùng nút **Mở Microsoft SmartScreen** trong
+*   **Microsoft SmartScreen Form**: dùng nút **Mở & tự điền Microsoft** trong
     Quick Report (hoặc [Báo cáo Microsoft](https://www.microsoft.com/wdsi/support/report-unsafe-site-guest)).
-    Hai nút mở form chính thức kèm query `url` của URL đang báo cáo để người vận
-    hành kiểm tra, bổ sung nội dung và tự xác nhận; tự điền bằng Playwright tại
-    Quick Report đang tạm ẩn.
+    Hai nút mở form chính thức kèm query `url`, đồng thời gửi task một lần cho
+    Web Form Assistant trên Chrome profile hiện tại. Google nhận URL, nội dung và
+    taxonomy; Microsoft nhận URL. Cả hai luôn `fill_only`: không tự giải CAPTCHA
+    hoặc submit, và tự điền bằng Playwright tại Quick Report vẫn tạm ẩn.
 *   **Cloudflare**: IP/ASN Cloudflare chỉ chứng minh lớp proxy/CDN, không phải
     origin hosting. Không gửi `abuse@cloudflare.com`; dùng form chính thức
     [Cloudflare Phishing Abuse](https://abuse.cloudflare.com/phishing) khi cần báo cáo lớp này.
@@ -29,6 +30,11 @@
     Với một URL ở Quick Report, nút Cloudflare đăng ký cùng loại task extension
     nhưng khóa `fill_only`: vẫn mở form thật trên profile hiện tại, không tạo
     batch ledger và không bao giờ submit từ Quick Report.
+    Extension v2 dùng coordinator chung và adapter Cloudflare riêng. Adapter chịu
+    trách nhiệm match origin, chờ field, fill, validate, trạng thái CAPTCHA,
+    submit và xác nhận thành công; coordinator chỉ quản lý task/reload/report.
+    Bản v2.1 thêm adapter riêng cho Google Safe Browsing và Microsoft SmartScreen,
+    giới hạn quyền extension đúng ba origin chính thức cùng localhost.
 *   **Bản Windows đóng gói**: `build_app.bat` cài Chromium vào thư mục hermetic
     của Playwright, còn spec copy nó vào đường dẫn browser của runtime frozen
     trước khi PyInstaller thu thập dữ liệu. Vì vậy phải chia sẻ

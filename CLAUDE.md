@@ -499,8 +499,18 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
   Comments. Trang trắng được reload đúng một lần bằng marker trong sessionStorage.
   Bridge fetch phải chạy trong `background.js` MV3 service worker; content script
   nhắn qua `chrome.runtime.sendMessage`, không fetch localhost trực tiếp.
-- Quick Report gọi `open_quick_report_form()` cho Cloudflare, tạo task one-time
-  `fill_only` không ledger/submit và thay hoàn toàn link form thủ công cũ.
+  Confirm email dùng `byCaption()` quét text node trong label/span/div/p, rồi
+  fallback input ngay sau email chính; badge báo số field có đúng giá trị `0..2/2`.
+  Từ extension v2.0.0, `content.js` là coordinator chung và mọi selector/hành vi
+  Cloudflare nằm trong `adapters/cloudflare.js`. Adapter contract gồm `matches`,
+  `waitUntilReady`, `fill`, `validate`, `captchaPending`, `submit`, `detectSuccess`.
+- Từ v2.1.0, manifest nạp thêm `adapters/google_gsb.js` và
+  `adapters/microsoft_smartscreen.js`, chỉ cấp host permission cho Cloudflare,
+  GSB, Microsoft và localhost. `open_profile_form()` whitelist provider/field
+  trước khi đăng ký task.
+- Quick Report gọi task one-time `fill_only` cho cả ba provider: Cloudflare điền
+  URL/draft/contact, GSB điền URL/draft/taxonomy và Microsoft điền URL. Không có
+  adapter GSB/Microsoft nào submit hoặc xử lý CAPTCHA.
 
 ### Domain Worker — chọn nhiều tài khoản và cache theo delivery
 

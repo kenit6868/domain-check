@@ -250,21 +250,34 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
         category = dc2.selectbox("", categories, index=categories.index(default_cat),
                                  key=f"cat_{idx}", label_visibility="collapsed")
 
-        # Quick Report opens official forms only. The operator pastes the URL and
-        # prepared description, then reviews and submits each form manually.
+        # Supported forms are filled through the local extension on the current
+        # Chrome profile. The operator reviews and submits every form manually.
         bc1, bc2, bc3, _bsp = st.columns([2, 2, 2, 6])
-        bc1.link_button(
-            "🛡️ Mở Google Safe Browsing",
-            _report_form_url(_GSB_REPORT_URL, original_url),
+        if bc1.button(
+            "Mở & tự điền Google",
+            key=f"gsb_profile_{idx}",
             type="primary",
-            help="Mở form Google Safe Browsing chính thức với URL đang báo cáo.",
-        )
-        bc2.link_button(
-            "🛡️ Mở Microsoft SmartScreen",
-            _report_form_url(_MICROSOFT_REPORT_URL, original_url),
+            icon=":material/shield:",
+            help="Mở GSB trên Chrome profile hiện tại và điền URL/nội dung; bạn tự xác nhận gửi.",
+        ):
+            res = cfw.open_profile_form(
+                "google_gsb", _report_form_url(_GSB_REPORT_URL, original_url),
+                original_url, gsb_text, cfg,
+                threat_type=threat, threat_category=category,
+            )
+            st.success("Đã mở GSB và gửi task tự điền.") if "error" not in res else st.error(res["error"])
+        if bc2.button(
+            "Mở & tự điền Microsoft",
+            key=f"ms_profile_{idx}",
             type="primary",
-            help="Mở form Microsoft SmartScreen chính thức với URL đang báo cáo.",
-        )
+            icon=":material/shield:",
+            help="Mở SmartScreen trên Chrome profile hiện tại và điền URL; bạn tự hoàn tất và gửi.",
+        ):
+            res = cfw.open_profile_form(
+                "microsoft_smartscreen", _report_form_url(_MICROSOFT_REPORT_URL, original_url),
+                original_url, "", cfg, language="Vietnamese",
+            )
+            st.success("Đã mở SmartScreen và gửi task tự điền.") if "error" not in res else st.error(res["error"])
 
         if _ENABLE_PLAYWRIGHT_FORM_AUTOMATION:
             if bc1.button("🤖 Tự điền GSB", key=f"gsb_{idx}", help="Tự điền form bằng Playwright"):

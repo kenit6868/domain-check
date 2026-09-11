@@ -48,7 +48,7 @@ class QuickReportRestoreTests(unittest.TestCase):
         self.assertIn("target_url=original_url", source)
         self.assertIn("st.code(registry_text", source)
 
-    def test_page_uses_official_manual_browser_blocking_forms_by_default(self):
+    def test_page_uses_profile_extension_for_browser_blocking_forms(self):
         source = (
             Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"
         ).read_text(encoding="utf-8")
@@ -57,8 +57,11 @@ class QuickReportRestoreTests(unittest.TestCase):
         self.assertIn("_MICROSOFT_REPORT_URL", source)
         self.assertIn("def _report_form_url", source)
         self.assertIn("urlencode({'url': target_url})", source)
-        self.assertIn("Mở Google Safe Browsing", source)
-        self.assertIn("Mở Microsoft SmartScreen", source)
+        self.assertIn('"google_gsb", _report_form_url(_GSB_REPORT_URL, original_url)', source)
+        self.assertIn('"microsoft_smartscreen", _report_form_url(_MICROSOFT_REPORT_URL, original_url)', source)
+        self.assertIn("Mở & tự điền Google", source)
+        self.assertIn("Mở & tự điền Microsoft", source)
+        self.assertIn("threat_type=threat, threat_category=category", source)
 
     def test_manual_form_link_encodes_the_full_reported_url(self):
         page_path = Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"

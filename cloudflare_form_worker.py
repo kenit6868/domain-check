@@ -298,8 +298,17 @@ def open_quick_report_form(target_url: str, draft: str, cfg: dict) -> dict:
 
     Quick Report deliberately has no submit mode, ledger, retry, or batch state.
     """
+    return open_profile_form("cloudflare", FORM_URL, target_url, draft, cfg)
+
+
+def open_profile_form(provider: str, form_url: str, target_url: str, draft: str,
+                      cfg: dict, **provider_fields) -> dict:
+    """Open one fill-only provider task in the current Chrome profile."""
     from urllib.parse import urlencode
     from cloudflare_profile_bridge import profile_bridge
+
+    if provider not in {"cloudflare", "google_gsb", "microsoft_smartscreen"}:
+        return {"error": "Provider form không được hỗ trợ."}
 
     bridge = profile_bridge()
     task_status = {"state": "OPENING_PROFILE", "result": ""}
@@ -310,15 +319,18 @@ def open_quick_report_form(target_url: str, draft: str, cfg: dict) -> dict:
     payload = {
         "target_url": normalize_target(target_url),
         "draft": str(draft or ""),
+        "provider": provider,
         "mode": "fill_only",
         "_contact_name": cfg.get("contact_name", ""),
         "_contact_email": cfg.get("contact_email", ""),
         "_brand_name": cfg.get("brand_name", ""),
     }
+    payload.update({key: str(value or "") for key, value in provider_fields.items()
+                    if key in {"threat_type", "threat_category", "language"}})
     token = bridge.register(payload, checkpoint)
     _QUICK_TASKS[token] = task_status
     fragment = urlencode({"ptask": token, "port": bridge.port})
-    if not open_in_installed_chrome(f"{FORM_URL}#{fragment}"):
+    if not open_in_installed_chrome(f"{form_url}#{fragment}"):
         _QUICK_TASKS.pop(token, None)
         return {"error": "Không tìm thấy Google Chrome đã cài đặt."}
     return {"status": "opened", "token": token}

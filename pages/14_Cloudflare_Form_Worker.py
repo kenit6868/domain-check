@@ -26,12 +26,12 @@ with st.expander("Thiết lập Chrome profile cá nhân (bắt buộc lần đ�
         "1. Trên đúng profile Chrome bạn muốn dùng, mở `chrome://extensions`.\n"
         "2. Bật **Developer mode** → **Load unpacked**.\n"
         "3. Chọn đúng thư mục extension bên dưới. Sau khi cài, không cần đóng Chrome.\n"
-        "4. Nếu đã cài từ trước, bấm **Reload** và kiểm tra extension đang ở bản **1.0.5**.\n"
+        "4. Nếu đã cài từ trước, bấm **Reload** và kiểm tra extension đang ở bản **2.1.0**.\n"
         "5. Trước khi chạy, hãy click/focus một cửa sổ của profile đó để Chrome dùng nó làm profile hiện tại."
     )
     st.code(str(cfw.extension_directory()), language=None)
     extension_ready = st.checkbox(
-        "Tôi đã cài/bật extension PhishingTool Cloudflare Form Worker trên profile Chrome hiện tại.",
+        "Tôi đã cài/bật extension PhishingTool Web Form Assistant trên profile Chrome hiện tại.",
         key="cfw_extension_ready",
     )
 

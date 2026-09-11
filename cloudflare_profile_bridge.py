@@ -79,12 +79,19 @@ class ProfileBridge:
 
     def register(self, payload: dict, callback) -> str:
         token = secrets.token_urlsafe(24)
+        provider = str(payload.get("provider") or "cloudflare")
+        if provider not in {"cloudflare", "google_gsb", "microsoft_smartscreen"}:
+            provider = "cloudflare"
         safe = {
             "target_url": str(payload.get("target_url") or ""),
             "draft": str(payload.get("draft") or ""),
             "contact_name": str(payload.get("_contact_name") or ""),
             "contact_email": str(payload.get("_contact_email") or ""),
             "brand_name": str(payload.get("_brand_name") or ""),
+            "provider": provider,
+            "threat_type": str(payload.get("threat_type") or ""),
+            "threat_category": str(payload.get("threat_category") or ""),
+            "language": str(payload.get("language") or ""),
             "mode": str(payload.get("mode") or "fill_only"),
             "_callback": callback,
         }

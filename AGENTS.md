@@ -268,8 +268,20 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
   Extension v1.0.5 phải điền/kiểm tra lại cả Email và Confirm email sau React
   rerender. Không tích hợp dịch vụ hay logic tự giải/vượt Cloudflare Turnstile;
   chỉ chờ operator hoàn tất rồi mới tiếp tục submit đã được xác nhận.
+  Extension v1.0.6 ánh xạ Confirm email từ caption DOM bất kể caption có phải
+  `<label>` hay không, fallback theo input kế tiếp và badge phải báo `2/2`.
   Quick Report dùng cùng profile bridge cho nút Cloudflare duy nhất nhưng luôn
   `fill_only`; không giữ song song link mở form cũ và không cho submit tại page này.
+  Phase adapter 1 hoàn tất ở extension v2.0.0: `content.js` chỉ điều phối task;
+  `adapters/cloudflare.js` sở hữu selector/fill/validate/CAPTCHA/submit/success
+  theo contract chung để thêm provider mới mà không sửa logic Cloudflare.
+  Phase adapter 2 hoàn tất ở extension v2.1.0: Quick Report dùng cùng profile
+  bridge để tự điền Google Safe Browsing (URL, draft, taxonomy) và Microsoft
+  SmartScreen (URL); cả hai luôn `fill_only`, không tự giải CAPTCHA/submit.
+  Manifest chỉ cấp quyền ba origin form chính thức và localhost; task bridge
+  whitelist provider/field, không nhận dữ liệu browser nhạy cảm. Đã kiểm tra
+  syntax toàn bộ JavaScript adapter/coordinator, 288/288 unittest, compileall,
+  pip check và diff check; không mở form hoặc submit báo cáo thật trong test.
 
 - 2026-09-11 — Sửa build Browser Evidence cho bản Windows share: `build_app.bat`
   cài rõ Chromium + Chromium Headless Shell với `PLAYWRIGHT_BROWSERS_PATH=0`

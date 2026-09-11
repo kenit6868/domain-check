@@ -91,6 +91,29 @@ class CloudflareFormWorkerTests(unittest.TestCase):
         self.assertEqual(callback_holder["payload"]["_brand_name"], "Example Brand")
         self.assertIn("ptask=one-time-token", opener.call_args.args[0])
 
+    def test_provider_form_passes_taxonomy_in_fill_only_task(self):
+        captured = {}
+        bridge = Mock(port=45678)
+        bridge.register.side_effect = lambda payload, callback: captured.update(payload=payload) or "token"
+        with patch("cloudflare_profile_bridge.profile_bridge", return_value=bridge), patch.object(
+            cfw, "open_in_installed_chrome", return_value=True
+        ) as opener:
+            result = cfw.open_profile_form(
+                "google_gsb", "https://safebrowsing.google.com/safebrowsing/report_phish/?url=x",
+                "https://example.test/login", "Evidence", {},
+                threat_type="Social Engineering", threat_category="Other Phishing",
+                cookie="not-allowed",
+            )
+        self.assertEqual(result["status"], "opened")
+        self.assertEqual(captured["payload"]["provider"], "google_gsb")
+        self.assertEqual(captured["payload"]["mode"], "fill_only")
+        self.assertNotIn("cookie", captured["payload"])
+        self.assertIn("url=x#ptask=token", opener.call_args.args[0])
+
+    def test_provider_form_rejects_unknown_adapter(self):
+        result = cfw.open_profile_form("unknown", "https://example.test", "example.test", "", {})
+        self.assertIn("error", result)
+
 
 if __name__ == "__main__":
     unittest.main()

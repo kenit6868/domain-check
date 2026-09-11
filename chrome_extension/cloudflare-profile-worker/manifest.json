@@ -1,16 +1,27 @@
 {
   "manifest_version": 3,
-  "name": "PhishingTool Cloudflare Form Worker",
-  "version": "1.0.5",
-  "description": "Fills the official Cloudflare phishing form from local, operator-approved tasks.",
+  "name": "PhishingTool Web Form Assistant",
+  "version": "2.1.0",
+  "description": "Fills supported official abuse forms from local, operator-approved tasks.",
   "background": {"service_worker": "background.js"},
   "host_permissions": [
     "https://abuse.cloudflare.com/*",
+    "https://safebrowsing.google.com/*",
+    "https://www.microsoft.com/*",
     "http://127.0.0.1/*"
   ],
   "content_scripts": [{
-    "matches": ["https://abuse.cloudflare.com/*"],
-    "js": ["content.js"],
+    "matches": [
+      "https://abuse.cloudflare.com/*",
+      "https://safebrowsing.google.com/*",
+      "https://www.microsoft.com/*"
+    ],
+    "js": [
+      "adapters/cloudflare.js",
+      "adapters/google_gsb.js",
+      "adapters/microsoft_smartscreen.js",
+      "content.js"
+    ],
     "run_at": "document_idle"
   }]
 }
