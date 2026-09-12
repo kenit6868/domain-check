@@ -46,10 +46,11 @@ token, contact, draft, cookie hoặc giá trị CAPTCHA vào popup/status messag
 Popup có checklist boolean/nhãn field và ba action: refill, recheck, copy safe
 diagnostic. Refill gọi lại đúng adapter/task trong tab; recheck chỉ chạy
 wait/validate; không action nào submit hoặc thao tác CAPTCHA.
-Service worker ánh xạ state thành badge theo tab bằng `chrome.action`:
+Content script không render panel/overlay trên trang; toàn bộ checklist và action
+refill/recheck nằm trong popup. Service worker ánh xạ state thành badge theo tab:
 `WORKING=…`, `FILLED/SUBMITTED=✓`, CAPTCHA manual=`C`, manual khác=`!`,
-`FAILED=×`. Khi tab navigation, badge và status cũ phải được xóa trước khi
-content script publish trạng thái mới.
+`FAILED=×`. Khi tab navigation, badge và status cũ phải được xóa
+trước khi content script publish trạng thái mới.
 
 Cloudflare Worker ưu tiên `cloudflare_abuse_api.py`: verify token bằng endpoint
 user token, kiểm tra entitlement bằng GET Abuse Reports và chỉ POST

@@ -168,8 +168,10 @@ Các trang (xem sidebar bên trái):
   draft, cookie hoặc giá trị CAPTCHA. Checklist cho biết field đã điền và bước
   CAPTCHA/submit còn thủ công; nút **Điền lại**, **Kiểm tra lại** và **Sao chép
   chẩn đoán** chỉ làm việc trên tab hiện tại, không tự submit hoặc click CAPTCHA.
-  Badge trên icon cập nhật riêng theo tab: `…` đang xử lý, `✓` đã điền/submit,
-  `C` chờ CAPTCHA, `!` cần thao tác thủ công và `×` khi adapter gặp lỗi.
+  Extension không chèn panel nổi vào trang form; trạng thái và thao tác hỗ trợ
+  chỉ nằm trong popup để không che giao diện website. Badge trên icon cập nhật
+  riêng theo tab: `…` đang xử lý, `✓` đã điền/submit, `C` chờ CAPTCHA, `!` cần
+  thao tác thủ công và `×` khi adapter gặp lỗi.
 - **Domain Worker** — nút precheck kiểm tra email và cloaking đồng thời; case
   cloaking chỉ được tách ngay khi có email nhận, còn domain thường mới đi vào
   job gửi batch. IP/ASN Cloudflare chỉ được xem là proxy/CDN: tool không gửi

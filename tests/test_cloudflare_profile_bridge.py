@@ -59,8 +59,8 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
         ])
         self.assertNotIn("<all_urls>", manifest["host_permissions"])
         self.assertEqual(manifest["background"]["service_worker"], "background.js")
-        coordinator = (root / "chrome_extension/cloudflare-profile-worker/content.js").read_text()
-        adapter = (root / "chrome_extension/cloudflare-profile-worker/adapters/cloudflare.js").read_text()
+        coordinator = (root / "chrome_extension/cloudflare-profile-worker/content.js").read_text(encoding="utf-8")
+        adapter = (root / "chrome_extension/cloudflare-profile-worker/adapters/cloudflare.js").read_text(encoding="utf-8")
         self.assertEqual(manifest["content_scripts"][0]["js"], [
             "adapters/cloudflare.js",
             "adapters/google_gsb.js",
@@ -91,6 +91,9 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
         self.assertIn("renderChecklist", popup)
         self.assertIn("assistant-command", coordinator)
         self.assertIn("buildChecklist", coordinator)
+        self.assertIn("runAssistantCommand", coordinator)
+        self.assertNotIn("attachShadow", coordinator)
+        self.assertNotIn("pt-form-assistant", coordinator)
         background = (root / "chrome_extension/cloudflare-profile-worker/background.js").read_text(encoding="utf-8")
         self.assertIn("chrome.action.setBadgeText", background)
         self.assertIn("chrome.action.setBadgeBackgroundColor", background)

@@ -52,7 +52,8 @@
     nguyên thư mục `dist/PhishingTool/`, không chỉ file `.exe`; máy nhận không
     cần cài Python hay chạy `playwright install` để tạo Browser Evidence.
     Extension đi kèm có icon PNG 16/32/48/128; sau khi cập nhật bản build cần
-    Reload extension tại trang quản lý extension của Chrome. Từ v2.6.0, bấm icon
+    Reload extension tại trang quản lý extension của Chrome. Từ v2.6.0, extension
+    không chèn panel nổi lên form. Bấm icon
     extension để mở popup chẩn đoán mini: xem phiên bản, form/adapter, trạng thái
     điền gần nhất, checklist field và thông báo đã rút gọn của tab hiện tại.
     **Điền lại** phục hồi field bị React xóa; **Kiểm tra lại** chỉ validate;

@@ -247,6 +247,13 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-13 — Web Form Assistant rollback panel nổi trên trang theo phản hồi
+  trải nghiệm; checklist, **Điền lại** và **Kiểm tra lại** chỉ còn trong popup.
+  Badge ghim cũng được khôi phục về bộ ký hiệu `…`, `✓`, `C`, `!`, `×` của
+  v2.6.0. File chính: extension `content.js`,
+  `background.js`, manifest và test; tài liệu: README, CLAUDE, Technical Guide,
+  AGENTS và skill dự án. Không thay đổi hành vi submit/CAPTCHA.
+
 - 2026-09-13 — Web Form Assistant v2.6.0 thêm badge trạng thái theo từng tab:
   `…` đang xử lý, `✓` đã điền/submit, `C` chờ CAPTCHA thủ công, `!` cần thao tác
   và `×` khi lỗi. Service worker chỉ dùng state/message đã sanitize, đổi màu và

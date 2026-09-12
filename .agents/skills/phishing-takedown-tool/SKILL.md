@@ -101,6 +101,9 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
 - Gửi email, submit report, đọc IMAP và mở URL nghi ngờ đều là hành động ngoài
   hệ thống: chỉ thực hiện khi người dùng cho phép rõ ràng; mặc định là draft/
   preview.
+- Web Form Assistant không chèn panel/overlay vào trang web; checklist, refill và
+  recheck chỉ nằm trong popup, không có action submit/CAPTCHA. Badge Chrome dùng
+  ký hiệu trạng thái theo tab và phải xóa trạng thái cũ khi navigation.
 - Helper SMTP phải tôn trọng transport của từng account: port 465/`ssl=true`
   dùng implicit TLS; port khác mặc định STARTTLS và chỉ dùng SMTP thường khi có
   `starttls=false` rõ ràng. Gửi bằng `EmailMessage`/`send_message`; email evidence

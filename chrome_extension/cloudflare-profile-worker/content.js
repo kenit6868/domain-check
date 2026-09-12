@@ -6,10 +6,6 @@
   if (!token || !/^\d{2,5}$/.test(port || "")) return;
   sessionStorage.setItem("pt-cfw-token", token);
   sessionStorage.setItem("pt-cfw-port", port);
-  const badge = document.createElement("div");
-  badge.id = "pt-cfw-status";
-  Object.assign(badge.style, {position:"fixed",right:"12px",bottom:"12px",zIndex:"2147483647",padding:"8px 12px",borderRadius:"8px",background:"#172554",color:"white",font:"13px sans-serif",boxShadow:"0 2px 10px #0005"});
-  (document.body || document.documentElement).appendChild(badge);
   let activeAdapter = null;
   let activeTask = null;
   let activeFields = null;
@@ -48,6 +44,25 @@
     }
     return items.slice(0, 12);
   };
+  const runAssistantCommand = async (action) => {
+    if (!activeAdapter || !activeTask) throw new Error("No active form task on this tab.");
+    activeFields = await activeAdapter.waitUntilReady({document, status, sleep});
+    if (!activeFields) throw new Error("Form fields are not available.");
+    if (action === "refill") {
+      const filled = await activeAdapter.fill(activeTask, activeFields, {document, sleep});
+      currentChecklist = buildChecklist();
+      status(`${activeAdapter.id}@${activeAdapter.version}; ${filled.status}`, !filled.valid,
+        filled.valid ? "FILLED" : "NEEDS_MANUAL");
+    } else if (action === "recheck") {
+      const validation = activeAdapter.validate(activeFields, document);
+      currentChecklist = buildChecklist();
+      status(validation.valid ? "Form fields checked." : validation.message,
+        !validation.valid, validation.valid ? "FILLED" : "NEEDS_MANUAL");
+    } else {
+      throw new Error("Unsupported assistant action.");
+    }
+    return latestPublicStatus;
+  };
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "assistant-read-status") {
       sendResponse({ok: true, status: latestPublicStatus});
@@ -55,29 +70,12 @@
     }
     if (message?.type !== "assistant-command") return false;
     (async () => {
-      if (!activeAdapter || !activeTask) throw new Error("No active form task on this tab.");
-      activeFields = await activeAdapter.waitUntilReady({document, status, sleep});
-      if (!activeFields) throw new Error("Form fields are not available.");
-      if (message.action === "refill") {
-        const filled = await activeAdapter.fill(activeTask, activeFields, {document, sleep});
-        currentChecklist = buildChecklist();
-        status(`${activeAdapter.id}@${activeAdapter.version}; ${filled.status}`, !filled.valid,
-          filled.valid ? "FILLED" : "NEEDS_MANUAL");
-      } else if (message.action === "recheck") {
-        const validation = activeAdapter.validate(activeFields, document);
-        currentChecklist = buildChecklist();
-        status(validation.valid ? "Form fields checked." : validation.message,
-          !validation.valid, validation.valid ? "FILLED" : "NEEDS_MANUAL");
-      } else {
-        throw new Error("Unsupported popup action.");
-      }
-      sendResponse({ok: true, status: latestPublicStatus});
+      const nextStatus = await runAssistantCommand(message.action);
+      sendResponse({ok: true, status: nextStatus});
     })().catch((error) => sendResponse({ok: false, error: cleanStatusText(error)}));
     return true;
   });
   const status = (text, error = false, state = "WORKING") => {
-    badge.textContent = `PhishingTool: ${text}`;
-    badge.style.background = error ? "#991b1b" : "#172554";
     latestPublicStatus = {
       state, message: cleanStatusText(text),
       adapterId: activeAdapter?.id || "", adapterVersion: activeAdapter?.version || "",
