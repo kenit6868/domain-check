@@ -89,13 +89,17 @@
       const confirm = byCaption(doc, "Confirm email address", "input") ||
         first(doc, ['input[name*="confirm-email" i]','input[id*="confirm-email" i]','input[name*="confirm_email" i]','input[id*="confirm_email" i]','input[name*="confirmEmail" i]','input[id*="confirmEmail" i]']) ||
         emailInputs.find((element) => element !== email) || (position >= 0 ? textInputs[position + 1] : null);
+      fields.email = email;
+      fields.confirm = confirm;
       setValue(email, task.contact_email);
       setValue(confirm, task.contact_email);
       await sleep(150);
       if (email && email.value !== task.contact_email) setValue(email, task.contact_email);
       if (confirm && confirm.value !== task.contact_email) setValue(confirm, task.contact_email);
-      setValue(byCaption(doc, "Company name", "input") || first(doc, ['input[name*="company" i]','input[id*="company" i]']), task.brand_name);
-      setValue(byCaption(doc, "Name", "input") || first(doc, ['input[name="name"]','input[name="reporterName"]']), task.contact_name);
+      fields.company = byCaption(doc, "Company name", "input") || first(doc, ['input[name*="company" i]','input[id*="company" i]']);
+      fields.name = byCaption(doc, "Name", "input") || first(doc, ['input[name="name"]','input[name="reporterName"]']);
+      setValue(fields.company, task.brand_name);
+      setValue(fields.name, task.contact_name);
       const emailReady = !!email && email.value === task.contact_email;
       const confirmReady = !!confirm && confirm.value === task.contact_email;
       return {

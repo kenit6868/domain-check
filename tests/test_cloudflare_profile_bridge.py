@@ -34,7 +34,7 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
     def test_extension_is_restricted_to_supported_forms_and_localhost(self):
         root = Path(__file__).resolve().parents[1]
         manifest = json.loads((root / "chrome_extension/cloudflare-profile-worker/manifest.json").read_text())
-        self.assertEqual(manifest["version"], "2.3.0")
+        self.assertEqual(manifest["version"], "2.6.0")
         expected_icons = {
             "16": "icons/icon16.png",
             "32": "icons/icon32.png",
@@ -43,6 +43,10 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
         }
         self.assertEqual(manifest["icons"], expected_icons)
         self.assertEqual(manifest["action"]["default_icon"]["16"], expected_icons["16"])
+        self.assertEqual(manifest["action"]["default_popup"], "popup.html")
+        self.assertEqual(manifest["permissions"], ["activeTab"])
+        for popup_file in ("popup.html", "popup.css", "popup.js"):
+            self.assertTrue((root / "chrome_extension/cloudflare-profile-worker" / popup_file).is_file())
         for relative_path in expected_icons.values():
             self.assertTrue((root / "chrome_extension/cloudflare-profile-worker" / relative_path).is_file())
         self.assertEqual(manifest["content_scripts"][0]["matches"], [
@@ -75,6 +79,24 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
         self.assertIn("Company name", adapter)
         self.assertNotIn("textarea[name=\"comments\"]", adapter)
         self.assertIn("bridge-fetch", coordinator)
+        self.assertIn("assistant-status", coordinator)
+        self.assertIn("assistant-read-status", coordinator)
+        popup = (root / "chrome_extension/cloudflare-profile-worker/popup.js").read_text(encoding="utf-8")
+        self.assertIn("assistant-get-status", popup)
+        self.assertIn("assistant-read-status", popup)
+        self.assertNotIn("ptask", popup)
+        self.assertIn('runCommand("refill")', popup)
+        self.assertIn('runCommand("recheck")', popup)
+        self.assertIn("navigator.clipboard.writeText(diagnostic)", popup)
+        self.assertIn("renderChecklist", popup)
+        self.assertIn("assistant-command", coordinator)
+        self.assertIn("buildChecklist", coordinator)
+        background = (root / "chrome_extension/cloudflare-profile-worker/background.js").read_text(encoding="utf-8")
+        self.assertIn("chrome.action.setBadgeText", background)
+        self.assertIn("chrome.action.setBadgeBackgroundColor", background)
+        self.assertIn('text: "C"', background)
+        self.assertIn('text: "✓"', background)
+        self.assertIn('text: "×"', background)
 
     def test_adapter_contract_is_complete(self):
         root = Path(__file__).resolve().parents[1]

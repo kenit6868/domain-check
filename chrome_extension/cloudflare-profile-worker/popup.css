@@ -1,0 +1,30 @@
+:root { color-scheme: dark; font-family: Inter, "Segoe UI", sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; width: 340px; background: #0f172a; color: #e2e8f0; }
+header { display: flex; gap: 12px; align-items: center; padding: 16px; background: linear-gradient(135deg, #172554, #1e3a8a); }
+header img { width: 40px; height: 40px; }
+h1 { margin: 0; font-size: 16px; }
+header p { margin: 3px 0 0; color: #bfdbfe; font-size: 12px; }
+main { padding: 14px 16px 16px; }
+.connection { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+#dot { width: 9px; height: 9px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 3px #f59e0b22; }
+#dot.ok { background: #22c55e; box-shadow: 0 0 0 3px #22c55e22; }
+#dot.error { background: #ef4444; box-shadow: 0 0 0 3px #ef444422; }
+dl { margin: 0; border: 1px solid #334155; border-radius: 10px; overflow: hidden; }
+dl div { display: grid; grid-template-columns: 105px 1fr; gap: 8px; padding: 9px 10px; border-bottom: 1px solid #334155; }
+dl div:last-child { border-bottom: 0; }
+dt { color: #94a3b8; font-size: 12px; }
+dd { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+section { margin-top: 12px; padding: 10px; border-radius: 10px; background: #1e293b; }
+h2 { margin: 0 0 5px; font-size: 12px; color: #93c5fd; }
+section p { margin: 0; font-size: 12px; line-height: 1.45; }
+ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 5px; font-size: 12px; }
+li.ok::before { content: "✓ "; color: #4ade80; }
+li.pending::before { content: "○ "; color: #fbbf24; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 12px; }
+button { border: 1px solid #475569; border-radius: 8px; padding: 8px; color: #e2e8f0; background: #1e293b; cursor: pointer; font-size: 12px; }
+button:hover { background: #334155; }
+button:disabled { opacity: .45; cursor: default; }
+#copy { grid-column: 1 / -1; }
+#action-result { min-height: 16px; margin: 7px 0 0; color: #93c5fd; font-size: 11px; }
+.privacy { margin: 12px 0 0; color: #64748b; font-size: 11px; line-height: 1.4; }

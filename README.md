@@ -162,6 +162,14 @@ Các trang (xem sidebar bên trái):
   Extension v2.1.0 thêm adapter Google Safe Browsing và Microsoft SmartScreen;
   quyền host chỉ giới hạn ở ba form chính thức và localhost. Hai adapter mới
   chỉ tự điền từ Quick Report, không tự xử lý CAPTCHA hoặc submit.
+  Extension v2.6.0 có popup mini khi bấm icon: hiển thị phiên bản extension,
+  hostname, adapter/version, trạng thái và thông báo gần nhất của tab hiện tại.
+  Popup chỉ nhận metadata chẩn đoán đã rút gọn, không hiển thị token, email,
+  draft, cookie hoặc giá trị CAPTCHA. Checklist cho biết field đã điền và bước
+  CAPTCHA/submit còn thủ công; nút **Điền lại**, **Kiểm tra lại** và **Sao chép
+  chẩn đoán** chỉ làm việc trên tab hiện tại, không tự submit hoặc click CAPTCHA.
+  Badge trên icon cập nhật riêng theo tab: `…` đang xử lý, `✓` đã điền/submit,
+  `C` chờ CAPTCHA, `!` cần thao tác thủ công và `×` khi adapter gặp lỗi.
 - **Domain Worker** — nút precheck kiểm tra email và cloaking đồng thời; case
   cloaking chỉ được tách ngay khi có email nhận, còn domain thường mới đi vào
   job gửi batch. IP/ASN Cloudflare chỉ được xem là proxy/CDN: tool không gửi

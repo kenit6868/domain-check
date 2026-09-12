@@ -39,6 +39,17 @@ Có build Windows qua `build_app.bat`/`PhishingTool.spec`. Bộ kiểm thử ch�
 
 Extension Web Form Assistant khai báo bộ icon PNG 16/32/48/128 trong manifest
 và action; thay đổi icon/manifest yêu cầu người dùng Reload extension đã nạp.
+Từ v2.6.0, action mở `popup.html`: popup hỏi trạng thái tab hiện tại trực tiếp
+từ content script, fallback qua service worker, và chỉ hiển thị metadata đã
+sanitize (state, hostname, adapter/version, message, timestamp). Không chuyển
+token, contact, draft, cookie hoặc giá trị CAPTCHA vào popup/status message.
+Popup có checklist boolean/nhãn field và ba action: refill, recheck, copy safe
+diagnostic. Refill gọi lại đúng adapter/task trong tab; recheck chỉ chạy
+wait/validate; không action nào submit hoặc thao tác CAPTCHA.
+Service worker ánh xạ state thành badge theo tab bằng `chrome.action`:
+`WORKING=…`, `FILLED/SUBMITTED=✓`, CAPTCHA manual=`C`, manual khác=`!`,
+`FAILED=×`. Khi tab navigation, badge và status cũ phải được xóa trước khi
+content script publish trạng thái mới.
 
 Cloudflare Worker ưu tiên `cloudflare_abuse_api.py`: verify token bằng endpoint
 user token, kiểm tra entitlement bằng GET Abuse Reports và chỉ POST
@@ -543,6 +554,12 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
   control để mở menu; phải phát `mousedown`, chọn option `data-value="1"` và
   xác minh hidden input `name="type"` thực sự bằng `1`. Không được trả `FILLED`
   chỉ vì đã tìm thấy text option.
+- Extension v2.6.0 có popup chẩn đoán và hỗ trợ form an toàn. `content.js` publish trạng thái
+  đã sanitize cho tab, `background.js` giữ fallback theo tab trong vòng đời
+  service worker, còn `popup.js` ưu tiên đọc trực tiếp content script để không
+  phụ thuộc service worker còn thức. Popup không được chứa task token hay dữ liệu
+  form. Checklist chỉ chứa tên field + boolean; refill/recheck không submit hoặc
+  thao tác CAPTCHA, còn nội dung copy phải là chẩn đoán đã sanitize.
 
 ### Domain Worker — chọn nhiều tài khoản và cache theo delivery
 

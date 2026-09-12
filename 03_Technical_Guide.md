@@ -52,7 +52,15 @@
     nguyên thư mục `dist/PhishingTool/`, không chỉ file `.exe`; máy nhận không
     cần cài Python hay chạy `playwright install` để tạo Browser Evidence.
     Extension đi kèm có icon PNG 16/32/48/128; sau khi cập nhật bản build cần
-    Reload extension tại trang quản lý extension của Chrome.
+    Reload extension tại trang quản lý extension của Chrome. Từ v2.6.0, bấm icon
+    extension để mở popup chẩn đoán mini: xem phiên bản, form/adapter, trạng thái
+    điền gần nhất, checklist field và thông báo đã rút gọn của tab hiện tại.
+    **Điền lại** phục hồi field bị React xóa; **Kiểm tra lại** chỉ validate;
+    **Sao chép chẩn đoán** không chứa dữ liệu form. Popup không hiển thị
+    token/email/draft/cookie/giá trị CAPTCHA, không submit và không click CAPTCHA.
+    Badge icon áp dụng riêng từng tab: `…` đang xử lý, `✓` hoàn tất điền/submit,
+    `C` chờ CAPTCHA, `!` cần thao tác thủ công và `×` khi lỗi; badge cũ được xóa
+    khi tab bắt đầu navigation mới.
 *   **Kênh cộng đồng Việt Nam**: Trong **Quick Report**, Web Form Assistant v2.2.1
     mở và tự điền form [Chống Lừa Đảo](https://chongluadao.vn/report/reportphishing)
     hoặc [Cốc Cốc Safe](https://safe.coccoc.com/) bằng full URL, email liên hệ,

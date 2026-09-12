@@ -247,6 +247,38 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-13 — Web Form Assistant v2.6.0 thêm badge trạng thái theo từng tab:
+  `…` đang xử lý, `✓` đã điền/submit, `C` chờ CAPTCHA thủ công, `!` cần thao tác
+  và `×` khi lỗi. Service worker chỉ dùng state/message đã sanitize, đổi màu và
+  tooltip tương ứng, đồng thời xóa badge/status cũ khi tab navigation. Không đọc
+  dữ liệu form và không thay đổi hành vi submit/CAPTCHA. File chính:
+  `chrome_extension/cloudflare-profile-worker/{manifest.json,background.js}`,
+  test extension; tài liệu: `README.md`, `CLAUDE.md`, `03_Technical_Guide.md`,
+  file này và skill dự án. Đã kiểm tra syntax toàn bộ JavaScript, 25 test tập
+  trung, 304/304 full unittest, compileall, pip check và diff check.
+
+- 2026-09-13 — Web Form Assistant v2.5.0 nâng popup lên EXT-UI 2: checklist chỉ
+  hiển thị tên/trạng thái field, CAPTCHA và submit; thêm **Điền lại**, **Kiểm tra
+  lại** và **Sao chép chẩn đoán** trên đúng tab. Content script giữ task/adapter
+  trong RAM để refill hoặc validate, không truyền giá trị field; mọi diagnostic
+  được sanitize và không action nào submit/click CAPTCHA. File chính:
+  `chrome_extension/cloudflare-profile-worker/{manifest.json,background.js,content.js,popup.html,popup.css,popup.js}`,
+  adapter Cloudflare, test extension; tài liệu: `README.md`, `CLAUDE.md`,
+  `03_Technical_Guide.md`, file này và skill dự án. Đã kiểm tra syntax toàn bộ
+  JavaScript, 25 test tập trung, 304/304 full unittest, compileall, pip check và
+  diff check.
+
+- 2026-09-13 — Web Form Assistant v2.4.0 bổ sung popup mini khi bấm icon
+  extension. Popup chỉ đọc và hiển thị version, hostname, adapter/version,
+  trạng thái cùng thông báo gần nhất của đúng tab; content script publish
+  metadata đã sanitize, service worker giữ fallback theo tab và popup ưu tiên
+  hỏi trực tiếp content script. Không hiển thị task token, email, draft, cookie,
+  CAPTCHA và không thêm submit. File chính:
+  `chrome_extension/cloudflare-profile-worker/{manifest.json,background.js,content.js,popup.html,popup.css,popup.js}`,
+  test extension; tài liệu: `README.md`, `CLAUDE.md`, `03_Technical_Guide.md`,
+  file này và skill dự án. Đã kiểm tra syntax toàn bộ JavaScript, 25 test tập
+  trung, 304/304 full unittest, compileall, pip check và diff check.
+
 - 2026-09-12 — Tăng chiều cao mặc định riêng của bảng **Kết quả domain** lên
   tối thiểu 300 px để dễ theo dõi batch khi mới có ít dòng; các bảng phụ vẫn co
   theo nội dung. File chính: `pages/6_Domain_Worker.py`, test UI; tài liệu:

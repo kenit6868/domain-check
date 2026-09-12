@@ -45,6 +45,16 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Với Cốc Cốc, loại vi phạm là Material UI Select: phải phát `mousedown`, chọn
   option `data-value="1"` và xác minh hidden `input[name="type"]` bằng `1`; chỉ
   tìm thấy text option chưa đủ để báo `FILLED`.
+  Popup extension chỉ được hiển thị metadata chẩn đoán đã sanitize của tab hiện
+  tại (extension version, hostname, adapter/version, state, message, timestamp).
+  Không đưa token, contact, draft, cookie, CAPTCHA hoặc action submit vào popup;
+  ưu tiên hỏi content script trực tiếp và chỉ dùng service worker làm fallback.
+  Checklist popup chỉ mang tên field + boolean/manual. Action refill được gọi lại
+  adapter hiện tại, recheck chỉ wait/validate và copy chỉ xuất diagnostic đã
+  sanitize; cả ba không được submit hoặc thao tác CAPTCHA.
+  Badge icon phải scope theo tab và chỉ phản ánh state đã sanitize: working,
+  filled/submitted, CAPTCHA manual, manual khác hoặc failed. Khi tab navigation
+  mới phải xóa badge/status cũ để không gắn kết quả của form trước.
   Adapter GoDaddy phishing chỉ match `legalportal.godaddy.com/abuse/phishing`,
   điền email/brand/full URL/draft registrar và luôn `fill_only`; không tự tích
   checkbox cam kết good-faith hoặc submit thay operator.

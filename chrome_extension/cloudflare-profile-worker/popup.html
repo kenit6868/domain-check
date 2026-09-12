@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PhishingTool Web Form Assistant</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="icons/icon48.png" alt="">
+    <div><h1>Web Form Assistant</h1><p id="version">Extension</p></div>
+  </header>
+  <main>
+    <div class="connection"><span id="dot"></span><strong id="connection">Đang kiểm tra…</strong></div>
+    <dl>
+      <div><dt>Trang hiện tại</dt><dd id="host">—</dd></div>
+      <div><dt>Adapter</dt><dd id="adapter">—</dd></div>
+      <div><dt>Trạng thái</dt><dd id="state">—</dd></div>
+    </dl>
+    <section><h2>Kiểm tra field</h2><ul id="checklist"><li>Chưa có dữ liệu field.</li></ul></section>
+    <section><h2>Chi tiết gần nhất</h2><p id="message">Chưa nhận được trạng thái từ form.</p></section>
+    <div class="actions">
+      <button id="refill" type="button">Điền lại</button>
+      <button id="recheck" type="button">Kiểm tra lại</button>
+      <button id="copy" type="button">Sao chép chẩn đoán</button>
+    </div>
+    <p id="action-result" aria-live="polite"></p>
+    <p class="privacy">Không hiển thị token, email, draft, cookie hoặc CAPTCHA.</p>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
