@@ -1,4 +1,5 @@
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,12 +12,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class PlaywrightPackagingTests(unittest.TestCase):
     def test_frozen_runtime_uses_hermetic_browser_path(self):
-        with (
-            patch.object(browser_evidence.sys, "frozen", True, create=True),
-            patch.dict(os.environ, {}, clear=True),
-        ):
-            browser_evidence.configure_playwright_runtime()
-            self.assertEqual(os.environ["PLAYWRIGHT_BROWSERS_PATH"], "0")
+        with tempfile.TemporaryDirectory() as folder:
+            with (
+                patch.object(browser_evidence.sys, "frozen", True, create=True),
+                patch.object(browser_evidence.sys, "_MEIPASS", folder, create=True),
+                patch.dict(os.environ, {}, clear=True),
+            ):
+                browser_evidence.configure_playwright_runtime()
+                self.assertEqual(
+                    os.environ["PLAYWRIGHT_BROWSERS_PATH"],
+                    str(Path(folder) / "playwright" / "driver" / "package.local-browsers"),
+                )
 
     def test_build_installs_chromium_hermetically_before_pyinstaller(self):
         source = (ROOT / "build_app.bat").read_text(encoding="utf-8")
@@ -27,6 +33,12 @@ class PlaywrightPackagingTests(unittest.TestCase):
             source.index("python -m PyInstaller PhishingTool.spec -y --clean"),
         )
         self.assertIn("python -m PyInstaller PhishingTool.spec -y --clean", source)
+        self.assertIn("package.local-browsers\\chromium-*", source)
+        self.assertIn("chrome-win64\\chrome.exe", source)
+        self.assertIn(
+            "chrome-headless-shell-win64\\chrome-headless-shell.exe",
+            source,
+        )
 
     def test_spec_requires_bundled_chromium_and_headless_shell(self):
         source = (ROOT / "PhishingTool.spec").read_text(encoding="utf-8")

@@ -337,6 +337,13 @@ người vận hành phê duyệt. Không đính kèm toàn bộ ảnh quan sát
 
 #### Browser Evidence dùng chung — Phase 1
 
+Bản Windows frozen đặt đường dẫn tuyệt đối từ `sys._MEIPASS` tới
+`_internal/playwright/driver/package.local-browsers`, đúng vị trí spec COLLECT
+Chromium. `build_app.bat` kiểm tra executable Chromium và Headless Shell sau
+PyInstaller; nếu thiếu thì build thất bại. Phải chia sẻ toàn bộ folder
+`dist/PhishingTool/`, không chỉ file `.exe`; nếu executable mất trên máy nhận,
+kiểm tra quá trình giải nén và lịch sử cách ly của phần mềm bảo mật.
+
 `browser_evidence.py` là lõi capture Browser Evidence chính thức. Chế độ mặc
 định là thụ động: module ghi một PNG và manifest JSON theo cùng evidence set,
 phân biệt rõ `requested_url`, `landing_url`, redirect HTTP do máy chủ trả về,

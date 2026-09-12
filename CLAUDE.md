@@ -24,10 +24,14 @@ khỏi kết quả `collect_data_files("playwright")` để không bundle thêm 
 701 MB tại `driver/package/.local-browsers`; sau Analysis phải lọc cả
 `a.datas` và `a.binaries` vì hook có thể chèn rồi phân loại lại package data.
 Không được chia sẻ
-riêng `.exe`, phải chia sẻ toàn bộ `dist/PhishingTool/`. Runtime frozen cũng đặt
-biến này để Browser Evidence luôn dùng Chromium đã bundle, không phụ thuộc browser
+riêng `.exe`, phải chia sẻ toàn bộ `dist/PhishingTool/`. Runtime frozen ghi đè
+`PLAYWRIGHT_BROWSERS_PATH` bằng đường dẫn tuyệt đối từ `sys._MEIPASS` tới
+`playwright/driver/package.local-browsers` để Browser Evidence luôn dùng Chromium đã bundle, không phụ thuộc browser
 trong profile của người nhận. PyInstaller phải chạy với `--clean`; `-y` một mình
 có thể tái sử dụng Analysis/TOC cũ và đưa browser nguồn trở lại output.
+Sau COLLECT, `build_app.bat` phải xác minh cả Chromium và Headless Shell thật sự
+có executable trong `dist`; build thiếu một trong hai phải thất bại trước khi
+được phân phối.
 
 Có build Windows qua `build_app.bat`/`PhishingTool.spec`. Bộ kiểm thử chính là
 `python -m unittest discover -s tests -v`; các test Streamlit dùng

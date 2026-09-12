@@ -55,6 +55,23 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: Xac minh artifact Browser Evidence sau COLLECT. Build thanh cong nhung thieu
+:: chrome.exe se khong duoc phep phan phoi cho may khac.
+set "PHISHINGTOOL_CHROMIUM_OK="
+for /d %%D in ("dist\PhishingTool\_internal\playwright\driver\package.local-browsers\chromium-*") do if exist "%%~fD\chrome-win64\chrome.exe" set "PHISHINGTOOL_CHROMIUM_OK=1"
+if not defined PHISHINGTOOL_CHROMIUM_OK (
+    echo [LOI] Build thieu Chromium chrome.exe trong _internal.
+    pause
+    exit /b 1
+)
+set "PHISHINGTOOL_HEADLESS_OK="
+for /d %%D in ("dist\PhishingTool\_internal\playwright\driver\package.local-browsers\chromium_headless_shell-*") do if exist "%%~fD\chrome-headless-shell-win64\chrome-headless-shell.exe" set "PHISHINGTOOL_HEADLESS_OK=1"
+if not defined PHISHINGTOOL_HEADLESS_OK (
+    echo [LOI] Build thieu Chromium Headless Shell trong _internal.
+    pause
+    exit /b 1
+)
+
 :: Tạo config.ini mẫu trong dist nếu chưa có
 :: Copy config.ini thật vào dist (ưu tiên config.ini gốc, fallback config.example.ini)
 if exist "config.ini" (

@@ -18,6 +18,7 @@ import re
 import sys
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
@@ -26,10 +27,15 @@ import requests
 def configure_playwright_runtime() -> None:
     """Use the browser bundled beside Playwright when running a frozen app."""
     if getattr(sys, "frozen", False):
-        # ``0`` is Playwright's hermetic browser location inside its driver
-        # package.  ``build_app.bat`` installs Chromium there before PyInstaller
-        # collects it, so shared dist folders do not rely on each user's profile.
-        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
+        # Point Playwright at the exact PyInstaller COLLECT destination. Using
+        # ``0`` makes the Node driver derive this path from its package layout;
+        # that is fragile after freezing and has produced missing-executable
+        # errors on machines receiving the shared dist folder.
+        bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+        bundled_browsers = (
+            bundle_root / "playwright" / "driver" / "package.local-browsers"
+        )
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(bundled_browsers)
 
 
 configure_playwright_runtime()

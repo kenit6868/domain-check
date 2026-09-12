@@ -41,6 +41,12 @@ Chromium không bị đóng gói hai lần; spec cũng lọc lại Analysis data
 PyInstaller có thể chèn lại cây browser sau bước collect ban đầu. Sau khi build, chia sẻ
 **toàn bộ** thư mục `dist/PhishingTool/`; người nhận chỉ cần cấu hình `config.ini`
 và chạy `PhishingTool.exe`, không cần cài Python hoặc chạy `playwright install`.
+Trong bản frozen, ứng dụng trỏ `PLAYWRIGHT_BROWSERS_PATH` tới đường dẫn tuyệt
+đối dưới `_internal/playwright/driver/package.local-browsers`; không phụ thuộc
+thư mục làm việc hay biến môi trường trên máy nhận. `build_app.bat` kiểm tra cả
+`chrome.exe` và `chrome-headless-shell.exe` sau PyInstaller và dừng build nếu
+thiếu. Nếu file có trên máy build nhưng mất sau khi giải nén, kiểm tra lịch sử
+cách ly của phần mềm bảo mật trên máy nhận.
 Nếu build bằng lệnh PyInstaller trực tiếp, chạy trước:
 
 ```powershell

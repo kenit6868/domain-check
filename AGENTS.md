@@ -247,6 +247,17 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-12 — Sửa Browser Evidence trên bản Windows chia sẻ bị Playwright báo
+  thiếu `chromium-*/chrome-win64/chrome.exe`: runtime frozen không còn để Node
+  tự suy ra vị trí từ `PLAYWRIGHT_BROWSERS_PATH=0`, mà trỏ tuyệt đối từ
+  `sys._MEIPASS` tới `playwright/driver/package.local-browsers`. `build_app.bat`
+  kiểm tra executable Chromium và Headless Shell sau COLLECT và dừng build nếu
+  artifact thiếu. File chính: `browser_evidence.py`, `build_app.bat`, test
+  packaging; tài liệu: `README.md`, `CLAUDE.md`, `03_Technical_Guide.md`, file
+  này và skill dự án. Đã build thật với `--clean`, xác minh đủ hai executable
+  trong `dist` và không có browser tree trùng; 31 test tập trung, 300/300 full
+  unittest, compileall, pip check và diff check đều đạt.
+
 - 2026-09-12 — Thêm adapter extension **GoDaddy Phishing** v2.3.0 cho Quick
   Report: chỉ hiện action tự điền khi registrar khớp GoDaddy, mở đúng
   `legalportal.godaddy.com/abuse/phishing` trên Chrome profile hiện tại và điền

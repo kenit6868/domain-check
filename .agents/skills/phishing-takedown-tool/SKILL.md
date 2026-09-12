@@ -53,8 +53,11 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
 - Bản PyInstaller phải bundle Chromium cùng Playwright, không dựa vào browser
   đã cài trong profile của người nhận. Build Windows đặt
   `PLAYWRIGHT_BROWSERS_PATH=0`, chạy `python -m playwright install chromium
-  chromium-headless-shell` trước PyInstaller và runtime frozen giữ cùng biến để Browser Evidence dùng
-  `package.local-browsers` đã đóng gói. Phải lọc cây nguồn `.local-browsers`
+  chromium-headless-shell` trước PyInstaller. Runtime frozen phải ghi đè biến
+  bằng đường dẫn tuyệt đối từ `sys._MEIPASS` để Browser Evidence dùng đúng
+  `package.local-browsers` đã đóng gói, không phụ thuộc working directory hoặc
+  môi trường máy nhận. Sau COLLECT, build phải thất bại nếu thiếu executable
+  Chromium hoặc Headless Shell. Phải lọc cây nguồn `.local-browsers`
   khỏi generic Playwright data collection và lọc lại cả `Analysis.datas` lẫn
   `Analysis.binaries` để hook PyInstaller không bundle browser hai lần, và
   chạy PyInstaller với `--clean` để không tái sử dụng Analysis/TOC cũ.
