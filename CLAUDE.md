@@ -36,6 +36,20 @@ Có build Windows qua `build_app.bat`/`PhishingTool.spec`. Bộ kiểm thử ch�
 Extension Web Form Assistant khai báo bộ icon PNG 16/32/48/128 trong manifest
 và action; thay đổi icon/manifest yêu cầu người dùng Reload extension đã nạp.
 
+Cloudflare Worker ưu tiên `cloudflare_abuse_api.py`: verify token bằng endpoint
+user token, kiểm tra entitlement bằng GET Abuse Reports và chỉ POST
+`/accounts/{account_id}/abuse-reports/abuse_phishing` sau preview + xác nhận;
+payload cũng dùng `act=abuse_phishing` và notification `send` cho host/owner.
+Cấu hình
+`[cloudflare]` chỉ nạp vào bộ nhớ; ledger không được chứa token. Batch gửi tuần
+tự, checkpoint từng URL và khóa cục bộ để hai Streamlit session không gửi trùng.
+Extension/form là fallback, không phải pipeline API.
+
+Adapter `godaddy_phishing` chỉ có host permission cho
+`legalportal.godaddy.com`, dùng task `fill_only` từ Quick Report và điền bốn
+field email/brand/full URL/description. Không click checkbox attestation và không
+submit vì hai thao tác này là xác nhận pháp lý của operator.
+
 ```bash
 # Setup
 pip install -r requirements.txt

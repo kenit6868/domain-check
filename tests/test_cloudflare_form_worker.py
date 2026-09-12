@@ -41,6 +41,31 @@ class CloudflareFormWorkerTests(unittest.TestCase):
             self.assertEqual(again["state"], "SUBMITTED")
             checker.assert_not_called()
 
+    def test_api_submit_checkpoints_report_id_and_prevents_same_day_resend(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "ledger.json"
+            row = cfw.prepare_urls(
+                ["https://example.com/login"], {"brand_name": "X"},
+                checker=lambda *_: {"cloudflare": True}, path=path,
+            )[0]
+            submitter = Mock(return_value={
+                "ok": True, "result": "success", "report_id": "report-123",
+                "http_status": 200,
+            })
+            result = cfw.submit_api_records(
+                [row], {"contact_email": "r@example.test"},
+                path=path, submitter=submitter,
+            )
+            self.assertTrue(result[0]["ok"])
+            saved = cfw.today_records(path)[0]
+            self.assertEqual(saved["state"], "SUBMITTED")
+            self.assertEqual(saved["channel"], "api")
+            self.assertEqual(saved["report_id"], "report-123")
+            self.assertEqual(cfw.submit_api_records(
+                [saved], {}, path=path, submitter=submitter
+            ), [])
+            submitter.assert_called_once()
+
     def test_ledger_contains_no_browser_or_captcha_state(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "ledger.json"
@@ -113,6 +138,25 @@ class CloudflareFormWorkerTests(unittest.TestCase):
     def test_provider_form_rejects_unknown_adapter(self):
         result = cfw.open_profile_form("unknown", "https://example.test", "example.test", "", {})
         self.assertIn("error", result)
+
+    def test_godaddy_form_uses_fill_only_task_with_contact_and_brand(self):
+        captured = {}
+        bridge = Mock(port=45678)
+        bridge.register.side_effect = lambda payload, callback: captured.update(payload=payload) or "token"
+        with patch("cloudflare_profile_bridge.profile_bridge", return_value=bridge), patch.object(
+            cfw, "open_in_installed_chrome", return_value=True
+        ) as opener:
+            result = cfw.open_profile_form(
+                "godaddy_phishing", "https://legalportal.godaddy.com/abuse/phishing",
+                "https://example.test/login", "Evidence",
+                {"contact_email": "r@example.test", "brand_name": "Example Brand"},
+            )
+        self.assertEqual(result["status"], "opened")
+        self.assertEqual(captured["payload"]["provider"], "godaddy_phishing")
+        self.assertEqual(captured["payload"]["mode"], "fill_only")
+        self.assertEqual(captured["payload"]["_contact_email"], "r@example.test")
+        self.assertEqual(captured["payload"]["_brand_name"], "Example Brand")
+        self.assertIn("legalportal.godaddy.com/abuse/phishing#ptask=token", opener.call_args.args[0])
 
     def test_community_form_passes_only_whitelisted_report_type(self):
         captured = {}

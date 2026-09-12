@@ -26,7 +26,7 @@ class CloudflareFormWorkerUiTests(unittest.TestCase):
                 str(ROOT / "pages" / "14_Cloudflare_Form_Worker.py"), default_timeout=10
             ).run()
             self.assertFalse(app.exception)
-            self.assertEqual(app.title[0].value, "Cloudflare Form Worker")
+            self.assertEqual(app.title[0].value, "Cloudflare Worker")
             self.assertTrue(any("Chưa" in item.value or "Nhập" in item.value for item in app.info))
 
 

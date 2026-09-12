@@ -23,6 +23,15 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   dòng để retry/resume. Muốn dùng profile Chrome đang mở phải dùng extension cục
   bộ giới hạn origin + task one-time qua localhost; không dùng remote debugging
   trên default profile, không đọc/sao chép cookie, CAPTCHA hay HTML.
+- Cloudflare Abuse Reports API dùng cùng danh sách lọc với Form Worker nhưng là
+  kênh riêng, ưu tiên khi `[cloudflare]` có token/account ID hợp lệ. Token không
+  được ghi ledger, UI, log, extension hoặc error. Mọi POST phải có preview và xác
+  nhận explicit; gửi tuần tự, checkpoint Report ID từng full URL, khóa chống gửi
+  đồng thời và không gửi lại URL đã SUBMITTED trong cùng ngày. Kiểm tra kết nối
+  chỉ được verify token + GET reports; extension là fallback khi API không sẵn sàng.
+  Submit phishing phải dùng `abuse_phishing` cho cả route
+  `abuse-reports/{report_param}` và field `act`; workflow công khai danh tính
+  doanh nghiệp dùng `send` cho cả host/owner notification.
 - Web Form Assistant extension phải giữ coordinator không chứa selector provider;
   mỗi adapter riêng tuân theo contract `matches`, `waitUntilReady`, `fill`,
   `validate`, `captchaPending`, `submit`, `detectSuccess`. Thêm provider không
@@ -36,6 +45,9 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Với Cốc Cốc, loại vi phạm là Material UI Select: phải phát `mousedown`, chọn
   option `data-value="1"` và xác minh hidden `input[name="type"]` bằng `1`; chỉ
   tìm thấy text option chưa đủ để báo `FILLED`.
+  Adapter GoDaddy phishing chỉ match `legalportal.godaddy.com/abuse/phishing`,
+  điền email/brand/full URL/draft registrar và luôn `fill_only`; không tự tích
+  checkbox cam kết good-faith hoặc submit thay operator.
 - `run_check()` là pipeline dùng chung giữa CLI và UI. Không tạo một pipeline
   kiểm tra domain khác trong page Streamlit.
 - Bản PyInstaller phải bundle Chromium cùng Playwright, không dựa vào browser

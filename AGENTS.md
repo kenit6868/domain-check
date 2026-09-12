@@ -41,6 +41,7 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
 - `pages/12_Domain_Evidence_Review.py`: page review riêng cho domain thường thiếu
   Browser Evidence, đọc preflight v4 theo ngày/full URL và gửi ảnh thủ công trực tiếp.
 - `cloudflare_form_worker.py`, `cloudflare_profile_bridge.py`,
+  `cloudflare_abuse_api.py`,
   `chrome_extension/cloudflare-profile-worker/`, `pages/14_Cloudflare_Form_Worker.py`:
   worker form Cloudflare, ledger ngày và extension chạy trên Chrome profile thật.
 - `tests/`: bộ kiểm thử `unittest`.
@@ -245,6 +246,38 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-09-12 — Thêm adapter extension **GoDaddy Phishing** v2.3.0 cho Quick
+  Report: chỉ hiện action tự điền khi registrar khớp GoDaddy, mở đúng
+  `legalportal.godaddy.com/abuse/phishing` trên Chrome profile hiện tại và điền
+  email, brand, full URL/path, draft registrar. Adapter không tự tích cam kết
+  good-faith, không CAPTCHA/submit; host permission chỉ thêm origin GoDaddy.
+  File chính: adapter JS, manifest, `cloudflare_profile_bridge.py`,
+  `cloudflare_form_worker.py`, `pages/7_Quick_Report.py` và test; không mở hay
+  submit form thật trong test. Đã kiểm tra JSON manifest, syntax toàn bộ
+  JavaScript, 24 test tập trung, 300/300 full unittest, compileall, pip check
+  và diff check.
+
+- 2026-09-12 — Sửa Cloudflare Abuse Reports API HTTP 405: route submit phishing
+  dùng đúng `abuse-reports/abuse_phishing` thay vì nhãn UI `phishing`. Payload
+  đổi `host_notification` và `owner_notification` từ `send-anon` sang `send`
+  để nhất quán với workflow báo cáo bằng danh tính doanh nghiệp.
+  Đã kiểm tra 15 test tập trung, 297/297 full unittest, compileall, pip
+  check và diff check; test chỉ mock API, không gửi report thật.
+
+- 2026-09-12 — Nâng Cloudflare Form Worker thành **Cloudflare Worker API-first**:
+  menu được bật lại; dùng cùng lõi Quick Report để lọc nameserver Cloudflare,
+  preview draft/payload và gửi tuần tự các URL được chọn qua Cloudflare Abuse
+  Reports API sau xác nhận. Token/Account ID đọc từ `[cloudflare]` trong
+  `config.ini` hoặc environment, không ghi ledger/UI/log; nút kiểm tra chỉ
+  verify + GET reports. Ledger schema v2 checkpoint kênh, HTTP status và Report
+  ID từng URL, chống gửi trùng trong ngày và khóa hai phiên local; extension
+  Chrome còn là fallback. File chính: `cloudflare_abuse_api.py`,
+  `cloudflare_form_worker.py`, `pages/14_Cloudflare_Form_Worker.py`,
+  `phishing_toolkit.py`, navigation, spec, config mẫu và test; tài liệu:
+  `README.md`, `CLAUDE.md`, `03_Technical_Guide.md`, file này và skill;
+  đã kiểm tra 297/297 unittest, AppTest, compileall, pip check, diff check và
+  build PyInstaller; chỉ mock POST, không phát sinh report thật.
 
 - 2026-09-11 — Thêm bộ icon lá chắn cho Web Form Assistant: manifest extension
   v2.2.2 khai báo icon PNG 16/32/48/128 và icon action; source chất lượng cao

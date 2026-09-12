@@ -82,7 +82,7 @@ class ProfileBridge:
         provider = str(payload.get("provider") or "cloudflare")
         if provider not in {
             "cloudflare", "google_gsb", "microsoft_smartscreen",
-            "chongluadao", "coccoc_safe",
+            "chongluadao", "coccoc_safe", "godaddy_phishing",
         }:
             provider = "cloudflare"
         safe = {

@@ -53,6 +53,33 @@ Chrome hiển thị icon lá chắn của Web Form Assistant sau khi người d�
 **Load unpacked** với thư mục extension. Nếu extension đã được nạp từ trước,
 vào trang quản lý extension của Chrome và bấm **Reload** để nhận icon mới.
 
+### Cloudflare Worker qua API
+
+Thêm cấu hình bí mật vào file `config.ini` cục bộ:
+
+```ini
+[cloudflare]
+api_token = YOUR_CLOUDFLARE_API_TOKEN
+account_id = YOUR_CLOUDFLARE_ACCOUNT_ID
+```
+
+Token cần quyền **Account → Trust and Safety → Write** và account cần entitlement
+`abuse-reports`. Menu **Cloudflare Worker** dùng cùng phép lọc nameserver của
+Quick Report, chỉ giữ URL có Cloudflare, cho preview payload rồi mới gửi các dòng
+được chọn qua API. Mỗi URL được checkpoint ngay với Report ID; URL đã thành công
+trong ngày không được gửi lại. Nút **Kiểm tra kết nối API** chỉ verify token và
+đọc danh sách report, không tạo report. Extension Chrome vẫn là fallback.
+Báo cáo phishing dùng route `abuse-reports/abuse_phishing` và cho phép
+Cloudflare chuyển danh tính người báo cáo tới host/owner (`send`).
+
+### Tự điền form phishing GoDaddy
+
+Khi Quick Report xác định registrar là GoDaddy, nút **Mở & tự điền form
+GoDaddy** mở `legalportal.godaddy.com/abuse/phishing` trên Chrome profile hiện
+tại. Extension điền email, brand, full URL/path và draft registrar. Người
+vận hành phải tự kiểm tra, tích cam kết good-faith và bấm **Send
+Report**; extension không tự cam kết, giải CAPTCHA hoặc submit.
+
 ## Sử dụng
 
 ```bash

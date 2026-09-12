@@ -813,6 +813,8 @@ def load_config():
     return {
         "vt_api_key": cfg.get("api", "vt_api_key", fallback="") or os.environ.get("VT_API_KEY", ""),
         "gsb_api_key": cfg.get("api", "gsb_api_key", fallback="") or os.environ.get("GSB_API_KEY", ""),
+        "cloudflare_api_token": cfg.get("cloudflare", "api_token", fallback="") or os.environ.get("CLOUDFLARE_API_TOKEN", ""),
+        "cloudflare_account_id": cfg.get("cloudflare", "account_id", fallback="") or os.environ.get("CLOUDFLARE_ACCOUNT_ID", ""),
         "brand_name": cfg.get("company", "brand_name", fallback="[TÊN THƯƠNG HIỆU]"),
         "contact_name": cfg.get("company", "contact_name", fallback="[TÊN NGƯỜI BÁO CÁO]"),
         "contact_email": cfg.get("company", "contact_email", fallback="[EMAIL LIÊN HỆ]"),

@@ -17,10 +17,16 @@
 *   **Cloudflare**: IP/ASN Cloudflare chỉ chứng minh lớp proxy/CDN, không phải
     origin hosting. Không gửi `abuse@cloudflare.com`; dùng form chính thức
     [Cloudflare Phishing Abuse](https://abuse.cloudflare.com/phishing) khi cần báo cáo lớp này.
-    Với danh sách nhiều URL, dùng **Cloudflare Form Worker**: lọc Cloudflare,
-    chọn dòng, xem draft rồi mở Chrome. Mặc định chỉ điền; submit phải được xác
-    nhận. Cài extension unpacked trong `chrome_extension/cloudflare-profile-worker`
-    trên đúng Chrome profile cần dùng; extension nhận task một lần qua localhost.
+    Với danh sách nhiều URL, dùng **Cloudflare Worker**: lọc Cloudflare bằng cùng
+    lõi với Quick Report, preview URL/payload rồi gửi tuần tự qua Abuse Reports
+    API sau xác nhận. API Token chỉ đọc từ `[cloudflare]` trong `config.ini`,
+    không ghi ledger/UI/log; mỗi kết quả checkpoint Report ID và chống gửi trùng
+    full URL trong ngày. Extension unpacked trong
+    `chrome_extension/cloudflare-profile-worker` là fallback khi API không dùng
+    được và vẫn nhận task một lần qua localhost.
+    API phishing phải POST tới `abuse-reports/abuse_phishing` với
+    `act=abuse_phishing`. Mặc định dùng `send` cho cả host/owner notification
+    vì workflow này chủ động công khai danh tính doanh nghiệp.
     CAPTCHA không được tự động vượt qua. Trạng thái checkpoint theo URL để
     retry/resume; tool không đọc hoặc sao chép cookie/profile.
     Extension tự reload form tối đa một lần nếu lần tải đầu bị trắng; điền email
@@ -35,6 +41,10 @@
     submit và xác nhận thành công; coordinator chỉ quản lý task/reload/report.
     Bản v2.1 thêm adapter riêng cho Google Safe Browsing và Microsoft SmartScreen,
     giới hạn quyền extension đúng ba origin chính thức cùng localhost.
+    Adapter GoDaddy phishing chỉ chạy tại
+    `https://legalportal.godaddy.com/abuse/phishing`: tự điền email, brand,
+    full URL và Description of Issue từ draft registrar trong Quick Report. Checkbox
+    cam kết good-faith và nút Send Report luôn do operator thao tác thủ công.
 *   **Bản Windows đóng gói**: `build_app.bat` cài Chromium vào thư mục hermetic
     của Playwright, còn spec copy nó vào đường dẫn browser của runtime frozen
     trước khi PyInstaller thu thập dữ liệu. Spec lọc datas/binaries cả trước và

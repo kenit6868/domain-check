@@ -355,11 +355,37 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                 with col_map["reg"]:
                     st.markdown(f"##### 📋 Registrar")
                     st.caption(registrar)
-                    st.link_button(f"↗ Form {registrar[:18]}", webform_url_r, type="primary")
                     draft_text = pt.get_webform_draft_text(
                         domain=domain, registrar=registrar, webform_url=webform_url_r,
                         cfg=cfg, target_url=original_url,
                     )
+                    if "godaddy" in r_lower:
+                        if st.button(
+                            "Mở & tự điền form GoDaddy",
+                            key=f"quick_godaddy_autofill_{idx}",
+                            type="primary",
+                            icon=":material/open_in_browser:",
+                            help=(
+                                "Mở GoDaddy Legal Portal trên Chrome profile hiện tại và "
+                                "điền email, brand, full URL, nội dung. Bạn tự tích cam kết "
+                                "và gửi."
+                            ),
+                        ):
+                            opened = cfw.open_profile_form(
+                                "godaddy_phishing", webform_url_r,
+                                original_url, draft_text, cfg,
+                            )
+                            if opened.get("error"):
+                                st.error(opened["error"])
+                            else:
+                                st.success(
+                                    "Đã mở form GoDaddy. Extension sẽ tự điền; "
+                                    "bạn tự xác nhận cam kết và submit."
+                                )
+                    else:
+                        st.link_button(
+                            f"↗ Form {registrar[:18]}", webform_url_r, type="primary"
+                        )
                     st.code(draft_text, language=None)
 
             if "tld" in col_map:

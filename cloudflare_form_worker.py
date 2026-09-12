@@ -24,11 +24,12 @@ import phishing_toolkit as pt
 
 
 FORM_URL = "https://abuse.cloudflare.com/phishing"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 LEDGER_PATH = Path(pt._runtime_path("cloudflare_form_worker.json"))
 TERMINAL_STATES = {"SUBMITTED"}
 RETRYABLE_STATES = {"READY", "FAILED", "NEEDS_MANUAL", "FILLED"}
 _FILE_LOCK = threading.RLock()
+_API_SEND_LOCK = threading.Lock()
 
 
 def current_day() -> str:
@@ -130,7 +131,10 @@ def update_record(item_id: str, path: Path | str = LEDGER_PATH, **changes) -> di
     found = None
     for item in data["records"]:
         if item.get("id") == item_id:
-            allowed = {"state", "attempts", "last_error", "updated_at", "mode", "result"}
+            allowed = {
+                "state", "attempts", "last_error", "updated_at", "mode", "result",
+                "channel", "report_id", "http_status",
+            }
             for key, value in changes.items():
                 if key in allowed:
                     item[key] = _clean_error(value) if key == "last_error" else value
@@ -301,6 +305,72 @@ def open_quick_report_form(target_url: str, draft: str, cfg: dict) -> dict:
     return open_profile_form("cloudflare", FORM_URL, target_url, draft, cfg)
 
 
+def _submit_api_records_unlocked(records: list[dict], cfg: dict, *,
+                                 path: Path | str = LEDGER_PATH,
+                                 submitter=None) -> list[dict]:
+    """Submit selected Cloudflare records via API and checkpoint every result."""
+    from cloudflare_abuse_api import CloudflareAbuseApiError, submit_phishing_report
+
+    submitter = submitter or submit_phishing_report
+    results = []
+    for record in records:
+        item_id = str(record.get("id") or "")
+        if not item_id or record.get("state") == "SUBMITTED":
+            continue
+        attempts = int(record.get("attempts") or 0) + 1
+        update_record(
+            item_id, path, state="API_SENDING", mode="api", channel="api",
+            attempts=attempts, last_error="",
+        )
+        try:
+            sent = submitter(record["target_url"], record.get("draft") or "", cfg)
+            update_record(
+                item_id, path, state="SUBMITTED", mode="api", channel="api",
+                result=sent.get("result") or "success",
+                report_id=sent.get("report_id") or "",
+                http_status=sent.get("http_status") or 200,
+                last_error="",
+            )
+            results.append({"id": item_id, "ok": True, **sent})
+        except CloudflareAbuseApiError as exc:
+            message = _clean_error(exc)
+            secret = str(cfg.get("cloudflare_api_token") or "")
+            if secret:
+                message = message.replace(secret, "[REDACTED]")
+            update_record(
+                item_id, path, state="FAILED", mode="api", channel="api",
+                last_error=message, result="",
+            )
+            results.append({"id": item_id, "ok": False, "error": message})
+        except Exception as exc:
+            message = _clean_error(exc)
+            secret = str(cfg.get("cloudflare_api_token") or "")
+            if secret:
+                message = message.replace(secret, "[REDACTED]")
+            update_record(
+                item_id, path, state="FAILED", mode="api", channel="api",
+                last_error=message, result="",
+            )
+            results.append({"id": item_id, "ok": False, "error": message})
+    return results
+
+
+def submit_api_records(records: list[dict], cfg: dict, *,
+                       path: Path | str = LEDGER_PATH,
+                       submitter=None) -> list[dict]:
+    """Serialize API delivery so two local Streamlit sessions cannot double-send."""
+    with _API_SEND_LOCK:
+        latest = {item.get("id"): item for item in today_records(path)}
+        pending = [
+            latest.get(item.get("id"), item)
+            for item in records
+            if latest.get(item.get("id"), item).get("state") != "SUBMITTED"
+        ]
+        return _submit_api_records_unlocked(
+            pending, cfg, path=path, submitter=submitter
+        )
+
+
 def open_profile_form(provider: str, form_url: str, target_url: str, draft: str,
                       cfg: dict, **provider_fields) -> dict:
     """Open one fill-only provider task in the current Chrome profile."""
@@ -309,7 +379,7 @@ def open_profile_form(provider: str, form_url: str, target_url: str, draft: str,
 
     if provider not in {
         "cloudflare", "google_gsb", "microsoft_smartscreen",
-        "chongluadao", "coccoc_safe",
+        "chongluadao", "coccoc_safe", "godaddy_phishing",
     }:
         return {"error": "Provider form không được hỗ trợ."}
 
