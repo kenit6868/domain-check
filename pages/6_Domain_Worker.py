@@ -6,6 +6,7 @@ import html
 import json
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -83,7 +84,7 @@ def _active_review_items_today() -> list[dict]:
     ]
 
 
-def _dataframe_with_copy(df: pd.DataFrame):
+def _dataframe_with_copy(df: pd.DataFrame, *, min_height: int = 110):
     """Render a table with an in-cell copy button for Full link and Domain."""
     columns = list(df.columns)
     headers = "".join(f"<th>{html.escape(str(column))}</th>" for column in columns)
@@ -104,7 +105,7 @@ def _dataframe_with_copy(df: pd.DataFrame):
                 cell = f"<td>{escaped_value}</td>"
             cells.append(cell)
         rows.append("<tr>" + "".join(cells) + "</tr>")
-    table_height = min(620, max(110, 48 * (len(df) + 1) + 8))
+    table_height = min(620, max(min_height, 48 * (len(df) + 1) + 8))
     st.html(
         f"""
         <style>
@@ -321,19 +322,6 @@ def _render_skipped_domain_tables(fully_sent: list[str], no_email_found: list[st
 
 
 st.set_page_config(page_title="Domain Worker", page_icon="⚙️", layout="wide")
-# Streamlit làm mờ toàn bộ element cũ bằng class `stale` trong mỗi lần rerun.
-# Trang này đã có spinner/trạng thái riêng, nên giữ UI rõ để tránh cảm giác bị treo.
-st.markdown(
-    """
-    <style>
-    .stale {
-        opacity: 1 !important;
-        transition: none !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 st.title("⚙️ Domain Report Worker")
 st.caption("Nhận danh sách domain, xử lý theo batch và tự gửi các email report có địa chỉ người nhận hợp lệ.")
 for review_job_root in dict.fromkeys([
@@ -344,26 +332,27 @@ for review_job_root in dict.fromkeys([
     except OSError:
         pass
 pending_review_count = len(_active_review_items_today())
-if pending_review_count:
-    st.warning(
-        f"Hôm nay có **{pending_review_count}** domain cloaking có email nhận "
-        "đã được cách ly khỏi luồng gửi tự động."
-    )
-    _review_page_link(f"Mở Cloaking Review ({pending_review_count})")
-else:
-    st.caption("Hôm nay không có domain cloaking có email nhận đang chờ duyệt.")
 try:
     pending_evidence_review_count = len(domain_worker.list_evidence_review_items())
 except (OSError, ValueError, TypeError):
     pending_evidence_review_count = 0
-if pending_evidence_review_count:
-    st.warning(
-        f"Hôm nay có **{pending_evidence_review_count}** domain thường chưa có ảnh evidence. "
-        "Các case này đã được tách khỏi luồng worker và có thể xử lý độc lập."
-    )
-    _evidence_review_page_link(
-        f"Mở Domain Evidence Review ({pending_evidence_review_count})",
-    )
+if pending_review_count or pending_evidence_review_count:
+    with st.container(border=True):
+        st.subheader("Cần bạn xử lý")
+        if pending_review_count:
+            st.write(
+                f"**{pending_review_count}** case cloaking có email nhận đã được "
+                "tách khỏi luồng gửi tự động."
+            )
+            _review_page_link(f"Mở Cloaking Review ({pending_review_count})")
+        if pending_evidence_review_count:
+            st.write(
+                f"**{pending_evidence_review_count}** domain thường chưa có "
+                "Browser Evidence và đang chờ bổ sung ảnh."
+            )
+            _evidence_review_page_link(
+                f"Mở Domain Evidence Review ({pending_evidence_review_count})",
+            )
 cached_sends = {
     (domain, account)
     for domain, accounts in _sent_domain_accounts_today().items()
@@ -390,92 +379,6 @@ selected_precheck_accounts = st.multiselect(
 )
 if not _account_labels:
     st.error("⚠️ Chưa cấu hình SMTP account trong config.ini.")
-
-with st.expander("🧹 Lọc domain từ nội dung thô", expanded=True):
-    st.caption(
-        "Dán nguyên nội dung có tiêu đề, ghi chú và URL. Công cụ giữ nguyên link đầy đủ "
-        "(gồm đường dẫn), bỏ ghi chú như `(top3)`, loại link trùng và đưa kết quả xuống worker."
-    )
-    with st.form("domain_filter_form"):
-        filter_input = st.text_area(
-            "Nội dung cần lọc",
-            height=220,
-            placeholder="789win\nhttps://example.com/vi-vn/ (top3)\nGhi chú khác...",
-        )
-        filter_clicked = st.form_submit_button("Lọc domain", type="primary")
-    if filter_clicked:
-        filtered_domains = extract_domains_from_text(filter_input)
-        if not selected_precheck_accounts:
-            st.warning("Hãy chọn ít nhất một tài khoản email trước khi lọc domain.")
-        elif filtered_domains:
-            sent_map = _sent_domain_accounts_today()
-            no_email_domains = _no_email_domains_today()
-            selected_account_keys = {
-                str(account).strip().lower()
-                for account in selected_precheck_accounts
-                if str(account).strip()
-            }
-
-            new_domains = []       # chưa account nào gửi hôm nay
-            partial_domains = []   # (domain, account đã gửi, account còn thiếu)
-            fully_sent = []        # tất cả account đều đã gửi hôm nay → skip
-            no_email_found = []    # đã check hôm nay nhưng không có email để gửi → skip
-
-            for entry in filtered_domains:
-                domain_key = pt.normalize_domain(entry).lower().rstrip(".")
-                sent_accounts = sent_map.get(domain_key, set())
-                selected_sent_accounts = sent_accounts & selected_account_keys
-                remaining_accounts = selected_account_keys - selected_sent_accounts
-                if domain_key in no_email_domains:
-                    no_email_found.append(entry)
-                elif not selected_sent_accounts:
-                    new_domains.append(entry)
-                elif not remaining_accounts:
-                    fully_sent.append(entry)
-                else:
-                    # Còn ít nhất 1 account chưa gửi hôm nay → vẫn đưa vào worker
-                    partial_domains.append((entry, selected_sent_accounts, remaining_accounts))
-
-            keep_domains = new_domains + [entry for entry, _sent, _remaining in partial_domains]
-            st.session_state["worker_domain_input"] = "\n".join(keep_domains)
-            st.session_state["worker_filter_skipped"] = {
-                "date": datetime.now().astimezone().date().isoformat(),
-                "fully_sent": fully_sent,
-                "no_email_found": no_email_found,
-            }
-
-            # Thông báo tóm tắt
-            parts = [
-                f"**{len(filtered_domains)}** link đầu vào",
-                f"**{len(keep_domains)}** domain đưa vào worker",
-            ]
-            if new_domains:
-                parts.append(f"**{len(new_domains)}** domain chưa account nào đang chọn gửi")
-            if partial_domains:
-                parts.append(
-                    f"**{len(partial_domains)}** domain đã gửi một phần và vẫn còn account cần gửi"
-                )
-            if fully_sent:
-                parts.append(f"bỏ qua **{len(fully_sent)}** domain đã gửi đủ bằng các account đang chọn")
-            if no_email_found:
-                parts.append(f"bỏ qua **{len(no_email_found)}** domain đã check hôm nay nhưng không có email để gửi")
-            if parts:
-                st.success("Kết quả lọc: " + "; ".join(parts) + ".")
-
-            if partial_domains:
-                with st.expander(f"⚠️ {len(partial_domains)} domain đã gửi một phần hôm nay — vẫn đưa vào worker", expanded=True):
-                    st.caption("Worker sẽ kiểm tra lại và chỉ bỏ qua đúng draft/người nhận đã gửi thành công hôm nay.")
-                    for entry, sent_accs, remaining_accs in partial_domains:
-                        st.markdown(
-                            f"- `{entry}` — đã gửi: {', '.join(sorted(sent_accs))}; "
-                            f"còn cần gửi: {', '.join(sorted(remaining_accs))}"
-                        )
-
-            if not keep_domains:
-                st.warning("Tất cả domain đã được xử lý hôm nay (đã gửi đủ hoặc không có email để gửi). Danh sách worker trống.")
-        else:
-            st.warning("Không tìm thấy domain hợp lệ trong nội dung.")
-
 
 # Hai bảng tracking luôn được dựng lại từ cache trong ngày, không phụ thuộc
 # session_state nên vẫn hiện sau F5, Streamlit rerun hoặc chạy lại source.
@@ -509,17 +412,35 @@ def normalize_list(raw: str) -> tuple[list, list]:
     return targets, invalid
 
 
-def latest_job_dir():
+def _job_is_today(job_dir: str) -> bool:
+    local_tz = datetime.now().astimezone().tzinfo
+    today = datetime.now(local_tz).date()
+    job_path = os.path.join(job_dir, "job.json")
+    try:
+        with open(job_path, encoding="utf-8") as handle:
+            created_at = json.load(handle).get("created_at")
+        if created_at:
+            created = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+        else:
+            created = datetime.fromtimestamp(os.path.getmtime(job_path), tz=local_tz)
+        return created.astimezone(local_tz).date() == today
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def latest_job_dir(*, current_day_only: bool = True):
     if not os.path.isdir(WORKER_DIR):
         return None
-    dirs = [
-        os.path.join(WORKER_DIR, name)
-        for name in os.listdir(WORKER_DIR)
-        if os.path.isdir(os.path.join(WORKER_DIR, name))
-        and not domain_worker.is_cloaking_review_job_dir(
-            os.path.join(WORKER_DIR, name),
-        )
-    ]
+    dirs = []
+    for name in os.listdir(WORKER_DIR):
+        job_dir = os.path.join(WORKER_DIR, name)
+        if not os.path.isdir(job_dir) or domain_worker.is_cloaking_review_job_dir(job_dir):
+            continue
+        if current_day_only and not _job_is_today(job_dir):
+            continue
+        dirs.append(job_dir)
     return max(dirs, key=os.path.getmtime) if dirs else None
 
 
@@ -535,40 +456,42 @@ def load_status(job_dir):
     return None
 
 
-def _render_job_metrics(status, total_sent=None):
+def _render_job_metrics(status):
     """Render the compact progress bar beside the table it describes."""
     state = status.get("state", "?")
     if state == "prechecking":
-        columns = st.columns(5)
+        columns = st.columns(4)
         columns[0].metric("Trạng thái", "Đang precheck")
         columns[1].metric("Đã kiểm tra", f"{status.get('precheck_processed', 0)}/{status.get('precheck_total', 0)}")
-        columns[2].metric("Dùng cache", status.get("precheck_cached", 0))
-        columns[3].metric("Sẵn sàng thường", status.get("ready_total", 0))
-        columns[4].metric("Cloaking tách riêng", status.get("cloaking_review_total", 0))
+        columns[2].metric("Sẵn sàng thường", status.get("ready_total", 0))
+        columns[3].metric("Cloaking tách riêng", status.get("cloaking_review_total", 0))
+        st.caption(f"Recipient dùng cache trong ngày: {status.get('precheck_cached', 0)}")
         return
     if state == "ready":
-        columns = st.columns(5)
+        columns = st.columns(4)
         columns[0].metric("Trạng thái", "Sẵn sàng")
         columns[1].metric("Domain sẵn sàng", status.get("ready_total", 0))
-        columns[2].metric("Dùng cache", status.get("precheck_cached", 0))
+        columns[2].metric("Cloaking tách riêng", status.get("cloaking_review_total", 0))
         columns[3].metric("Bị loại", len(status.get("excluded_no_email") or []))
-        columns[4].metric("Cloaking tách riêng", status.get("cloaking_review_total", 0))
+        st.caption(f"Recipient dùng cache trong ngày: {status.get('precheck_cached', 0)}")
         return
-    columns = st.columns(5 if total_sent is not None else 4)
-    c1, c2, c3, c4 = columns[:4]
+    columns = st.columns(4)
+    c1, c2, c3, c4 = columns
     c1.metric("Trạng thái", state)
     c2.metric("Tiến độ", f"{status.get('processed', 0)}/{status.get('total', 0)}")
     c3.metric("Batch", f"{status.get('current_batch', 0)}/{status.get('total_batches', 0)}")
     c4.metric("Batch tiếp theo", f"{status.get('next_batch_in_seconds', 0)} giây")
-    if total_sent is not None:
-        columns[4].metric("Tổng gửi thành công", total_sent)
 
 
 def launch_job_process(job_path):
     return domain_worker.launch_job_process(job_path)
 
 
-prepared_dir_ui = st.session_state.get("worker_job_dir") or latest_job_dir()
+session_job_dir = st.session_state.get("worker_job_dir")
+prepared_dir_ui = (
+    session_job_dir if session_job_dir and _job_is_today(session_job_dir)
+    else latest_job_dir()
+)
 try:
     with open(os.path.join(prepared_dir_ui, "job.json"), encoding="utf-8") as f:
         prepared_job_ui = json.load(f)
@@ -585,23 +508,130 @@ def _load_preflight(job_dir):
         return {}
 
 
+def _render_live_domain_results(active_job_dir: str, latest: dict) -> None:
+    """Render the domain table from fresh status so fragment polling updates it."""
+    preflight_ready = (_load_preflight(active_job_dir).get("ready") or [])
+    results_list = latest.get("results") or []
+    if not preflight_ready and not results_list:
+        return
+    try:
+        with open(os.path.join(active_job_dir, "job.json"), encoding="utf-8") as f:
+            job = json.load(f)
+    except (OSError, ValueError, TypeError):
+        job = {}
+    sender_accounts = [
+        str(account).strip() for account in (job.get("allowed_accounts") or [])
+        if str(account).strip()
+    ]
+    result_by_target = {
+        item.get("target_url"): item for item in results_list if item.get("target_url")
+    }
+    worker_items = preflight_ready or results_list
+    sent_accounts = _sent_domain_accounts_today()
+    sent_details = _sent_domain_details_today()
+    skip_labels = {
+        "manual_review_required": "⏸ Chờ xác nhận cloaking",
+        "already_sent": "✅ Đã gửi trước đó",
+        "no_sendable_email": "⏭ Không có email để gửi",
+    }
+    rows = []
+    for prepared in worker_items:
+        target_url = prepared.get("target_url", "")
+        result = result_by_target.get(target_url, prepared if not preflight_ready else {})
+        domain_key = (result.get("domain") or prepared.get("domain", "")).lower().rstrip(".")
+        cached_accounts = sent_accounts.get(domain_key, set())
+        fully_sent = result.get("skipped") == "already_sent"
+        if fully_sent and not result.get("sent_ok", 0):
+            row_status = "✅ Đã gửi trước đó"
+            sent_count = len(cached_accounts)
+        elif result:
+            if result.get("error"):
+                row_status = "❌ Lỗi"
+            elif result.get("skipped"):
+                row_status = skip_labels.get(result["skipped"], "⏭ Bỏ qua")
+            elif result.get("sent_failed", 0) and not result.get("sent_ok", 0):
+                row_status = "❌ Thất bại"
+            elif result.get("sent_ok", 0):
+                row_status = "✅ Đã gửi"
+            else:
+                row_status = "✅ Hoàn tất"
+            sent_count = result.get("sent_ok", 0)
+        elif latest.get("current_domain") == target_url:
+            row_status, sent_count = "🔄 Đang chạy", 0
+        else:
+            row_status, sent_count = "⏳ Chờ", 0
+
+        successful_recipients: dict[str, str] = {}
+        account_delivery: dict[str, dict[str, list[str]]] = {
+            account.lower(): {"sent": [], "failed": []} for account in sender_accounts
+        }
+        for delivery in sent_details.get(domain_key, []):
+            recipient = str(delivery.get("to") or "").strip()
+            account = str(delivery.get("account") or "").strip().lower()
+            if recipient:
+                successful_recipients.setdefault(recipient.lower(), recipient)
+                if account in account_delivery:
+                    account_delivery[account]["sent"].append(recipient)
+        for delivery in (result.get("sent_to") or []):
+            recipient = str(delivery.get("to") or "").strip()
+            account = str(delivery.get("account") or "").strip().lower()
+            successful = bool(delivery.get("ok")) or str(
+                delivery.get("status") or ""
+            ).lower() in {"sent", "already_sent"}
+            if recipient and successful:
+                successful_recipients.setdefault(recipient.lower(), recipient)
+            if account in account_delivery and recipient:
+                bucket = "sent" if successful else "failed"
+                account_delivery[account][bucket].append(recipient)
+
+        row = {
+            "Full link": target_url,
+            "Status": row_status,
+            "Evidence": (
+                "Sẵn sàng" if prepared.get("browser_evidence")
+                else ("Không bắt buộc" if prepared.get("browser_evidence_terminal") else "—")
+            ),
+            "Email": result.get("drafts_sendable", 0),
+            "✅ Sent": sent_count,
+            "Đã gửi đến": "; ".join(successful_recipients.values()) or "—",
+            "❌ Failed": result.get("sent_failed", 0),
+        }
+        sender_statuses = []
+        for sender in sender_accounts:
+            delivery = account_delivery[sender.lower()]
+            sent_to = list(dict.fromkeys(delivery["sent"]))
+            failed_to = list(dict.fromkeys(delivery["failed"]))
+            if sent_to and failed_to:
+                value = f"⚠️ Một phần → {'; '.join(sent_to)} | Lỗi → {'; '.join(failed_to)}"
+            elif failed_to:
+                value = f"❌ Lỗi → {'; '.join(failed_to)}"
+            elif sent_to:
+                value = f"✅ Đã gửi → {'; '.join(sent_to)}"
+            else:
+                value = "⏳ Chưa gửi"
+            sender_statuses.append(f"{sender}: {value}")
+        row["Trạng thái tài khoản"] = "\n".join(sender_statuses) or "—"
+        rows.append(row)
+    results_df = pd.DataFrame(rows)
+    results_df.insert(0, "STT", range(1, len(results_df) + 1))
+    st.subheader("Kết quả domain")
+    _dataframe_with_copy(results_df, min_height=300)
+
+
 with st.form("worker_form"):
     raw_domains = st.text_area(
-        "Danh sách domain",
+        "Danh sách URL hoặc nội dung thô",
         height=220,
         key="worker_domain_input",
-        placeholder="example-one.com\nexample-two.net\nhttps://example-three.org/login",
-        help="Mỗi dòng một URL đầy đủ hoặc domain. Worker giữ nguyên đường dẫn URL để kiểm tra đúng trang.",
+        placeholder="789win\nhttps://example.com/vi-vn/ (top3)\nGhi chú khác...",
+        help=(
+            "Có thể dán URL/domain hoặc nội dung kèm tiêu đề và ghi chú. Worker tự trích, "
+            "loại trùng và giữ nguyên đường dẫn URL để kiểm tra đúng trang."
+        ),
     )
-    preview_targets, preview_invalid = normalize_list(raw_domains)
-    if preview_targets or preview_invalid:
-        st.caption(
-            f"Chuẩn bị chạy: {len(preview_targets)} domain hợp lệ"
-            + (f" · {len(preview_invalid)} không hợp lệ" if preview_invalid else "")
-        )
-        if preview_invalid:
-            with st.expander(f"❌ Domain không hợp lệ — {len(preview_invalid)}", expanded=False):
-                st.code("\n".join(preview_invalid), language=None)
+    preview_targets = extract_domains_from_text(raw_domains)
+    if preview_targets:
+        st.caption(f"Đã nhận diện {len(preview_targets)} URL/domain hợp lệ; ghi chú và nội dung khác sẽ được bỏ qua.")
     force_precheck = st.checkbox(
         "Bỏ qua cache và check lại toàn bộ domain",
         value=False,
@@ -617,7 +647,8 @@ with st.form("worker_form"):
     precheck = st.form_submit_button("🔎 Check toàn bộ, lọc email & cloaking", type="primary")
 
 if precheck:
-    domains, invalid = normalize_list(raw_domains)
+    extracted_domains = extract_domains_from_text(raw_domains)
+    domains, invalid = normalize_list("\n".join(extracted_domains))
     existing_dir = domain_worker.find_active_job_dir()
     existing_status = load_status(existing_dir)
     active_job = existing_status and existing_status.get("state") in domain_worker.ACTIVE_JOB_STATES
@@ -626,15 +657,48 @@ if precheck:
             f"Job `{existing_status.get('job_id')}` vẫn đang chạy. "
             "Hãy chờ hoàn tất hoặc yêu cầu dừng trước khi tạo job mới."
         )
-    elif invalid:
-        st.error("Domain không hợp lệ: " + ", ".join(invalid[:10]))
     elif not domains:
-        st.warning("Danh sách chưa có domain hợp lệ.")
+        st.warning("Không tìm thấy URL/domain hợp lệ trong nội dung.")
     elif not selected_precheck_accounts:
         st.warning("Bạn phải chọn ít nhất một tài khoản email cho job này.")
     elif not pt.load_config().get("smtp_accounts"):
         st.error("Chưa cấu hình SMTP account trong config.ini.")
     else:
+        sent_map = _sent_domain_accounts_today()
+        no_email_domains = _no_email_domains_today()
+        selected_account_keys = {
+            str(account).strip().lower()
+            for account in selected_precheck_accounts
+            if str(account).strip()
+        }
+        keep_domains = []
+        fully_sent = []
+        no_email_found = []
+        partial_domains = []
+        for entry in domains:
+            domain_key = pt.normalize_domain(entry).lower().rstrip(".")
+            sent_accounts = sent_map.get(domain_key, set())
+            selected_sent = sent_accounts & selected_account_keys
+            remaining = selected_account_keys - selected_sent
+            if domain_key in no_email_domains:
+                no_email_found.append(entry)
+            elif selected_sent and not remaining:
+                fully_sent.append(entry)
+            else:
+                keep_domains.append(entry)
+                if selected_sent:
+                    partial_domains.append((entry, selected_sent, remaining))
+        st.session_state["worker_filter_skipped"] = {
+            "date": datetime.now().astimezone().date().isoformat(),
+            "fully_sent": fully_sent,
+            "no_email_found": no_email_found,
+        }
+        if not keep_domains:
+            st.warning(
+                "Tất cả URL đã được xử lý hôm nay: đã gửi đủ bằng các account "
+                "đang chọn hoặc đã xác định không có email nhận."
+            )
+            st.stop()
         os.makedirs(WORKER_DIR, exist_ok=True)
         job_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "_" + uuid.uuid4().hex[:8]
         job_dir = os.path.join(WORKER_DIR, job_id)
@@ -643,7 +707,7 @@ if precheck:
         job = {
             "job_id": job_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "domains": domains,
+            "domains": keep_domains,
             "batch_size": 5,
             "interval_seconds": 300,
             "include_vncert": False,
@@ -655,14 +719,29 @@ if precheck:
         domain_worker._atomic_json(job_path, job)
         launch_job_process(job_path)
         st.session_state["worker_job_dir"] = job_dir
+        st.session_state["worker_poll_job_dir"] = job_dir
+        st.session_state["worker_poll_started_at"] = time.time()
         st.success(
-            f"Đã bắt đầu kiểm tra email + cloaking cho **{len(domains)}** domain. "
+            f"Đã bắt đầu kiểm tra email + cloaking cho **{len(keep_domains)}** URL. "
             "Case cloaking có email nhận sẽ xuất hiện ngay tại Cloaking Review; "
             "case không có email sẽ được bỏ qua. Chưa có email nào được gửi."
         )
+        skipped_count = len(fully_sent) + len(no_email_found)
+        if skipped_count:
+            st.info(f"Đã bỏ qua {skipped_count} URL đã được xử lý trong ngày.")
+        if partial_domains:
+            st.caption(
+                f"{len(partial_domains)} URL đã gửi một phần; worker chỉ gửi các "
+                "delivery còn thiếu."
+            )
+        st.rerun()
 
 st.divider()
-job_dir = st.session_state.get("worker_job_dir") or latest_job_dir()
+session_job_dir = st.session_state.get("worker_job_dir")
+job_dir = (
+    session_job_dir if session_job_dir and _job_is_today(session_job_dir)
+    else latest_job_dir()
+)
 status = load_status(job_dir)
 cached_preflight = _load_preflight(job_dir)
 ready_domains = cached_preflight.get("ready") or []
@@ -681,48 +760,99 @@ if cached_preflight:
     display_status["cloaking_review_total"] = len(cloaking_review_domains)
     display_status["evidence_review_total"] = len(evidence_review_domains)
 
+_STAGE_LABELS = {
+    "starting": "Đang khởi động",
+    "recipient_and_cloaking": "Đang tìm email và kiểm tra cloaking",
+    "browser_evidence": "Đang tạo Browser Evidence",
+    "precheck_checkpoint": "Đang lưu kết quả precheck",
+    "ready": "Đã sẵn sàng gửi",
+    "starting_delivery": "Đang chuẩn bị gửi",
+    "draft_and_delivery": "Đang tạo draft và gửi email",
+    "delivery_checkpoint": "Đang lưu kết quả delivery",
+    "batch_wait": "Đang nghỉ giữa hai batch",
+    "starting_next_batch": "Đang bắt đầu batch tiếp theo",
+    "finished": "Đã hoàn tất",
+}
+_initial_worker_active = bool(
+    (status and status.get("state") in domain_worker.ACTIVE_JOB_STATES)
+    or (job_dir and st.session_state.get("worker_poll_job_dir") == job_dir)
+)
+
+
+@st.fragment(run_every="3s" if _initial_worker_active else None)
+def _render_live_worker_progress(active_job_dir: str) -> None:
+    latest = load_status(active_job_dir) or {}
+    poll_marker_active = st.session_state.get("worker_poll_job_dir") == active_job_dir
+    poll_age = max(0.0, time.time() - float(st.session_state.get("worker_poll_started_at", 0) or 0))
+    if not latest:
+        if poll_marker_active and poll_age < 15:
+            st.status("Đang khởi động tiến trình check...", state="running", expanded=True)
+            return
+        st.error("Không đọc được trạng thái worker sau khi khởi chạy. Hãy kiểm tra log tiến trình.")
+        if poll_marker_active:
+            st.session_state.pop("worker_poll_job_dir", None)
+            st.session_state.pop("worker_poll_started_at", None)
+        return
+    state = str(latest.get("state") or "")
+    if poll_marker_active and state not in domain_worker.ACTIVE_JOB_STATES and poll_age < 5:
+        st.status("Đang khởi động worker...", state="running", expanded=True)
+        return
+    stage = _STAGE_LABELS.get(str(latest.get("current_stage") or ""), "Đang xử lý")
+    if state == "prechecking":
+        message = (
+            f"Precheck {latest.get('precheck_processed', 0)}/"
+            f"{latest.get('precheck_total', 0)} URL — {stage}"
+        )
+        status_state = "running"
+    elif state == "ready":
+        message = f"Precheck hoàn tất — {latest.get('ready_total', 0)} URL sẵn sàng gửi"
+        status_state = "complete"
+    elif state in {"running", "waiting"}:
+        message = (
+            f"Worker {latest.get('processed', 0)}/{latest.get('total', 0)} URL — {stage}"
+        )
+        status_state = "running"
+    elif state == "failed":
+        message, status_state = "Check/worker gặp lỗi", "error"
+    elif state == "stopped":
+        message, status_state = "Worker đã dừng", "error"
+    else:
+        message, status_state = "Worker đã hoàn tất", "complete"
+    st.status(message, state=status_state, expanded=state in domain_worker.ACTIVE_JOB_STATES)
+    if latest.get("current_domain"):
+        st.caption(f"{stage}: `{latest['current_domain']}`")
+    if state == "waiting":
+        st.caption(f"Batch tiếp theo sau khoảng {latest.get('next_batch_in_seconds', 0)} giây.")
+    if state in domain_worker.ACTIVE_JOB_STATES:
+        _render_job_metrics(latest)
+    if latest.get("error"):
+        st.error(latest["error"])
+    if _initial_worker_active and state not in domain_worker.ACTIVE_JOB_STATES:
+        if st.session_state.get("worker_poll_job_dir") == active_job_dir:
+            del st.session_state["worker_poll_job_dir"]
+            st.session_state.pop("worker_poll_started_at", None)
+        st.rerun(scope="app")
+
+
+@st.fragment(run_every="3s" if _initial_worker_active else None)
+def _render_live_worker_results(active_job_dir: str) -> None:
+    """Keep the result table live at its intended position below send config."""
+    latest = load_status(active_job_dir) or {}
+    if latest:
+        _render_live_domain_results(active_job_dir, latest)
+
 if not job_dir:
-    st.info("Chưa có worker job nào.")
+    historical_job = latest_job_dir(current_day_only=False)
+    if historical_job:
+        st.info("Hôm nay chưa có worker job. Job gần nhất thuộc ngày trước và chỉ được giữ để audit.")
+    else:
+        st.info("Chưa có worker job nào.")
 elif not status:
-    st.status("Đang khởi động tiến trình check...", state="running", expanded=True)
+    _render_live_worker_progress(job_dir)
     if st.button("🔄 Làm mới trạng thái", key="refresh_starting_check"):
         st.rerun()
 else:
-    if status.get("state") == "prechecking":
-        st.status(
-            f"Đang check email + cloaking toàn bộ danh sách — "
-            f"{status.get('precheck_processed', 0)}/{status.get('precheck_total', 0)} domain...",
-            state="running",
-            expanded=True,
-        )
-    elif status.get("state") == "ready":
-        st.status(
-            f"Check hoàn tất — {status.get('ready_total', 0)} domain thường sẵn sàng gửi; "
-            f"{display_status.get('cloaking_review_total', 0)} case cloaking có email đã tách riêng.",
-            state="complete",
-            expanded=False,
-        )
-    elif status.get("state") == "failed":
-        st.status("Check/worker gặp lỗi.", state="error", expanded=True)
-    if status.get("state") == "prechecking":
-        if st.button("🔄 Làm mới trạng thái", key="refresh_active_check"):
-            st.rerun()
-    if status.get("current_domain"):
-        action = "Đang precheck email + cloaking" if status.get("state") == "prechecking" else "Đang xử lý"
-        st.info(f"{action}: `{status['current_domain']}`")
-    if status.get("error"):
-        st.error(status["error"])
-    if status.get("state") == "prechecking":
-        st.subheader("Tiến độ precheck")
-        _render_job_metrics(display_status)
-        st.caption(
-            f"Đã precheck {status.get('precheck_processed', 0)}/{status.get('precheck_total', 0)} domain; "
-            f"{status.get('precheck_cached', 0)} domain lấy email từ cache hôm nay; "
-            f"tìm thấy {status.get('ready_total', 0)} domain thường có email để gửi; "
-            f"đã tách {display_status.get('cloaking_review_total', 0)} case có email "
-            "sang Cloaking Review. "
-            "Chưa gửi email trong pha này."
-        )
+    _render_live_worker_progress(job_dir)
 
     excluded_no_email = status.get("excluded_no_email") or []
     cloaking_without_email = [
@@ -752,63 +882,8 @@ else:
 
     worker_state = status.get("state")
     active_worker = worker_state in ("prechecking", "running", "waiting")
-    if cloaking_review_domains:
-        queue_labels = {
-            review_queue.PENDING_REVIEW: "Chờ duyệt",
-            review_queue.PARTIAL: "Đã gửi một phần",
-            review_queue.QUEUED_CLOAKING: "Đang gửi kèm evidence",
-            review_queue.QUEUED_NORMAL: "Đang gửi report thường",
-            review_queue.SENT: "Đã gửi",
-            review_queue.FAILED: "Gửi lỗi — có thể retry",
-            review_queue.SKIPPED: "Đã bỏ qua",
-        }
-
-        def _preflight_queue_label(item):
-            if item.get("queue_error"):
-                return "Lỗi ghi queue"
-            current = review_queue.load_item(str(item.get("queue_id") or ""))
-            state = (current or {}).get("state") or item.get("queue_state")
-            return queue_labels.get(state, "Đã tách")
-
-        cloaking_table = pd.DataFrame({
-            "STT": range(1, len(cloaking_review_domains) + 1),
-            "Full link": [item.get("target_url", "") for item in cloaking_review_domains],
-            "Domain": [item.get("domain", "") for item in cloaking_review_domains],
-            "Verdict": [item.get("cloaking_verdict", "INCONCLUSIVE") for item in cloaking_review_domains],
-            "Điểm": [item.get("cloaking_score", 0) for item in cloaking_review_domains],
-            "Email gửi tới": [
-                ", ".join(
-                    recipient.get("email", "")
-                    for recipient in item.get("recipients", [])
-                    if recipient.get("email")
-                ) or "—"
-                for item in cloaking_review_domains
-            ],
-            "Queue": [_preflight_queue_label(item) for item in cloaking_review_domains],
-        })
-        st.warning(
-            f"Đã tách **{len(cloaking_review_domains)}** case khỏi Domain Worker. "
-            "Bạn có thể mở Cloaking Review, xem draft và gửi trực tiếp ngay cả khi "
-            "precheck/worker thường vẫn đang chạy."
-        )
-        _review_page_link(f"Mở Cloaking Review ({len(cloaking_review_domains)})")
-        with st.expander(
-            f"🕵️ Case cloaking đã tách — {len(cloaking_review_domains)}",
-            expanded=status.get("state") == "prechecking",
-        ):
-            _dataframe_with_copy(cloaking_table)
-    if evidence_review_domains:
-        st.warning(
-            f"Có **{len(evidence_review_domains)}** domain thường có email nhưng công cụ "
-            "không tạo được ảnh. Các domain này đã bị tách khỏi luồng gửi tự động."
-        )
-        _evidence_review_page_link(
-            f"Mở Domain Evidence Review ({len(evidence_review_domains)})"
-        )
-        st.caption(
-            "Upload ảnh, xem draft đầy đủ và gửi/retry theo từng tài khoản tại trang review. "
-            "Domain Worker chỉ theo dõi precheck và trạng thái, không xử lý ảnh thủ công."
-        )
+    # Các ngoại lệ đã có page review riêng và được gom tại khu
+    # "Cần bạn xử lý"; không lặp lại bảng ở giữa trang.
     if status.get("state") == "ready" and not ready_domains:
         st.subheader("Kết quả precheck")
         _render_job_metrics(display_status)
@@ -816,23 +891,6 @@ else:
             if status.get("state") == "ready":
                 st.subheader("Kết quả precheck")
                 _render_job_metrics(display_status)
-            if status.get("state") == "ready":
-                ready_table = pd.DataFrame({
-                    "STT": range(1, len(ready_domains) + 1),
-                    "Full link": [item.get("target_url", "") for item in ready_domains],
-                    "Domain": [item.get("domain", "") for item in ready_domains],
-                    "Cloaking": [item.get("cloaking_verdict", "NO_SIGNAL") for item in ready_domains],
-                    "Email gửi tới": [
-                        ", ".join(
-                            recipient.get("email", "")
-                            for recipient in item.get("recipients", [])
-                            if recipient.get("email")
-                        )
-                        for item in ready_domains
-                    ],
-                })
-                with st.expander(f"📋 Domain sẵn sàng gửi — {len(ready_domains)}", expanded=False):
-                    _dataframe_with_copy(ready_table)
             if active_worker:
                 st.info("Cache precheck vẫn được giữ. Worker hiện đang chạy nên chưa thể khởi chạy thêm tiến trình.")
             elif worker_state == "completed":
@@ -872,11 +930,20 @@ else:
                     help="Chỉ bật khi toàn bộ domain trong danh sách nhắm tới nạn nhân tại Việt Nam.",
                 )
                 selected_accounts = job_selected_accounts
+                delivery_preview = domain_worker.build_preflight_delivery_preview(
+                    ready_domains, selected_accounts, include_vncert=bool(include_vncert),
+                )
+                st.caption(
+                    f"Dự kiến theo recipient đã precheck: **{delivery_preview['pending']}** "
+                    f"delivery còn cần gửi · **{delivery_preview['already_sent']}** "
+                    "delivery đã thành công hôm nay sẽ được bỏ qua. Draft cuối cùng "
+                    "vẫn được worker tạo và kiểm tra trước SMTP."
+                )
                 if not _all_accounts:
                     st.error("⚠️ Chưa cấu hình SMTP account trong config.ini.")
                 confirmed = st.checkbox(
                     "Tôi xác nhận danh sách đã được kiểm tra và cho phép worker gửi email report thật tự động.",
-                    value=True,
+                    value=False,
                 )
                 start = st.form_submit_button(
                     "↻ Retry phần còn thiếu" if worker_state == "completed" else "▶ Khởi chạy worker",
@@ -916,140 +983,28 @@ else:
                     prepared_job.pop("retry_targets", None)
                     domain_worker._atomic_json(prepared_job_path, prepared_job)
                     launch_job_process(prepared_job_path)
+                    st.session_state["worker_job_dir"] = job_dir
+                    st.session_state["worker_poll_job_dir"] = job_dir
+                    st.session_state["worker_poll_started_at"] = time.time()
                     action_text = "retry" if worker_state == "completed" else "xử lý"
                     st.success(
                         f"Đã yêu cầu worker {action_text} {len(ready_domains)} domain. "
                         "Các email đã thành công hôm nay sẽ tự động được bỏ qua."
                     )
+                    st.rerun()
+    _render_live_worker_results(job_dir)
     preflight_ready = (_load_preflight(job_dir).get("ready") or [])
     results_list = status.get("results") or []
     if preflight_ready or results_list:
-        # Luôn hiện toàn bộ danh sách worker ngay lần render đầu tiên. Kết quả mới
-        # được ghép vào đúng dòng khi người dùng bấm Làm mới trạng thái.
-        result_by_target = {r.get("target_url"): r for r in results_list if r.get("target_url")}
-        worker_items = preflight_ready or results_list
-        summary_rows = []
-        _SKIP_LABELS = {
-            "manual_review_required": "⏸ Chờ xác nhận cloaking",
-            "already_sent": "✅ Đã gửi trước đó",
-            "no_sendable_email": "⏭ không có email để gửi",
-        }
-        sent_accounts_ui = _sent_domain_accounts_today()
-        sent_details_ui = _sent_domain_details_today()
-        for prepared in worker_items:
-            target_url = prepared.get("target_url", "")
-            r = result_by_target.get(target_url, prepared if not preflight_ready else {})
-            domain_key = (r.get("domain") or prepared.get("domain", "")).lower().rstrip(".")
-            cached_accounts_for_domain = sent_accounts_ui.get(domain_key, set())
-            fully_sent_by_selected_accounts = r.get("skipped") == "already_sent"
-            sent_to_list = r.get("sent_to") or []
-            skip_reason = r.get("skipped")
-            sender_addresses = "; ".join(dict.fromkeys(
-                str(s.get("account", "")).strip() for s in sent_to_list
-                if str(s.get("account", "")).strip()
-            )) or "—"
-            successful_account_names = set(cached_accounts_for_domain)
-            successful_account_names.update(
-                str(s.get("account", "")).strip().lower()
-                for s in sent_to_list
-                if s.get("ok") and str(s.get("account", "")).strip()
-            )
-            successful_sender_addresses = "; ".join(sorted(successful_account_names)) or "—"
-            recipient_addresses = "; ".join(dict.fromkeys(
-                str(s.get("to", "")).strip() for s in sent_to_list
-                if str(s.get("to", "")).strip()
-            )) or "—"
-            if fully_sent_by_selected_accounts and not r.get("sent_ok", 0):
-                row_status = "✅ Đã gửi trước đó"
-                cached_details = sent_details_ui.get(domain_key, [])
-                sender_addresses = "; ".join(dict.fromkeys(
-                    detail.get("account", "") for detail in cached_details if detail.get("account")
-                )) or "; ".join(sorted(cached_accounts_for_domain)) or "—"
-                recipient_addresses = "; ".join(dict.fromkeys(
-                    detail.get("to", "") for detail in cached_details if detail.get("to")
-                )) or "—"
-                display_sent_ok = len(cached_accounts_for_domain)
-            elif r:
-                if r.get("error"):
-                    row_status = "❌ Lỗi"
-                elif skip_reason:
-                    row_status = _SKIP_LABELS.get(skip_reason, "⏭ Bỏ qua")
-                elif r.get("sent_failed", 0) and not r.get("sent_ok", 0):
-                    row_status = "❌ Thất bại"
-                elif r.get("sent_ok", 0):
-                    row_status = "✅ Đã gửi"
-                else:
-                    row_status = "✅ Hoàn tất"
-            elif status.get("current_domain") == target_url:
-                row_status = "🔄 Đang chạy"
-            else:
-                row_status = "⏳ Chờ"
-            if not fully_sent_by_selected_accounts or r.get("sent_ok", 0):
-                display_sent_ok = r.get("sent_ok", 0)
-            summary_rows.append({
-                "Full link": target_url,
-                "Domain": r.get("domain") or prepared.get("domain", ""),
-                "Status": row_status,
-                "Verdict": r.get("reputation") or (_SKIP_LABELS.get(skip_reason, "skipped") if skip_reason else "—"),
-                "Cloaking": (
-                    f"{r.get('cloaking_verdict')} ({r.get('cloaking_score', 0)})"
-                    if r.get("cloaking_verdict") else "—"
-                ),
-                "Drafts": r.get("drafts_total", 0),
-                "Sendable": r.get("drafts_sendable", 0),
-                "✅ Sent": display_sent_ok,
-                "❌ Failed": r.get("sent_failed", 0),
-                "Account đã gửi thành công": successful_sender_addresses,
-                "Địa chỉ gửi": sender_addresses,
-                "Địa chỉ nhận": recipient_addresses,
-            })
-        results_df = pd.DataFrame(summary_rows)
-        results_df.insert(0, "STT", range(1, len(results_df) + 1))
-        if status.get("state") != "ready":
-            st.subheader("Theo dõi worker")
-            total_sent = sum(int(row.get("✅ Sent", 0) or 0) for row in summary_rows)
-            _render_job_metrics(status, total_sent=total_sent)
-        current_target = status.get("current_domain")
-        if current_target:
-            st.info(
-                f"🔄 Domain đang xử lý: `{pt.normalize_domain(current_target).lower().rstrip('.')}`\n\n"
-                f"Full link: `{current_target}`"
-            )
-        elif status.get("state") == "waiting":
-            completed_result_targets = set(result_by_target)
-            next_item = next(
-                (
-                    item for item in worker_items
-                    if item.get("target_url") not in completed_result_targets
-                ),
-                None,
-            )
-            if next_item:
-                st.info(
-                    f"⏳ Đang nghỉ giữa batch. Domain xử lý tiếp theo: "
-                    f"`{next_item.get('domain', '')}` — `{next_item.get('target_url', '')}`"
-                )
-        _dataframe_with_copy(results_df)
-
-        manual_review_count = sum(
-            1 for item in result_by_target.values()
-            if item.get("skipped") == "manual_review_required"
-        )
-        if manual_review_count:
-            with st.container(border=True):
-                st.subheader("Cloaking đã được cách ly")
-                st.write(
-                    f"**{manual_review_count}** domain trong job này không được gửi tự động. "
-                    "Hãy duyệt bằng chứng và chọn hành động tại trang riêng."
-                )
-                _review_page_link("Mở Cloaking Review")
-
+        # Bảng kết quả chính nằm trong fragment realtime phía trên. Phần dưới chỉ
+        # giữ chi tiết lỗi/email đã gửi để tránh render trùng một bảng trạng thái cũ.
         error_rows = []
         for item in results_list:
             errors = []
             if item.get("error"):
                 errors.append(str(item["error"]))
             errors.extend(
+                f"[{sent.get('error_code') or 'DELIVERY_FAILED'}] "
                 f"{sent.get('to', '')} (via {sent.get('account', '')}): {sent.get('error')}"
                 for sent in (item.get("sent_to") or [])
                 if sent.get("error")
@@ -1077,7 +1032,8 @@ else:
                 for s in sent_to_list:
                     icon = "✅" if s["ok"] else "❌"
                     err = f" — {s['error']}" if s.get("error") else ""
-                    st.caption(f"{icon} `{s['to']}` via `{s['account']}` ({s['draft']}){err}")
+                    error_code = f" [{s.get('error_code')}]" if s.get("error_code") else ""
+                    st.caption(f"{icon}{error_code} `{s['to']}` via `{s['account']}` ({s['draft']}){err}")
 
     a, b = st.columns(2)
     if status.get("state") != "prechecking":

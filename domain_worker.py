@@ -423,6 +423,66 @@ def _successfully_sent_deliveries_today(
     return deliveries
 
 
+def build_preflight_delivery_preview(
+    ready_items: list[dict], account_names: list[str], *, include_vncert: bool = False,
+) -> dict:
+    """Estimate delivery scope from persisted preflight without touching SMTP.
+
+    Draft generation still happens inside the worker, so this preview deliberately
+    describes recipient/account routes rather than claiming an exact final body.
+    """
+    sent_deliveries = _successfully_sent_deliveries_today()
+    rows = []
+    for prepared in ready_items or []:
+        domain = str(prepared.get("domain") or "").strip().lower().rstrip(".")
+        target_url = str(prepared.get("target_url") or "").strip()
+        if not domain or not target_url:
+            continue
+        for recipient in prepared.get("recipients") or []:
+            if not isinstance(recipient, dict):
+                continue
+            channel = str(recipient.get("channel") or "").strip().lower()
+            email = str(recipient.get("email") or "").strip().lower()
+            if channel not in {"registrar", "registry", "hosting"} or not email:
+                continue
+            draft = f"{domain}_{channel}_report.txt"
+            for account in account_names or []:
+                account_name = str(account or "").strip().lower()
+                if not account_name:
+                    continue
+                key = (domain, account_name, draft.lower(), email)
+                rows.append({
+                    "target_url": target_url,
+                    "domain": domain,
+                    "account": account_name,
+                    "recipient": email,
+                    "channel": channel,
+                    "draft": draft,
+                    "status": "already_sent" if key in sent_deliveries else "pending",
+                })
+    return {
+        "rows": rows,
+        "total": len(rows),
+        "pending": sum(row["status"] == "pending" for row in rows),
+        "already_sent": sum(row["status"] == "already_sent" for row in rows),
+        "include_vncert": bool(include_vncert),
+    }
+
+
+def _delivery_error_code(stage: str, error: str) -> str:
+    stage = str(stage or "").strip().lower()
+    message = str(error or "").lower()
+    if stage == "authenticate":
+        return "SMTP_AUTH_FAILED"
+    if stage in {"connect", "starttls"}:
+        return "SMTP_CONNECTION_FAILED"
+    if stage == "send" and any(token in message for token in ("recipient", "refused", "550", "553")):
+        return "RECIPIENT_REJECTED"
+    if stage == "send":
+        return "SMTP_SEND_FAILED"
+    return "DELIVERY_FAILED"
+
+
 def _successfully_reported_domain_accounts() -> set[tuple[str, str]]:
     """Return every successful ``(domain, sender account)`` pair in the sent cache."""
     reported = set()
@@ -510,6 +570,11 @@ def _send_domain_drafts(
                 parsed = pt.parse_draft_email(path)
             except Exception as exc:
                 summary["sent_failed"] += 1
+                summary["sent_to"].append({
+                    "to": "", "draft": filename, "account": "", "ok": False,
+                    "status": "failed", "stage": "draft",
+                    "error_code": "DRAFT_FAILED", "error": str(exc),
+                })
                 _append_event(events_path, {"type": "draft_error", "domain": domain, "draft": filename, "error": str(exc)})
                 continue
         if not parsed.get("to"):
@@ -525,7 +590,9 @@ def _send_domain_drafts(
             error = "; ".join(delivery_errors)
             summary["sent_to"].append({
                 "to": parsed.get("to") or "", "draft": filename,
-                "account": "", "ok": False, "status": "failed", "error": error,
+                "account": "", "ok": False, "status": "failed",
+                "stage": "validation", "error_code": "DRAFT_VALIDATION_FAILED",
+                "error": error,
             })
             _append_event(events_path, {
                 "type": "draft_error", "domain": domain, "draft": filename,
@@ -584,6 +651,10 @@ def _send_domain_drafts(
                 "account": delivery_account,
                 "ok": ok,
                 "status": "sent" if ok else "failed",
+                "stage": result.get("stage") or ("sent" if ok else ""),
+                "error_code": "" if ok else _delivery_error_code(
+                    result.get("stage") or "", result.get("error") or "",
+                ),
                 "error": result.get("error") or "",
             })
             row = {
@@ -1929,7 +2000,7 @@ def run_job(job_path: str):
         "precheck_total": len(targets), "precheck_processed": 0, "ready_total": 0,
         "precheck_cached": 0, "cloaking_review_total": 0,
         "evidence_review_total": 0,
-        "current_domain": None, "current_batch": 0, "total_batches": 0,
+        "current_domain": None, "current_stage": "starting", "current_batch": 0, "total_batches": 0,
         "next_batch_in_seconds": 0, "results": previous_results, "excluded_no_email": [],
         "excluded_already_sent": [], "error": None,
     }
@@ -1985,6 +2056,7 @@ def run_job(job_path: str):
                     _atomic_json(status_path, status)
                     continue
                 status["current_domain"] = target
+                status["current_stage"] = "recipient_and_cloaking"
                 _atomic_json(status_path, status)
                 _append_event(events_path, {"type": "precheck_started", "target_url": target})
                 started = time.time()
@@ -2121,6 +2193,8 @@ def run_job(job_path: str):
                 elif recipients:
                     if requested_preflight_version >= 4:
                         prepared["require_browser_evidence"] = True
+                        status["current_stage"] = "browser_evidence"
+                        _atomic_json(status_path, status)
                         capture = _capture_worker_browser_evidence(target)
                         if browser_evidence.evidence_attachment_paths(capture):
                             prepared["browser_evidence"] = capture
@@ -2172,6 +2246,7 @@ def run_job(job_path: str):
                 status["cloaking_review_total"] = len(cloaking_review_items)
                 status["evidence_review_total"] = len(evidence_review_items)
                 status["current_domain"] = None
+                status["current_stage"] = "precheck_checkpoint"
                 _write_preflight(
                     preflight_path, version=requested_preflight_version, ready=ready,
                     excluded_no_email=status["excluded_no_email"],
@@ -2203,6 +2278,7 @@ def run_job(job_path: str):
             "state": next_state, "total": len(previous_results) + len(ready),
             "processed": len(previous_results),
             "ready_total": len(ready), "current_domain": None,
+            "current_stage": "ready" if precheck_only else "starting_delivery",
             "total_batches": (len(ready) + batch_size - 1) // batch_size,
         })
         _atomic_json(status_path, status)
@@ -2229,6 +2305,7 @@ def run_job(job_path: str):
                 target = prepared["target_url"]
                 domain = prepared["domain"]
                 status["current_domain"] = target
+                status["current_stage"] = "draft_and_delivery"
                 _atomic_json(status_path, status)
                 configured_accounts = cfg.get("smtp_accounts") or []
                 if configured_accounts:
@@ -2294,6 +2371,7 @@ def run_job(job_path: str):
                 status["results"].append(domain_result)
                 status["processed"] += 1
                 status["current_domain"] = None
+                status["current_stage"] = "delivery_checkpoint"
                 _atomic_json(status_path, status)
                 _append_event(events_path, {"type": "domain_finished", **domain_result})
                 if stopped_during_send:
@@ -2303,11 +2381,13 @@ def run_job(job_path: str):
                 break
             if offset + batch_size < len(ready):
                 status["state"] = "waiting"
+                status["current_stage"] = "batch_wait"
                 _atomic_json(status_path, status)
                 if _interruptible_wait(interval_seconds, stop_path, status_path, status):
                     status["state"] = "stopped"
                     break
                 status["state"] = "running"
+                status["current_stage"] = "starting_next_batch"
 
         if status["state"] not in ("stopped", "failed"):
             status["state"] = "completed"
@@ -2317,6 +2397,10 @@ def run_job(job_path: str):
         _append_event(events_path, {"type": "job_error", "error": str(exc)})
     finally:
         status["current_domain"] = None
+        status["current_stage"] = (
+            "finished" if status.get("state") in {"completed", "failed", "stopped"}
+            else str(status.get("state") or "idle")
+        )
         status["next_batch_in_seconds"] = 0
         status["finished_at"] = _now()
         _atomic_json(status_path, status)

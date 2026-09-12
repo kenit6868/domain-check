@@ -546,21 +546,50 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
 
 ### Domain Worker — chọn nhiều tài khoản và cache theo delivery
 
-- Trang `pages/6_Domain_Worker.py` có một bộ chọn tài khoản SMTP duy nhất nằm trước cả bước lọc nội dung thô,
-  mặc định toàn bộ account từ `config.ini`. Lọc domain/hiển thị cache dùng đúng tập account đang chọn; lựa chọn
+- Trang `pages/6_Domain_Worker.py` có một bộ chọn tài khoản SMTP và một ô nhập duy nhất nhận cả URL lẫn nội dung
+  thô, mặc định toàn bộ account từ `config.ini`. Parser bỏ ghi chú/token lỗi và không chặn batch nếu vẫn còn URL
+  hợp lệ. Lọc domain/hiển thị cache dùng đúng tập account đang chọn; lựa chọn
   sau đó được lưu vào `job.json` và giữ nguyên từ precheck đến khi gửi.
 - Worker không còn coi một lần gửi thành công là hoàn tất toàn domain/account. Cache trong ngày xét theo
   `(domain, account, draft_file, recipient)`, nên draft lỗi vẫn được retry mà draft đã thành công không bị gửi lại.
 - Không được dùng cache `(domain, account)` để loại domain trước khi sinh draft: ở thời điểm precheck chưa thể
   biết tất cả delivery của domain đã hoàn tất hay chưa.
-- Bảng theo dõi worker có cột `Account đã gửi thành công`, hợp nhất account thành công trong cache hôm nay và
-  kết quả lượt chạy hiện tại; cột `Địa chỉ gửi` vẫn là danh sách account đã thử gửi, kể cả lần lỗi.
-- UI chỉ giữ một bảng theo dõi chính. Preview trước precheck là dòng đếm (chỉ mở danh sách khi có input lỗi),
+- Bảng theo dõi worker chính giữ URL, trạng thái, evidence, bộ đếm gửi/lỗi và cột `Đã gửi đến` chỉ liệt kê
+  recipient đã thành công/đã gửi trước đó trong ngày; account, draft và lỗi cụ thể vẫn nằm trong phần chi tiết
+  email để không làm bảng chính quá rộng. Recipient gửi lỗi không được hiển thị như đã gửi.
+- Bảng này phải được render bên trong cùng fragment polling với tiến độ, đọc lại
+  `status.json` mỗi chu kỳ. Chỉ dùng một cột `Trạng thái tài khoản`, trong mỗi ô
+  liệt kê mọi account của job và tổng hợp delivery thành `Đã gửi`, `Một phần`,
+  `Lỗi` hoặc `Chưa gửi`, kèm recipient; không tạo cột động theo account và không
+  giữ thêm bản sao tĩnh của bảng bên ngoài fragment. Fragment bảng kết quả phải
+  được gọi sau form **Cấu hình gửi worker**, không đặt bảng chen giữa tiến độ và
+  cấu hình. Riêng bảng kết quả dùng `min_height=300`; các bảng phụ vẫn dùng chiều
+  cao thích ứng mặc định để không chiếm chỗ.
+- UI chỉ giữ một bảng theo dõi chính. Preview trước precheck là dòng đếm URL parser nhận diện,
   domain đã gửi đủ/không có email được gộp vào một bảng `Domain bị bỏ qua`, bảng ready chỉ hiện ở state `ready`,
   và metric đổi theo phase để không hiển thị sai kiểu `ready 0/N`.
+- Khu `Cần bạn xử lý` là vị trí duy nhất ở đầu page dẫn sang Cloaking Review/Domain Evidence Review. Xác nhận
+  cho phép gửi thật mặc định `False`; page chỉ tự phục hồi job ngày địa phương hiện tại, còn job ngày cũ chỉ audit.
 - Khi job ở state `completed`, panel trên bảng không được nói “có thể chạy worker ngay”: phải tổng hợp số email
   gửi mới/số delivery bỏ qua do cache/số lỗi, đổi form thành `Retry phần còn thiếu`, và nhắc rõ retry không gửi
   trùng delivery đã thành công trong ngày.
+- Khối tiến độ chạy trong `st.fragment(run_every="3s")` chỉ khi state ban đầu là
+  `prechecking`/`running`/`waiting`; khi thấy terminal state phải full rerun một
+  lần để dừng lịch refresh và cập nhật phần còn lại. `status.json.current_stage`
+  chỉ chứa mã stage, URL và counter, không chứa body/credential.
+- Sau thao tác launch precheck/worker/retry, UI phải ghi poll marker vào session
+  state và `st.rerun()` ngay để fragment bật `run_every` trong lần render kế tiếp.
+  Giữ grace period ngắn vì process con có thể chưa kịp thay trạng thái `ready`
+  cũ hoặc tạo `status.json`; xóa marker khi đọc được terminal state thật.
+- Trước nút gửi, `build_preflight_delivery_preview()` chỉ ước tính route theo
+  preflight recipient × account và sent-delivery ledger. UI phải gọi đúng là
+  “dự kiến”; không được khẳng định exact draft/body trước khi `run_check()` sinh
+  và validate draft. UI chỉ hiện tổng pending/already-sent, không dựng bảng route
+  riêng. Metadata lỗi delivery giữ `stage` + `error_code` có cấu trúc.
+- Chỉ fragment được render metric/current domain/countdown khi job active. Không
+  render lại metric batch tĩnh hoặc current-domain status dưới bảng kết quả.
+  Không lặp bảng ready/cloaking trên Domain Worker vì đã có bảng kết quả chính và
+  các page review chuyên biệt.
 - Kết quả “Lọc domain” phân loại tương đối theo tập account đang chọn: chưa account được chọn nào gửi, đã gửi
   một phần (hiện rõ account đã gửi/còn thiếu), hoặc đã gửi đủ. Thông báo tổng hợp luôn nêu riêng số domain thực
   sự được đưa xuống worker để tránh gọi domain đã gửi một phần là domain mới.

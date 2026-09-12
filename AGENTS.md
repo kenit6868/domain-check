@@ -247,6 +247,70 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-12 — Tăng chiều cao mặc định riêng của bảng **Kết quả domain** lên
+  tối thiểu 300 px để dễ theo dõi batch khi mới có ít dòng; các bảng phụ vẫn co
+  theo nội dung. File chính: `pages/6_Domain_Worker.py`, test UI; tài liệu:
+  `README.md`, `CLAUDE.md` và file này. Đã kiểm tra 8/8 test UI Domain Worker,
+  compileall và diff check; không đổi nghiệp vụ worker nên không chạy lại full suite.
+
+- 2026-09-12 — Sắp xếp lại Domain Worker theo thứ tự **tiến độ → cấu hình gửi
+  worker → kết quả domain**. Tách bảng và tiến độ thành hai fragment cùng poll
+  mỗi 3 giây để bảng vẫn realtime nhưng không chen lên trên form cấu hình. File
+  chính: `pages/6_Domain_Worker.py`, test UI; tài liệu: `README.md`, `CLAUDE.md`,
+  `03_Technical_Guide.md`, file này và skill dự án. Đã kiểm tra 58 test tập
+  trung, 304/304 full unittest, compileall, pip check và diff check.
+
+- 2026-09-12 — Bảng **Kết quả domain** của Domain Worker chuyển vào fragment
+  polling nên cập nhật cùng tiến độ mỗi 3 giây. Bảng dùng đúng một cột **Trạng
+  thái tài khoản** để liệt kê mọi account trong job với **Đã gửi / Một phần /
+  Lỗi / Chưa gửi** và recipient tương ứng; thêm account không làm rộng bảng, và
+  đã bỏ bản sao bảng tĩnh từng chỉ đổi sau full refresh. File
+  chính: `pages/6_Domain_Worker.py`, test UI; tài liệu: `README.md`, `CLAUDE.md`,
+  `03_Technical_Guide.md`, file này và skill dự án. Đã kiểm tra 58 test tập
+  trung, 304/304 full unittest, compileall, pip check và diff check.
+
+- 2026-09-12 — Sửa Domain Worker không tự bật real-time ngay sau nút **Khởi
+  chạy worker**: cả precheck, launch gửi và retry đều ghi session poll marker,
+  rerun page ngay để fragment bật chu kỳ 3 giây; thêm grace period cho khoảng
+  trễ process con tạo/cập nhật status và tự dọn marker khi terminal. Không còn
+  phải bấm **Làm mới trạng thái** để kích hoạt polling. File chính:
+  `pages/6_Domain_Worker.py`, test UI; tài liệu: `README.md`, `CLAUDE.md`,
+  `03_Technical_Guide.md`, file này và skill dự án. Đã kiểm tra 58 test tập
+  trung, 304/304 full unittest, compileall, pip check và diff check.
+
+- 2026-09-12 — Bảng **Kết quả domain** của Domain Worker bổ sung cột **Đã gửi
+  đến**, hợp nhất và loại trùng địa chỉ nhận từ kết quả job cùng sent ledger
+  thành công của ngày hiện tại. Chỉ delivery `sent`/`already_sent` thành công
+  được hiển thị; recipient gửi lỗi không bị ghi nhận nhầm là đã gửi. File chính:
+  `pages/6_Domain_Worker.py`, test UI; tài liệu: `README.md`, `CLAUDE.md`,
+  `03_Technical_Guide.md`, file này và skill dự án. Đã kiểm tra 58 test tập
+  trung, 304/304 full unittest, compileall, pip check và diff check.
+
+- 2026-09-12 — Domain Worker DW-2 bổ sung theo dõi active job tự động mỗi 3 giây
+  bằng fragment độc lập, ghi/hiển thị `current_stage` và full-rerun đúng một lần
+  khi job kết thúc để dừng polling. Form gửi có preview route dự kiến theo
+  URL/account/recipient/channel và sent ledger, không gọi đây là exact draft;
+  delivery result giữ stage/error code cho lỗi draft validation, SMTP auth,
+  connection, send hoặc recipient rejected. Worker vẫn tự sinh/validate draft và
+  gửi sau xác nhận, không có SMTP trong preview. File chính: `domain_worker.py`,
+  `pages/6_Domain_Worker.py`, test core/UI; tài liệu: `README.md`, `CLAUDE.md`,
+  `03_Technical_Guide.md`, file này và skill dự án. Đã kiểm tra 58 test tập
+  trung, 304/304 full unittest, compileall, pip check và diff check.
+  Sau phản hồi UX, fragment trở thành nguồn duy nhất hiển thị trạng thái/tiến độ/
+  batch/countdown; đã bỏ khối metric tĩnh trùng lặp và các bảng ready, cloaking,
+  delivery route ít dùng. Page chỉ giữ bảng kết quả domain, tổng delivery và các
+  expander lỗi/email cần thiết.
+
+- 2026-09-12 — Domain Worker DW-1 tối ưu UI mà không đổi pipeline gửi tự động:
+  gộp lọc nội dung thô và danh sách worker thành một ô nhập, parser bỏ qua ghi
+  chú/token lỗi nhưng vẫn chạy URL hợp lệ, tự lọc cache gửi/no-email trước khi
+  tạo job; gom link ngoại lệ vào khu `Cần bạn xử lý`, thu gọn KPI/bảng theo dõi,
+  bỏ CSS `.stale`, đặt xác nhận gửi thật mặc định tắt và chỉ tự phục hồi job của
+  ngày địa phương hiện tại. Job cũ vẫn giữ để audit. File chính:
+  `pages/6_Domain_Worker.py`, test UI; tài liệu: `README.md`, `CLAUDE.md`,
+  `03_Technical_Guide.md`, file này và skill dự án. Đã kiểm tra 58 test tập
+  trung, 302/302 full unittest, compileall, pip check và diff check.
+
 - 2026-09-12 — Sửa Browser Evidence trên bản Windows chia sẻ bị Playwright báo
   thiếu `chromium-*/chrome-win64/chrome.exe`: runtime frozen không còn để Node
   tự suy ra vị trí từ `PLAYWRIGHT_BROWSERS_PATH=0`, mà trỏ tuyệt đối từ

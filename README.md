@@ -367,8 +367,10 @@ domain, nghỉ 5 phút rồi mới lấy batch tiếp theo.
 
 Luồng sử dụng hiện tại:
 
-1. Chọn tài khoản gửi, nhập danh sách full URL và bấm **Check toàn bộ, lọc email
-   & cloaking**. Với từng URL, lookup email và detector cloaking chạy đồng thời.
+1. Chọn tài khoản gửi, dán full URL hoặc nguyên nội dung thô vào **một ô nhập duy
+   nhất**, rồi bấm **Check toàn bộ, lọc email & cloaking**. Tool tự trích URL,
+   giữ path/query, loại trùng và bỏ qua ghi chú hay token không hợp lệ; một dòng
+   lỗi không chặn các URL hợp lệ còn lại. Với từng URL, lookup email và detector cloaking chạy đồng thời.
    Cache trong ngày chỉ áp dụng cho email; cloaking luôn được kiểm tra mới theo
    đúng full URL/path. Pha này không gửi email.
 2. Ngay khi một URL có verdict `LIKELY`, `POSSIBLE`, `INCONCLUSIVE` hoặc thiếu
@@ -395,10 +397,31 @@ Luồng sử dụng hiện tại:
    chờ worker job gửi mail.
 
 Worker chạy bằng process riêng nên vẫn tiếp tục nếu đóng hoặc refresh tab trình
-duyệt. Trang này hiển thị tiến độ, kết quả gửi của từng domain và có nút dừng hẳn
-process worker. Mỗi email thành công được ghi ngay vào `sent_log.csv` kèm metadata
+duyệt. Trang này hiển thị tiến độ ở trên, tiếp theo là cấu hình gửi worker, rồi
+đến bảng kết quả domain trong fragment real-time. Cột **Đã gửi đến** liệt kê các
+email nhận đã gửi thành công trong ngày;
+một cột **Trạng thái tài khoản** duy nhất liệt kê từng account với trạng thái
+**Đã gửi**, **Một phần**, **Lỗi** hoặc **Chưa gửi** cùng recipient tương ứng.
+Thêm account mới không làm phát sinh thêm cột. Bảng giữ chiều cao tối thiểu đủ
+để theo dõi batch ngay cả khi mới chỉ có ít kết quả. Đồng thời page có nút dừng hẳn
+process worker. Ngay sau khi bấm khởi chạy hoặc retry, page tự chuyển sang theo dõi
+real-time mỗi 3 giây; không cần bấm **Làm mới trạng thái** để kích hoạt polling.
+Mỗi email thành công được ghi ngay vào `sent_log.csv` kèm metadata
 account, Message-ID, recipient, kênh, draft/subject và evidence source/count; job và danh
 sách mới tự bỏ qua delivery đã gửi thành công trong ngày hiện tại.
+Khu **Cần bạn xử lý** gom link Cloaking Review và Domain Evidence Review tại một
+vị trí. Form gửi chỉ xuất hiện khi có URL ready và checkbox cho phép gửi thật
+luôn mặc định tắt. Page mặc định chỉ phục hồi job của ngày địa phương hiện tại;
+job cũ vẫn nằm trên đĩa để audit nhưng không trở thành job thao tác của ngày mới.
+Khi job đang `prechecking`, `running` hoặc `waiting`, riêng khối tiến độ tự đọc
+`status.json` mỗi 3 giây bằng Streamlit fragment; form nhập và cấu hình không bị
+rerun theo nhịp này. Worker ghi stage hiện tại (lookup/cloaking, Browser Evidence,
+draft/delivery hoặc nghỉ batch) để UI giải thích đang làm gì. Đây là khối tiến độ
+duy nhất; page không dựng lại một bộ metric batch tĩnh phía dưới. Trước khi cho phép
+gửi, form chỉ tóm tắt số delivery dự kiến còn thiếu/đã gửi hôm nay; danh sách route
+chi tiết không được lặp thành một bảng ít dùng. Draft cuối vẫn được tạo và validate
+trong worker. Lỗi delivery mới có mã stage như SMTP auth, kết nối,
+recipient rejected hoặc draft validation để retry dễ chẩn đoán hơn.
 Draft VNCERT mặc định không tự gửi; chỉ bật nếu toàn bộ danh sách thực sự
 nhắm tới nạn nhân tại Việt Nam. Job Domain Worker thường nằm trong
 `data/worker_jobs/`; queue case và delivery ledger của Cloaking Review nằm trong

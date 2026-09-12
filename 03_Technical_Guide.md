@@ -253,7 +253,9 @@ no-email trong ngày. Trang **Cloaking Review** là nơi duy nhất để ngư�
 xem evidence, chọn từng URL và quyết định: gửi kèm evidence cloaking, gửi report
 thường sau khi loại evidence cloaking, hoặc bỏ qua.
 
-Nút **Check toàn bộ, lọc email & cloaking** tạo preflight schema v3. Với từng
+Domain Worker dùng một ô nhập cho cả URL và nội dung thô. Parser giữ full
+path/query, loại trùng và bỏ qua ghi chú/token không hợp lệ; chỉ chặn khi không
+còn URL hợp lệ. Nút **Check toàn bộ, lọc email & cloaking** tạo preflight schema v3. Với từng
 full URL, lookup recipient và HTTP detector chạy song song; cache theo ngày chỉ
 áp dụng cho recipient. Khi HTTP cần xác minh, Playwright chạy ngay trong precheck.
 Kết quả cần duyệt có recipient được enqueue và ghi tăng dần vào `preflight.json`
@@ -262,6 +264,30 @@ lúc phần còn lại của danh sách vẫn đang precheck. Nếu recipient r�
 giá trị email rỗng, case không được enqueue/migrate và UI hai page không tính hay
 hiển thị record legacy đó. Chỉ các mục trong `ready` mới được đưa vào job gửi
 thường; mục `cloaking_review` không bao giờ được gửi bởi job đó.
+UI gom các ngoại lệ cần thao tác vào khu `Cần bạn xử lý`, yêu cầu tích xác nhận
+gửi thật ở trạng thái mặc định tắt và chỉ phục hồi job thuộc ngày địa phương hiện
+tại. Job ngày cũ không bị xóa nhưng chỉ dùng để audit.
+
+Tiến độ active job được đọc lại mỗi 3 giây trong một fragment độc lập; khi job
+đạt terminal state, page rerun toàn phần một lần rồi dừng polling. Field
+`current_stage` mô tả lookup/cloaking, Browser Evidence, draft/delivery và batch
+wait mà không lưu nội dung thư. Nút launch/retry đặt session poll marker rồi
+rerun page ngay, vì vậy fragment bắt đầu chu kỳ 3 giây mà không cần operator bấm
+**Làm mới trạng thái**; grace period ngắn che khoảng trễ process con ghi status.
+Fragment là nguồn hiển thị duy nhất cho metric,
+domain hiện tại và countdown; không có khối tiến độ tĩnh thứ hai. Trước SMTP, UI
+chỉ hiển thị tổng delivery **dự kiến** từ recipient precheck, account đã chọn và
+ledger trong ngày; worker vẫn là nơi sinh draft cuối và áp quality gate. Bảng
+ready/cloaking không lặp trên Domain Worker vì đã có bảng kết quả chính và các
+page review chuyên biệt. Bảng kết quả chính hợp nhất recipient thành công từ
+`status.results[].sent_to` và sent ledger của ngày hiện tại vào cột **Đã gửi đến**;
+delivery lỗi không được đưa vào cột này. Bảng được render ngay trong fragment
+polling và có đúng một cột **Trạng thái tài khoản**; mỗi ô liệt kê các sender
+account của job, cho biết delivery đã gửi, gửi một phần, lỗi hay chưa gửi và
+recipient tương ứng. Về bố cục, fragment bảng được đặt sau khu cấu hình gửi
+worker; fragment tiến độ vẫn ở phía trên và hai phần cùng poll mỗi 3 giây.
+Delivery lỗi lưu thêm stage/error code để
+phân biệt auth, connection, recipient rejection và draft validation.
 
 Mỗi thao tác xử lý đúng một queue record. Người vận hành chọn disposition và tài
 khoản gửi, sau đó bấm **Tạo / cập nhật draft để xem**. Page gọi pipeline dùng

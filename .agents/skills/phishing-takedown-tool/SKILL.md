@@ -65,6 +65,29 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   điều tra còn lại vẫn được trả về.
 - Worker phải giữ tính resume, chống gửi trùng và trạng thái job có thể đọc lại.
   Mọi thay đổi các phần này cần có test hồi quy.
+- Domain Worker UI dùng một ô nhập nhận URL/nội dung thô; token lỗi không được
+  chặn URL hợp lệ còn lại. Xác nhận gửi thật luôn mặc định tắt. Page chỉ tự phục
+  hồi job ngày địa phương hiện tại, còn job cũ giữ để audit. Link sang Cloaking
+  Review và Domain Evidence Review phải được gom tại một khu hành động, không
+  lặp cảnh báo ở nhiều vị trí.
+- Poll tiến độ Domain Worker phải cô lập trong fragment và tự dừng sau terminal
+  state; không rerun form nhập theo chu kỳ. `current_stage` chỉ lưu mã stage,
+  không lưu body/credential. Preview trước gửi chỉ được gọi là delivery dự kiến
+  nếu mới dựa trên preflight route; draft/body chỉ exact sau pipeline tạo draft.
+  Lỗi delivery phải giữ stage/error code để retry phần còn thiếu có thể chẩn đoán.
+  Fragment là nguồn duy nhất hiển thị metric/current URL/countdown của active
+  job. Domain Worker không lặp bảng ready, cloaking hoặc delivery route; chỉ giữ
+  bảng kết quả chính, tổng delivery trước gửi và chi tiết lỗi/email dạng thu gọn.
+  Bảng chính phải liệt kê recipient đã gửi thành công/đã gửi trước đó trong ngày;
+  không được hiển thị recipient lỗi như đã gửi.
+  Bảng chính phải nằm trong fragment polling và chỉ có một cột trạng thái tài
+  khoản; mỗi ô liệt kê mọi sender account của job (`sent`/`partial`/`failed`/
+  `pending`) cùng recipient. Không tạo cột động theo account và không render
+  thêm bản sao tĩnh bên ngoài fragment. Bố cục phải đặt fragment bảng sau form
+  cấu hình gửi worker, còn fragment tiến độ ở phía trên.
+  Launch precheck/worker/retry phải đặt session poll marker và full-rerun ngay để
+  fragment bật chu kỳ theo dõi mà không cần operator bấm refresh; giữ grace
+  period ngắn cho race trước khi process con ghi status và xóa marker ở terminal.
 - Gửi email, submit report, đọc IMAP và mở URL nghi ngờ đều là hành động ngoài
   hệ thống: chỉ thực hiện khi người dùng cho phép rõ ràng; mặc định là draft/
   preview.

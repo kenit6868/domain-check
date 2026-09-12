@@ -21,6 +21,33 @@ class DomainWorkerTests(unittest.TestCase):
         cache_patch.start()
         self.addCleanup(cache_patch.stop)
 
+    def test_delivery_preview_counts_pending_and_already_sent_without_smtp(self):
+        ready = [{
+            "target_url": "https://target.example/login",
+            "domain": "target.example",
+            "recipients": [
+                {"channel": "registrar", "email": "abuse@registrar.example"},
+                {"channel": "registry", "email": "abuse@registry.example"},
+            ],
+        }]
+        sent = {(
+            "target.example", "one@example.org",
+            "target.example_registrar_report.txt", "abuse@registrar.example",
+        )}
+        with patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=sent):
+            preview = domain_worker.build_preflight_delivery_preview(
+                ready, ["one@example.org", "two@example.org"],
+            )
+        self.assertEqual(preview["total"], 4)
+        self.assertEqual(preview["already_sent"], 1)
+        self.assertEqual(preview["pending"], 3)
+
+    def test_delivery_error_codes_are_structured_by_smtp_stage(self):
+        self.assertEqual(domain_worker._delivery_error_code("authenticate", "bad password"), "SMTP_AUTH_FAILED")
+        self.assertEqual(domain_worker._delivery_error_code("connect", "timeout"), "SMTP_CONNECTION_FAILED")
+        self.assertEqual(domain_worker._delivery_error_code("send", "550 recipient refused"), "RECIPIENT_REJECTED")
+        self.assertEqual(domain_worker._delivery_error_code("send", "socket closed"), "SMTP_SEND_FAILED")
+
     def test_precheck_cache_reuses_only_current_day_entries(self):
         now = datetime.now(timezone.utc)
         yesterday = now - timedelta(days=1)

@@ -32,6 +32,8 @@ class DomainWorkerUiTests(unittest.TestCase):
         self.assertIn("Ảnh bằng chứng thủ công (1–3 ảnh PNG/JPEG)", review_source)
         self.assertIn("prepare_manual_evidence_preview", review_source)
         self.assertIn("đúng draft đã preview", review_source)
+        self.assertIn('"Đã gửi đến":', worker_source)
+        self.assertIn('delivery.get("ok")', worker_source)
 
     def test_v4_manual_evidence_case_renders_without_sending(self):
         with tempfile.TemporaryDirectory() as runtime_dir, tempfile.TemporaryDirectory() as review_dir:
@@ -318,13 +320,85 @@ class DomainWorkerUiTests(unittest.TestCase):
             metrics = {metric.label: str(metric.value) for metric in app.metric}
             self.assertEqual(metrics["Domain sẵn sàng"], "1")
             self.assertEqual(metrics["Cloaking tách riêng"], "1")
-            self.assertTrue(any(
-                "Bạn có thể mở Cloaking Review" in warning.value
-                for warning in app.warning
-            ))
+            self.assertIn("Cần bạn xử lý", [item.value for item in app.subheader])
             self.assertIn(
                 "🔎 Check toàn bộ, lọc email & cloaking",
                 [button.label for button in app.button],
+            )
+            self.assertTrue(any(
+                "delivery còn cần gửi" in caption.value for caption in app.caption
+            ))
+
+    def test_dw1_uses_one_input_and_requires_explicit_send_confirmation(self):
+        source = (ROOT / "pages" / "6_Domain_Worker.py").read_text(encoding="utf-8")
+        self.assertNotIn('st.form("domain_filter_form")', source)
+        self.assertIn('"Danh sách URL hoặc nội dung thô"', source)
+        self.assertIn("extract_domains_from_text(raw_domains)", source)
+        self.assertNotIn("elif invalid:", source)
+        self.assertIn(
+            '"Tôi xác nhận danh sách đã được kiểm tra và cho phép worker gửi email report thật tự động."',
+            source,
+        )
+        confirmation_block = source.split(
+            '"Tôi xác nhận danh sách đã được kiểm tra và cho phép worker gửi email report thật tự động."',
+            1,
+        )[1].split(")", 1)[0]
+        self.assertIn("value=False", confirmation_block)
+        self.assertNotIn(".stale", source)
+        self.assertNotIn("st.columns(5)", source)
+        self.assertIn('@st.fragment(run_every="3s"', source)
+        self.assertIn('st.session_state["worker_poll_job_dir"] = job_dir', source)
+        self.assertIn('st.rerun()', source)
+        self.assertIn("def _render_live_worker_results(active_job_dir: str)", source)
+        self.assertIn("_render_live_worker_results(job_dir)\n    preflight_ready", source)
+        self.assertIn('row["Trạng thái tài khoản"]', source)
+        self.assertNotIn('row[f"Tài khoản: {sender}"]', source)
+        self.assertIn("_dataframe_with_copy(results_df, min_height=300)", source)
+        self.assertNotIn("được ghép vào đúng dòng khi người dùng bấm Làm mới trạng thái", source)
+        self.assertIn("build_preflight_delivery_preview", source)
+        self.assertNotIn("Xem phạm vi delivery dự kiến", source)
+        self.assertNotIn("Case cloaking đã tách", source)
+        self.assertNotIn("_render_job_metrics(status, total_sent=", source)
+
+    def test_dw1_mixed_raw_input_launches_only_extracted_valid_targets(self):
+        with tempfile.TemporaryDirectory() as runtime_dir, tempfile.TemporaryDirectory() as review_dir:
+            runtime = Path(runtime_dir)
+            worker_dir = runtime / "worker_jobs"
+            worker_dir.mkdir()
+            (runtime / "cloaking_send_jobs").mkdir()
+            with (
+                patch.object(review_queue, "REVIEW_DIR", review_dir),
+                patch.object(domain_worker, "WORKER_DIR", str(worker_dir)),
+                patch.object(domain_worker, "CLOAKING_WORKER_DIR", str(runtime / "cloaking_send_jobs")),
+                patch.object(domain_worker, "NO_EMAIL_LOG_PATH", str(runtime / "no_email.csv")),
+                patch.object(pt, "SENT_LOG_PATH", str(runtime / "sent.csv")),
+                patch.object(pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(domain_worker, "launch_job_process") as launch,
+            ):
+                app = AppTest.from_file(str(ROOT / "streamlit_app.py"), default_timeout=10).run()
+                app = app.switch_page("pages/6_Domain_Worker.py").run()
+                input_box = next(
+                    item for item in app.text_area
+                    if item.label == "Danh sách URL hoặc nội dung thô"
+                )
+                app = input_box.set_value(
+                    "NHÓM TEST\nhttps://valid-one.example/path (top3)\n"
+                    "ghi chú không phải domain\nbad://not-a-domain\nvalid-two.example/login"
+                ).run()
+                check = next(
+                    item for item in app.button
+                    if item.label == "🔎 Check toàn bộ, lọc email & cloaking"
+                )
+                app = check.click().run()
+            self.assertEqual([], list(app.exception))
+            launch.assert_called_once()
+            job_path = Path(launch.call_args.args[0])
+            job = json.loads(job_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                job["domains"],
+                ["https://valid-one.example/path", "valid-two.example/login"],
             )
 
     def test_no_email_cloaking_is_not_counted_or_linked_for_review(self):
