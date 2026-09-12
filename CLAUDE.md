@@ -51,6 +51,8 @@ refill/recheck nằm trong popup. Service worker ánh xạ state thành badge th
 `WORKING=…`, `FILLED/SUBMITTED=✓`, CAPTCHA manual=`C`, manual khác=`!`,
 `FAILED=×`. Khi tab navigation, badge và status cũ phải được xóa
 trước khi content script publish trạng thái mới.
+Microsoft SmartScreen adapter v1.0.5 chỉ điền URL. Không tìm, mở hoặc thay đổi MWF
+language combo; trường này luôn giữ mặc định do Microsoft cung cấp.
 
 Cloudflare Worker ưu tiên `cloudflare_abuse_api.py`: verify token bằng endpoint
 user token, kiểm tra entitlement bằng GET Abuse Reports và chỉ POST

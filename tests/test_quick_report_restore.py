@@ -59,6 +59,7 @@ class QuickReportRestoreTests(unittest.TestCase):
         self.assertIn("urlencode({'url': target_url})", source)
         self.assertIn('"google_gsb", _report_form_url(_GSB_REPORT_URL, original_url)', source)
         self.assertIn('"microsoft_smartscreen", _report_form_url(_MICROSOFT_REPORT_URL, original_url)', source)
+        self.assertNotIn('cfg, language="Vietnamese"', source)
         self.assertIn("Mở & tự điền Google", source)
         self.assertIn("Mở & tự điền Microsoft", source)
         self.assertIn("threat_type=threat, threat_category=category", source)

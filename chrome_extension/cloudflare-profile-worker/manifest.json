@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PhishingTool Web Form Assistant",
-  "version": "2.6.0",
+  "version": "2.6.5",
   "description": "Fills supported official abuse forms from local, operator-approved tasks.",
   "icons": {
     "16": "icons/icon16.png",

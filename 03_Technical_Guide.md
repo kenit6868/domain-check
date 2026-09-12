@@ -62,6 +62,8 @@
     Badge icon áp dụng riêng từng tab: `…` đang xử lý, `✓` hoàn tất điền/submit,
     `C` chờ CAPTCHA, `!` cần thao tác thủ công và `×` khi lỗi; badge cũ được xóa
     khi tab bắt đầu navigation mới.
+    Với Microsoft SmartScreen, adapter chỉ điền URL và giữ nguyên ngôn ngữ mặc
+    định; không mở hoặc thao tác dropdown ngôn ngữ.
 *   **Kênh cộng đồng Việt Nam**: Trong **Quick Report**, Web Form Assistant v2.2.1
     mở và tự điền form [Chống Lừa Đảo](https://chongluadao.vn/report/reportphishing)
     hoặc [Cốc Cốc Safe](https://safe.coccoc.com/) bằng full URL, email liên hệ,

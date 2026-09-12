@@ -247,6 +247,36 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-13 — Microsoft SmartScreen adapter v1.0.5/extension v2.6.5 rollback
+  toàn bộ tự chọn ngôn ngữ theo yêu cầu: Quick Report không truyền `language`,
+  adapter chỉ điền URL và không tìm/mở/thao tác MWF language combo. Trường ngôn
+  ngữ giữ nguyên mặc định của Microsoft; popup recheck chỉ xác minh URL.
+
+- 2026-09-13 — Microsoft SmartScreen adapter v1.0.4/extension v2.6.4 sửa trạng
+  thái dropdown mở nhưng không commit: option Vietnamese được focus, gắn class
+  `active` theo MWF, phát pointer/mouse; nếu chưa đổi `comboLanguage` thì mở lại
+  và phát Enter. Chỉ báo `FILLED` sau khi widget cập nhật thật; không submit hay
+  thao tác CAPTCHA.
+
+- 2026-09-13 — Microsoft SmartScreen adapter v1.0.3/extension v2.6.3 sửa MWF
+  Combo lần hai: component chỉ cập nhật state gửi đi qua `onSelectionChanged`,
+  nên adapter phát chuỗi pointer/mouse event thật sự tới nút và option Vietnamese,
+  chờ input `comboLanguage` đổi rồi mới báo `FILLED`. Không gán giả input, submit
+  hoặc thao tác CAPTCHA.
+
+- 2026-09-13 — Sửa Microsoft SmartScreen adapter v1.0.2/extension v2.6.2:
+  form thật dùng MWF custom combo (`comboLanguage`, `LanguageListButton`,
+  `comboLanguageList`) chứ không phải select chuẩn. Adapter click option
+  **Vietnamese** rồi xác minh input readonly đã đổi giá trị; không còn kiểm tra
+  nhầm text của nút khiến badge luôn `!`. Không submit hoặc thao tác CAPTCHA.
+
+- 2026-09-13 — Web Form Assistant v2.6.1 cập nhật Microsoft SmartScreen adapter
+  v1.0.1: Quick Report vẫn truyền `language=Vietnamese`; adapter tìm trường theo
+  thuộc tính hoặc caption “What is the main language used on the site?”, chọn
+  **Vietnamese** và xác minh selected option trước khi báo `FILLED`. Recheck cũng
+  chặn trạng thái hoàn tất nếu ngôn ngữ bị mất sau rerender. Không thay đổi
+  submit/CAPTCHA.
+
 - 2026-09-13 — Web Form Assistant rollback panel nổi trên trang theo phản hồi
   trải nghiệm; checklist, **Điền lại** và **Kiểm tra lại** chỉ còn trong popup.
   Badge ghim cũng được khôi phục về bộ ký hiệu `…`, `✓`, `C`, `!`, `×` của

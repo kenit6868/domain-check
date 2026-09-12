@@ -276,7 +276,7 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
         ):
             res = cfw.open_profile_form(
                 "microsoft_smartscreen", _report_form_url(_MICROSOFT_REPORT_URL, original_url),
-                original_url, "", cfg, language="Vietnamese",
+                original_url, "", cfg,
             )
             st.success("Đã mở SmartScreen và gửi task tự điền.") if "error" not in res else st.error(res["error"])
 

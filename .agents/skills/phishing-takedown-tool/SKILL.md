@@ -38,7 +38,9 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   được làm thay đổi hành vi adapter Cloudflare đã kiểm thử.
   Adapter Google Safe Browsing và Microsoft SmartScreen từ Quick Report luôn
   `fill_only`, không tự giải CAPTCHA/submit; task chỉ được mang các field provider
-  đã whitelist và extension chỉ có quyền trên các origin form chính thức.
+  đã whitelist và extension chỉ có quyền trên các origin form chính thức. Adapter
+  Microsoft chỉ điền URL; không mở hoặc thay đổi MWF language combo, để nguyên
+  giá trị mặc định của provider.
   Adapter Chống Lừa Đảo và Cốc Cốc Safe cũng chỉ `fill_only`, dùng nội dung
   community trung lập thay vì draft gọi đích danh Google/Cloudflare, chọn đúng
   loại phishing và không thao tác reCAPTCHA hoặc nút gửi.

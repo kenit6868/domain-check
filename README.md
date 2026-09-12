@@ -162,6 +162,8 @@ Các trang (xem sidebar bên trái):
   Extension v2.1.0 thêm adapter Google Safe Browsing và Microsoft SmartScreen;
   quyền host chỉ giới hạn ở ba form chính thức và localhost. Hai adapter mới
   chỉ tự điền từ Quick Report, không tự xử lý CAPTCHA hoặc submit.
+  Extension v2.6.5 chỉ điền URL trên Microsoft SmartScreen; trường ngôn ngữ được
+  giữ nguyên mặc định của website, không mở dropdown hoặc chọn thay người dùng.
   Extension v2.6.0 có popup mini khi bấm icon: hiển thị phiên bản extension,
   hostname, adapter/version, trạng thái và thông báo gần nhất của tab hiện tại.
   Popup chỉ nhận metadata chẩn đoán đã rút gọn, không hiển thị token, email,

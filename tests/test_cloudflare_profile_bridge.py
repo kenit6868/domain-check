@@ -34,7 +34,7 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
     def test_extension_is_restricted_to_supported_forms_and_localhost(self):
         root = Path(__file__).resolve().parents[1]
         manifest = json.loads((root / "chrome_extension/cloudflare-profile-worker/manifest.json").read_text())
-        self.assertEqual(manifest["version"], "2.6.0")
+        self.assertEqual(manifest["version"], "2.6.5")
         expected_icons = {
             "16": "icons/icon16.png",
             "32": "icons/icon32.png",
@@ -126,6 +126,14 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
         self.assertIn('data-value") === "1"', adapter)
         self.assertIn('input[name="type"]', adapter)
         self.assertIn('fields.typeInput.value === "1"', adapter)
+
+    def test_microsoft_adapter_leaves_provider_language_default_untouched(self):
+        root = Path(__file__).resolve().parents[1]
+        adapter = (root / "chrome_extension/cloudflare-profile-worker/adapters/microsoft_smartscreen.js").read_text(encoding="utf-8")
+        self.assertIn("language left at provider default", adapter)
+        self.assertNotIn("LanguageListButton", adapter)
+        self.assertNotIn("comboLanguage", adapter)
+        self.assertNotIn("Vietnamese", adapter)
 
     def test_bridge_exposes_only_safe_provider_fields(self):
         bridge = ProfileBridge()
