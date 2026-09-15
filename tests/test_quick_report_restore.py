@@ -37,8 +37,103 @@ class QuickReportRestoreTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"
         ).read_text(encoding="utf-8")
         self.assertIn("_QUICK_REPORT_RUNTIME_VERSION = 2", source)
-        self.assertIn('st.session_state.get("quick_report_runtime_version")', source)
+        self.assertIn('cache.get("runtime_version")', source)
         self.assertIn("cache.clear()", source)
+
+    def test_refresh_pending_results_and_clear_cache(self):
+        import tempfile
+        from concurrent.futures import Future, ThreadPoolExecutor
+        from unittest.mock import Mock
+        import streamlit as st
+        from streamlit.testing.v1 import AppTest
+
+        page = Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"
+        pending = Future()
+        executor = Mock()
+        executor.submit.return_value = pending
+        st.cache_resource.clear()
+        try:
+            with tempfile.TemporaryDirectory() as folder, \
+                    patch.object(pt, "_runtime_path", side_effect=lambda name: str(Path(folder) / name)), \
+                    patch.object(pt, "load_config", return_value={}), \
+                    patch("concurrent.futures.ThreadPoolExecutor", side_effect=lambda *a, **kw:
+                          executor if kw.get("thread_name_prefix") == "quick-report"
+                          else ThreadPoolExecutor(*a, **kw)):
+                app = AppTest.from_file(str(page)).run()
+                self.assertFalse(app.exception)
+                app.text_area(key="qr_domain_input").set_value("https://example.test/login")
+                next(b for b in app.button if "Kiểm tra tất cả" in b.label).click().run()
+                self.assertFalse(app.exception)
+                executor.submit.assert_called_once()
+
+                # A fresh session models F5; the pending job must survive too.
+                refreshed = AppTest.from_file(str(page)).run()
+                self.assertFalse(refreshed.exception)
+                self.assertEqual(refreshed.text_area(key="qr_domain_input").value,
+                                 "https://example.test/login")
+                self.assertFalse(pending.cancelled())
+                pending.set_result({"domain": "example.test", "cloudflare": False, "_error": "cached test result"})
+                refreshed.run()
+                self.assertTrue(any("cached test result" in w.value for w in refreshed.warning))
+                again = AppTest.from_file(str(page)).run()
+                self.assertTrue(any("cached test result" in w.value for w in again.warning))
+                next(b for b in again.button if "Xóa cache" in b.label).click().run()
+                self.assertFalse(again.exception)
+                self.assertEqual(again.text_area(key="qr_domain_input").value, "")
+                empty = AppTest.from_file(str(page)).run()
+                self.assertFalse(empty.exception)
+                self.assertFalse(any("cached test result" in w.value for w in empty.warning))
+                self.assertEqual(empty.text_area(key="qr_domain_input").value, "")
+                executor.submit.assert_called_once()
+        finally:
+            st.cache_resource.clear()
+
+    def test_completed_batch_stops_polling_and_form_buttons_can_repeat(self):
+        import tempfile
+        from concurrent.futures import Future, ThreadPoolExecutor
+        from unittest.mock import Mock
+        import streamlit as st
+        from streamlit.testing.v1 import AppTest
+
+        page = Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"
+        result = Future()
+        result.set_result({"domain": "example.test", "cloudflare": True,
+                           "registrar": "GoDaddy.com, LLC"})
+        executor = Mock()
+        executor.submit.return_value = result
+        st.cache_resource.clear()
+        try:
+            with tempfile.TemporaryDirectory() as folder, \
+                    patch.object(pt, "_runtime_path", side_effect=lambda name: str(Path(folder) / name)), \
+                    patch.object(pt, "load_config", return_value={}), \
+                    patch("concurrent.futures.ThreadPoolExecutor", side_effect=lambda *a, **kw:
+                          executor if kw.get("thread_name_prefix") == "quick-report"
+                          else ThreadPoolExecutor(*a, **kw)), \
+                    patch("cloudflare_form_worker.open_profile_form", return_value={"status": "opened"}) as opener:
+                app = AppTest.from_file(str(page)).run()
+                app.text_area(key="qr_domain_input").set_value("https://example.test/login")
+                next(b for b in app.button if "Kiểm tra tất cả" in b.label).click().run()
+                self.assertFalse(app.exception)
+                for _ in range(2):
+                    for key in ("gsb_profile_0", "ms_profile_0"):
+                        app.button(key=key).click().run()
+                        self.assertFalse(app.exception)
+                self.assertEqual(opener.call_count, 4)
+                self.assertEqual([c.args[0] for c in opener.call_args_list],
+                                 ["google_gsb", "microsoft_smartscreen"] * 2)
+                executor.submit.assert_called_once()
+        finally:
+            st.cache_resource.clear()
+
+        # The timer is conditional and domain actions have their own fragment.
+        tree = ast.parse(page.read_text(encoding="utf-8"))
+        block = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                     and n.name == "_render_domain_block")
+        self.assertIn("st.fragment", [ast.unparse(d) for d in block.decorator_list])
+        render = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                      and n.name == "_render_results")
+        self.assertIn("run_every=1 if _results_polling else None",
+                      ast.unparse(render.decorator_list[0]))
 
     def test_page_shows_copy_ready_registry_webform_text(self):
         source = (

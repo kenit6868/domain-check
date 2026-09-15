@@ -1,4 +1,13 @@
 # CẨM NANG VẬN HÀNH KỸ THUẬT SOC (TECHNICAL OPERATIONS GUIDE)
+
+Quick Report chỉ polling kết quả trong lúc check nền; sau hoàn tất danh sách đứng yên, thao tác form cập nhật riêng khối domain. Các nút vẫn chỉ tạo task tự điền qua extension.
+
+Quick Report: có thể F5 hoặc chuyển menu rồi quay lại trong khi check nền; kết quả và tiến độ vẫn được giữ khi server còn chạy. Dùng **Xóa cache** để xóa cả kết quả, cache lọc và ô nhập trước lượt mới; restart server không khôi phục kết quả RAM.
+
+Quick Report: các nút mở/tự điền form dùng Chrome đã cài trên Windows, macOS
+(`/Applications` hoặc `~/Applications`) và Linux (`google-chrome` hoặc
+`google-chrome-stable` trong PATH). Chrome cần có Web Form Assistant trong
+profile sử dụng; chạy ứng dụng trên cùng máy với Chrome.
 ## HƯỚNG DẪN CHI TIẾT CẤU HÌNH, SCRIPTS VÀ BIỂU MẪU CHO 9 PHƯƠNG ÁN
 
 ---

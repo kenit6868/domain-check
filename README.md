@@ -1,5 +1,14 @@
 # Domain Check Tool — Phát hiện & báo cáo domain phishing
 
+Quick Report dừng tự làm mới khi batch hoàn tất; mỗi khối domain xử lý nút form trong fragment riêng để giảm render lại danh sách khi thao tác liên tiếp.
+
+Quick Report giữ kết quả và lượt check đang chạy khi F5 hoặc chuyển menu; danh sách đã check được khôi phục vào ô nhập. **Xóa cache** dọn kết quả, cache lọc và ô nhập để bắt đầu lại. Kết quả lưu trong RAM của server, mất khi restart server; bấm **Kiểm tra tất cả** tạo lượt check thay thế.
+
+Quick Report: các nút mở/tự điền form dùng Chrome đã cài trên Windows, macOS
+(`/Applications` hoặc `~/Applications`) và Linux (`google-chrome` hoặc
+`google-chrome-stable` trong PATH). Chrome cần có Web Form Assistant trong
+profile sử dụng; chạy ứng dụng trên cùng máy với Chrome.
+
 Bộ công cụ hỗ trợ 2 người rà soát, xác minh và báo cáo (takedown) các domain
 giả mạo thương hiệu công ty để lừa đảo.
 
