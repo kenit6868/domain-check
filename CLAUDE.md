@@ -1,5 +1,14 @@
 # CLAUDE.md
 
+Quick Report: `_render_results` chỉ có timer khi còn pending; khi thu hoạch hết futures, pop pending rồi full rerun một lần để bỏ timer. `_render_domain_block` là nested fragment để widget/form action không rerender toàn bộ batch đã hoàn tất.
+
+Quick Report đặt `runtime_version` trong resource cache dùng chung, không trong session state: session mới sau F5 không được invalidate results/pending futures. Khôi phục `qr_domain_input` từ targets trước khi tạo widget nếu thiếu key; clear dùng callback để reset widget hợp lệ. Cache kết quả chỉ ở RAM, không ghi cfg/credential xuống disk.
+
+Quick Report: các nút mở/tự điền form dùng Chrome đã cài trên Windows, macOS
+(`/Applications` hoặc `~/Applications`) và Linux (`google-chrome` hoặc
+`google-chrome-stable` trong PATH). Chrome cần có Web Form Assistant trong
+profile sử dụng; chạy ứng dụng trên cùng máy với Chrome.
+
 File này cung cấp hướng dẫn cho Claude Code (claude.ai/code) khi làm việc với code trong repo này.
 
 ## Mục đích dự án

@@ -247,6 +247,20 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-13 — Giảm lag Quick Report: dừng timer kết quả sau khi batch hoàn tất,
+  tách mỗi domain thành fragment để click form không render lại toàn danh sách.
+  AppTest kiểm tra bấm Google/Microsoft lặp lại bằng mock, không mở form thật.
+
+- 2026-09-13 — Sửa Quick Report mất kết quả khi F5: version nằm trong cache
+  dùng chung thay vì session, giữ pending futures và khôi phục danh sách sau
+  F5/chuyển menu. Xóa cache dùng callback dọn kết quả/cache lọc/ô nhập. Kết quả
+  chỉ giữ trong vòng đời server; có AppTest cho session mới, pending và clear.
+
+- 2026-09-13 — Sửa các nút tự điền Quick Report báo không tìm thấy Chrome trên
+  macOS: helper mở Chrome bổ sung app hệ thống/người dùng trên macOS và PATH
+  trên Linux, giữ tìm kiếm Windows; lỗi khởi chạy được cô lập và thử ứng viên
+  tiếp theo. Kiểm thử bằng mock, không mở form hoặc gửi report thật.
+
 - 2026-09-15 — Web Form Assistant v2.7.0 thêm adapter Registry Co phishing
   v1.0.0 cho Quick Report: chỉ match form chính thức
   `registry.co/report-abuse/form`, điền reporter, loại phishing, brand, domain,

@@ -8,6 +8,35 @@ import cloudflare_form_worker as cfw
 
 
 class CloudflareFormWorkerTests(unittest.TestCase):
+    def test_open_installed_chrome_macos_system_and_user_install(self):
+        url = "https://www.microsoft.com/wdsi/support/report-unsafe-site-guest#task=test"
+        paths = [Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+                 Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+        for installed in paths:
+            with self.subTest(installed=installed), patch.object(cfw.os, "name", "posix"), \
+                    patch.object(cfw.sys, "platform", "darwin"), \
+                    patch.object(Path, "is_file", autospec=True, side_effect=lambda p: p == installed), \
+                    patch("subprocess.Popen") as launch:
+                self.assertTrue(cfw.open_in_installed_chrome(url))
+                launch.assert_called_once_with([str(installed), url], close_fds=True)
+
+    def test_open_installed_chrome_linux_path(self):
+        with patch.object(cfw.os, "name", "posix"), patch.object(cfw.sys, "platform", "linux"), \
+                patch("shutil.which", side_effect=[None, "/usr/bin/google-chrome-stable"]), \
+                patch.object(Path, "is_file", return_value=True), patch("subprocess.Popen") as launch:
+            self.assertTrue(cfw.open_in_installed_chrome("https://example.test/#task=test"))
+            launch.assert_called_once_with(
+                ["/usr/bin/google-chrome-stable", "https://example.test/#task=test"], close_fds=True)
+
+    def test_open_installed_chrome_missing_or_launch_failure(self):
+        for exists in (False, True):
+            with self.subTest(exists=exists), patch.object(cfw.os, "name", "posix"), \
+                    patch.object(cfw.sys, "platform", "darwin"), \
+                    patch.object(Path, "is_file", return_value=exists), \
+                    patch("subprocess.Popen", side_effect=OSError("Cannot launch")) as launch:
+                self.assertFalse(cfw.open_in_installed_chrome("https://example.test"))
+                self.assertEqual(launch.call_count, 2 if exists else 0)
+
     def test_normalize_target_preserves_full_path_and_query(self):
         self.assertEqual(
             cfw.normalize_target("HTTPS://Example.COM/login?next=%2Faccount"),

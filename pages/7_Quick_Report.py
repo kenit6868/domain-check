@@ -190,6 +190,7 @@ def _parse_domains(raw: str) -> tuple[list[str], list[str]]:
     return valid, invalid
 
 
+@st.fragment
 def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mode: bool = True) -> None:
     domain = result["domain"]
     cf = result["cloudflare"]
@@ -450,6 +451,31 @@ def _run_one_cdn_check(
     return result
 
 
+def _clear_quick_report_cache() -> None:
+    cache = _quick_report_cache()
+    for future in cache.get("pending", {}).values():
+        future.cancel()
+    cache.clear()
+    _quick_report_filter_cache().clear()
+    try:
+        os.remove(_FILTER_CACHE_PATH)
+    except FileNotFoundError:
+        pass
+    st.session_state["qr_domain_input"] = ""
+    st.session_state["raw_paste"] = ""
+
+
+# Version belongs to the shared cache, not the browser's replaceable session.
+cache = _quick_report_cache()
+if cache.get("runtime_version") != _QUICK_REPORT_RUNTIME_VERSION:
+    for stale_future in cache.get("pending", {}).values():
+        stale_future.cancel()
+    cache.clear()
+    cache["runtime_version"] = _QUICK_REPORT_RUNTIME_VERSION
+if "qr_domain_input" not in st.session_state:
+    st.session_state["qr_domain_input"] = "\n".join(cache.get("targets", []))
+
+
 # ── Page layout ────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Quick Report", page_icon="⚡", layout="wide")
 st.title("⚡ Quick Report")
@@ -518,27 +544,15 @@ with st.form("quick_report_form"):
 
 cache = _quick_report_cache()
 filter_cache = _quick_report_filter_cache()
-if st.session_state.get("quick_report_runtime_version") != _QUICK_REPORT_RUNTIME_VERSION:
-    for stale_future in cache.get("pending", {}).values():
-        stale_future.cancel()
-    cache.clear()
-    st.session_state["quick_report_runtime_version"] = _QUICK_REPORT_RUNTIME_VERSION
 cache_col, cache_info_col = st.columns([1, 4])
 if cache_col.button(
     "🗑️ Xóa cache",
     use_container_width=True,
-    disabled=not cache and not filter_cache,
+    disabled=not cache.get("targets") and not filter_cache,
+    on_click=_clear_quick_report_cache,
 ):
-    for future in cache.get("pending", {}).values():
-        future.cancel()
-    cache.clear()
-    filter_cache.clear()
-    try:
-        os.remove(_FILTER_CACHE_PATH)
-    except FileNotFoundError:
-        pass
     st.success("Đã xóa cache Quick Report. Bạn có thể dán danh sách mới.")
-if cache or filter_cache:
+if cache.get("targets") or filter_cache:
     result_count = sum(r is not None for r in cache.get("results", []))
     result_total = len(cache.get("results", []))
     cache_info_col.caption(
@@ -561,6 +575,7 @@ if go:
             future.cancel()
         cache.clear()
         cache.update({
+            "runtime_version": _QUICK_REPORT_RUNTIME_VERSION,
             "signature": signature,
             "targets": domains,
             "results": [None] * total,
@@ -579,7 +594,10 @@ if go:
         )
 
 
-@st.fragment(run_every=1)
+_results_polling = bool(_quick_report_cache().get("pending"))
+
+
+@st.fragment(run_every=1 if _results_polling else None)
 def _render_results() -> None:
     cache = _quick_report_cache()
     if "results" not in cache:
@@ -616,6 +634,9 @@ def _render_results() -> None:
 
     if not pending:
         cache.pop("pending", None)
+        if _results_polling:
+            # Re-register without a timer once the background batch completes.
+            st.rerun()
 
     st.divider()
     st.markdown(f"### Kết quả trực tiếp — {completed}/{total} domain")

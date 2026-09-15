@@ -44,6 +44,7 @@ def extension_directory() -> Path:
 def open_in_installed_chrome(url: str) -> bool:
     """Route a URL to the already-running installed Chrome, never Playwright."""
     import subprocess
+    import shutil
     candidates: list[Path] = []
     if os.name == "nt":
         try:
@@ -59,10 +60,23 @@ def open_in_installed_chrome(url: str) -> bool:
         for root in (os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)"), os.environ.get("LOCALAPPDATA")):
             if root:
                 candidates.append(Path(root) / "Google" / "Chrome" / "Application" / "chrome.exe")
+    elif sys.platform == "darwin":
+        candidates.extend([
+            Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ])
+    else:
+        for name in ("google-chrome", "google-chrome-stable"):
+            executable = shutil.which(name)
+            if executable:
+                candidates.append(Path(executable))
     for executable in candidates:
         if executable.is_file():
-            subprocess.Popen([str(executable), url], close_fds=True)
-            return True
+            try:
+                subprocess.Popen([str(executable), url], close_fds=True)
+                return True
+            except OSError:
+                continue
     return False
 
 
