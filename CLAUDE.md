@@ -777,3 +777,8 @@ khối TLD Registry của Quick Report. Adapter điền `#ar-name`, `#ar-email`,
 `#ar-type=phishing`, `#ar-brand`, `#ar-domains`, full URL và description; không
 chọn file evidence, không tích `Input.GoodFaithConfirmed`, không xử lý
 reCAPTCHA và không submit.
+
+Status sau các nút mở Google/Microsoft trong Quick Report phải dùng khối
+`if/else` statement. Không dùng conditional expression trả về
+`st.success()`/`st.error()` vì Streamlit magic sẽ render `DeltaGenerator` và
+docstring nội bộ ra page.

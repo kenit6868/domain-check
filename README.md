@@ -575,3 +575,6 @@ form Registry Co**. Web Form Assistant v2.7.0 mở form chính thức
 cáo, loại phishing, brand, domain, full URL/path và nội dung report. Evidence
 upload, xác nhận thiện chí, reCAPTCHA và submit luôn do người vận hành
 thực hiện; extension không tự tích, giải CAPTCHA hay gửi form.
+
+Quick Report hiển thị thông báo gọn sau khi mở form Google/Microsoft;
+không render đối tượng nội bộ `DeltaGenerator` ra giao diện.

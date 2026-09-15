@@ -199,6 +199,22 @@ class QuickReportRestoreTests(unittest.TestCase):
         self.assertIn('"Mở & tự điền form Registry Co"', source)
         self.assertIn('if "registry.co/report-abuse/form" in registry_form_url.lower():', source)
 
+    def test_form_status_messages_are_statements_not_magic_rendered_expressions(self):
+        page = Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"
+        tree = ast.parse(page.read_text(encoding="utf-8"))
+        conditional_calls = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.IfExp)
+            and any(
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Attribute)
+                and isinstance(child.func.value, ast.Name)
+                and child.func.value.id == "st"
+                for child in ast.walk(node)
+            )
+        ]
+        self.assertEqual([], conditional_calls)
+
 
 if __name__ == "__main__":
     unittest.main()

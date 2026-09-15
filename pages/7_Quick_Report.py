@@ -267,7 +267,10 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                 original_url, gsb_text, cfg,
                 threat_type=threat, threat_category=category,
             )
-            st.success("Đã mở GSB và gửi task tự điền.") if "error" not in res else st.error(res["error"])
+            if "error" in res:
+                st.error(res["error"])
+            else:
+                st.success("Đã mở GSB và gửi task tự điền.")
         if bc2.button(
             "Mở & tự điền Microsoft",
             key=f"ms_profile_{idx}",
@@ -279,17 +282,26 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                 "microsoft_smartscreen", _report_form_url(_MICROSOFT_REPORT_URL, original_url),
                 original_url, "", cfg,
             )
-            st.success("Đã mở SmartScreen và gửi task tự điền.") if "error" not in res else st.error(res["error"])
+            if "error" in res:
+                st.error(res["error"])
+            else:
+                st.success("Đã mở SmartScreen và gửi task tự điền.")
 
         if _ENABLE_PLAYWRIGHT_FORM_AUTOMATION:
             if bc1.button("🤖 Tự điền GSB", key=f"gsb_{idx}", help="Tự điền form bằng Playwright"):
                 res = pt.open_gsb_form_playwright(original_url, gsb_text,
                                                    threat_type=threat, threat_category=category,
                                                    dark_mode=dark_mode)
-                st.success("✅ Đã mở Chrome và tự điền GSB.") if "error" not in res else st.error(res["error"])
+                if "error" in res:
+                    st.error(res["error"])
+                else:
+                    st.success("✅ Đã mở Chrome và tự điền GSB.")
             if bc2.button("🤖 Tự điền SmartScreen", key=f"ms_{idx}", help="Tự điền form bằng Playwright"):
                 res = pt.open_microsoft_form_playwright(original_url, dark_mode=dark_mode)
-                st.success("✅ Đã mở SmartScreen.") if "error" not in res else st.error(res["error"])
+                if "error" in res:
+                    st.error(res["error"])
+                else:
+                    st.success("✅ Đã mở SmartScreen.")
 
         if bc3.button("📡 Netcraft", key=f"nc_{idx}", type="primary",
                       help="Gửi thẳng qua Netcraft API"):

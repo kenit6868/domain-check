@@ -247,6 +247,15 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-15 — Sửa Quick Report hiển thị `DeltaGenerator` và docstring dài
+  sau khi mở form Google Safe Browsing/Microsoft SmartScreen: thay bốn
+  conditional expression gọi `st.success`/`st.error` bằng `if/else` statement,
+  gồm cả hai nhánh Playwright legacy. Không đổi adapter, payload hoặc
+  hành vi submit. File chính: `pages/7_Quick_Report.py`, test UI; tài liệu:
+  README, CLAUDE và file này. Đã kiểm tra 11/11 test Quick Report,
+  AppTest không có exception, compileall và diff check; không đổi nghiệp vụ
+  nên không chạy lại full suite.
+
 - 2026-09-13 — Giảm lag Quick Report: dừng timer kết quả sau khi batch hoàn tất,
   tách mỗi domain thành fragment để click form không render lại toàn danh sách.
   AppTest kiểm tra bấm Google/Microsoft lặp lại bằng mock, không mở form thật.
