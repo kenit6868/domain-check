@@ -391,15 +391,41 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
             if "tld" in col_map:
                 with col_map["tld"]:
                     reg_name = registry_info.get("registry", "Registry")
+                    registry_form_url = registry_info["report_webform"]
                     st.markdown(f"##### 🌐 TLD Registry")
                     st.caption(reg_name)
                     if registry_info.get("note"):
                         st.caption(f"ℹ️ {registry_info['note']}")
-                    st.link_button(f"↗ Form {reg_name[:18]}", registry_info["report_webform"],
-                                   type="primary")
                     registry_text = pt.get_registry_webform_draft_text(
                         domain, registry_info, cfg, target_url=original_url,
                     )
+                    if "registry.co/report-abuse/form" in registry_form_url.lower():
+                        if st.button(
+                            "Mở & tự điền form Registry Co",
+                            key=f"quick_registry_co_autofill_{idx}",
+                            type="primary",
+                            icon=":material/open_in_browser:",
+                            help=(
+                                "Mở form .CO Registry trên Chrome profile hiện tại và điền "
+                                "thông tin report. Bạn tự đính kèm evidence, xác nhận thiện chí, "
+                                "giải CAPTCHA và submit."
+                            ),
+                        ):
+                            opened = cfw.open_profile_form(
+                                "registry_co_phishing", registry_form_url,
+                                original_url, registry_text, cfg,
+                            )
+                            if opened.get("error"):
+                                st.error(opened["error"])
+                            else:
+                                st.success(
+                                    "Đã mở form Registry Co. Extension sẽ tự điền; "
+                                    "bạn tự thêm evidence, xác nhận, giải CAPTCHA và submit."
+                                )
+                    else:
+                        st.link_button(
+                            f"↗ Form {reg_name[:18]}", registry_form_url, type="primary"
+                        )
                     st.code(registry_text, language=None)
 
 

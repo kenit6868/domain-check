@@ -557,3 +557,12 @@ vantage_points = [{"name":"VN mobile","country":"VN","proxy":"http://user:passwo
 Mỗi vantage thêm một desktop trực tiếp và một mobile Google vào lớp HTTP;
 `browser=true` thêm mobile Google vào Playwright. Tên/quốc gia được ghi vào
 manifest, còn URL proxy và credential không được ghi vào evidence hoặc UI.
+
+### Tự điền form .CO Registry
+
+Với URL thuộc TLD `.co`, Quick Report hiển thị nút **Mở & tự điền
+form Registry Co**. Web Form Assistant v2.7.0 mở form chính thức
+`registry.co/report-abuse/form?type=phishing` và điền tên/email người báo
+cáo, loại phishing, brand, domain, full URL/path và nội dung report. Evidence
+upload, xác nhận thiện chí, reCAPTCHA và submit luôn do người vận hành
+thực hiện; extension không tự tích, giải CAPTCHA hay gửi form.

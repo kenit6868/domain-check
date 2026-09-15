@@ -762,3 +762,9 @@ nhận web form.
 - `fallback_note` trong draft được cập nhật hiển thị nguồn: `[rdap]` hoặc `[static_table]`.
 - `run_check()` cũng dùng `get_rdap_abuse_email()` để tính `registrar_abuse_email_source` cho UI.
 
+Registry Co adapter v1.0.0 (extension v2.7.0) chỉ match
+`registry.co/report-abuse/form`, dùng task `registry_co_phishing` `fill_only` từ
+khối TLD Registry của Quick Report. Adapter điền `#ar-name`, `#ar-email`,
+`#ar-type=phishing`, `#ar-brand`, `#ar-domains`, full URL và description; không
+chọn file evidence, không tích `Input.GoodFaithConfirmed`, không xử lý
+reCAPTCHA và không submit.

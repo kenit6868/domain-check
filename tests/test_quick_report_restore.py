@@ -98,6 +98,12 @@ class QuickReportRestoreTests(unittest.TestCase):
         self.assertIn('"Mở & tự điền form GoDaddy"', source)
         self.assertIn('if "godaddy" in r_lower:', source)
 
+    def test_registry_co_uses_fill_only_extension_adapter(self):
+        source = (Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py").read_text(encoding="utf-8")
+        self.assertIn('"registry_co_phishing", registry_form_url', source)
+        self.assertIn('"Mở & tự điền form Registry Co"', source)
+        self.assertIn('if "registry.co/report-abuse/form" in registry_form_url.lower():', source)
+
 
 if __name__ == "__main__":
     unittest.main()

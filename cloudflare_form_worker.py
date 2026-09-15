@@ -380,6 +380,7 @@ def open_profile_form(provider: str, form_url: str, target_url: str, draft: str,
     if provider not in {
         "cloudflare", "google_gsb", "microsoft_smartscreen",
         "chongluadao", "coccoc_safe", "godaddy_phishing",
+        "registry_co_phishing",
     }:
         return {"error": "Provider form không được hỗ trợ."}
 

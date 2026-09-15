@@ -158,6 +158,26 @@ class CloudflareFormWorkerTests(unittest.TestCase):
         self.assertEqual(captured["payload"]["_brand_name"], "Example Brand")
         self.assertIn("legalportal.godaddy.com/abuse/phishing#ptask=token", opener.call_args.args[0])
 
+    def test_registry_co_form_uses_fill_only_task_and_preserves_query(self):
+        captured = {}
+        bridge = Mock(port=45678)
+        bridge.register.side_effect = lambda payload, callback: captured.update(payload=payload) or "token"
+        with patch("cloudflare_profile_bridge.profile_bridge", return_value=bridge), patch.object(
+            cfw, "open_in_installed_chrome", return_value=True
+        ) as opener:
+            result = cfw.open_profile_form(
+                "registry_co_phishing",
+                "https://registry.co/report-abuse/form?type=phishing",
+                "https://phish.example.co/login?campaign=1", "Evidence",
+                {"contact_name": "Reporter", "contact_email": "r@example.test",
+                 "brand_name": "Example Brand"},
+            )
+        self.assertEqual(result["status"], "opened")
+        self.assertEqual(captured["payload"]["provider"], "registry_co_phishing")
+        self.assertEqual(captured["payload"]["mode"], "fill_only")
+        self.assertEqual(captured["payload"]["target_url"], "https://phish.example.co/login?campaign=1")
+        self.assertIn("registry.co/report-abuse/form?type=phishing#ptask=token", opener.call_args.args[0])
+
     def test_community_form_passes_only_whitelisted_report_type(self):
         captured = {}
         bridge = Mock(port=45678)

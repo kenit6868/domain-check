@@ -83,6 +83,7 @@ class ProfileBridge:
         if provider not in {
             "cloudflare", "google_gsb", "microsoft_smartscreen",
             "chongluadao", "coccoc_safe", "godaddy_phishing",
+            "registry_co_phishing",
         }:
             provider = "cloudflare"
         safe = {

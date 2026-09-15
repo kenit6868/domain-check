@@ -34,7 +34,7 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
     def test_extension_is_restricted_to_supported_forms_and_localhost(self):
         root = Path(__file__).resolve().parents[1]
         manifest = json.loads((root / "chrome_extension/cloudflare-profile-worker/manifest.json").read_text())
-        self.assertEqual(manifest["version"], "2.6.5")
+        self.assertEqual(manifest["version"], "2.7.0")
         expected_icons = {
             "16": "icons/icon16.png",
             "32": "icons/icon32.png",
@@ -56,6 +56,7 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
             "https://chongluadao.vn/*",
             "https://safe.coccoc.com/*",
             "https://legalportal.godaddy.com/*",
+            "https://registry.co/*",
         ])
         self.assertNotIn("<all_urls>", manifest["host_permissions"])
         self.assertEqual(manifest["background"]["service_worker"], "background.js")
@@ -68,6 +69,7 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
             "adapters/chongluadao.js",
             "adapters/coccoc_safe.js",
             "adapters/godaddy_phishing.js",
+            "adapters/registry_co.js",
             "content.js",
         ])
         self.assertIn("PhishingToolFormAdapters", coordinator)
@@ -106,6 +108,7 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
         for name in (
             "cloudflare.js", "google_gsb.js", "microsoft_smartscreen.js",
             "chongluadao.js", "coccoc_safe.js", "godaddy_phishing.js",
+            "registry_co.js",
         ):
             adapter = (root / "chrome_extension/cloudflare-profile-worker/adapters" / name).read_text(encoding="utf-8")
             for member in ("matches:", "waitUntilReady:", "fill:", "validate:", "captchaPending:", "submit:", "detectSuccess:"):
@@ -118,6 +121,19 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
             self.assertIn(selector, adapter)
         self.assertIn("submit: () => false", adapter)
         self.assertNotIn('.querySelector("#attested").click', adapter)
+
+    def test_registry_co_adapter_fills_report_but_leaves_evidence_attestation_and_submit_manual(self):
+        root = Path(__file__).resolve().parents[1]
+        adapter = (root / "chrome_extension/cloudflare-profile-worker/adapters/registry_co.js").read_text(encoding="utf-8")
+        for selector in (
+            "#ar-name", "#ar-email", "#ar-type", "#ar-brand",
+            "#ar-domains", "#ar-path", "#ar-description",
+        ):
+            self.assertIn(selector, adapter)
+        self.assertIn('selectValue(fields.type, "phishing")', adapter)
+        self.assertIn("submit: () => false", adapter)
+        self.assertNotIn("GoodFaithConfirmed", adapter)
+        self.assertNotIn('input[type="file"]', adapter)
 
     def test_coccoc_adapter_verifies_the_mui_hidden_value(self):
         root = Path(__file__).resolve().parents[1]

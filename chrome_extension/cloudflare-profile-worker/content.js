@@ -18,6 +18,7 @@
     url: "Reported URL", source: "Reported URL", details: "Evidence / details",
     evidence: "Evidence / details", email: "Email", confirm: "Confirm email",
     company: "Company / brand", name: "Contact name", contact: "Contact email",
+    domains: "Involved domain",
     type: "Report type", typeInput: "Report type",
   };
   const fieldHasValue = (field) => {

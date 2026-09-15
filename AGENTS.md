@@ -247,6 +247,17 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-15 — Web Form Assistant v2.7.0 thêm adapter Registry Co phishing
+  v1.0.0 cho Quick Report: chỉ match form chính thức
+  `registry.co/report-abuse/form`, điền reporter, loại phishing, brand, domain,
+  full URL/path và draft registry. Upload evidence, checkbox thiện chí,
+  reCAPTCHA và submit vẫn thủ công; host permission chỉ thêm origin
+  Registry Co. File chính: adapter JS, manifest, bridge/worker, Quick Report và
+  test extension/UI; tài liệu: README, CLAUDE, Technical Guide, file này và
+  skill dự án. Đã kiểm tra syntax toàn bộ JavaScript, 28 test tập
+  trung, 308/308 full unittest, AppTest Quick Report, compileall, pip check và
+  diff check.
+
 - 2026-09-13 — Microsoft SmartScreen adapter v1.0.5/extension v2.6.5 rollback
   toàn bộ tự chọn ngôn ngữ theo yêu cầu: Quick Report không truyền `language`,
   adapter chỉ điền URL và không tìm/mở/thao tác MWF language combo. Trường ngôn
