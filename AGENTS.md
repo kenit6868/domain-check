@@ -247,6 +247,25 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-17 — Điều tra retry bằng log thực: job chọn 13 URL nhưng hai lượt đầu
+  tiếp tục timeout SMTP, rồi nghỉ batch theo cấu hình. Sửa bảng ưu tiên trạng thái
+  đang/chờ retry thay vì che bởi kết quả lỗi cũ; hiển thị scope và tiến độ theo
+  lần chạy. UI/worker dùng chung completion predicate, submit lưu retry_targets
+  cụ thể, không coi success của pipeline là SMTP success. Thêm test đi qua lõi
+  draft/send với SMTP mock cho 12 failed + 1 pending và retry lỗi lần nữa, cùng
+  AppTest trạng thái bảng. Đã đạt 66 test Domain Worker, 322/322 full unittest,
+  compileall và diff check. Không sửa runtime data hoặc gửi thật.
+
+- 2026-09-17 — Domain Worker sửa retry nhiều lần: kết quả mới thay dòng URL cũ,
+  bộ đếm không cộng dồn attempt, và lượt bị ngắt giữa chừng vẫn có thể chạy tiếp.
+  Thêm khóa vòng đời process, ghi PID ngay khi launch và xác minh worker nhả khóa
+  trước khi báo dừng. UI có Chạy lại sau stopped/failed và Chạy lại precheck khi
+  chưa hoàn tất; không tự restart. Kiểm thử mock SMTP/process và AppTest cho
+  stop → chạy lại → retry lỗi lặp lại. Người dùng cho phép tiếp tục khi skill
+  developing-with-streamlit bị thiếu trong checkout. Đã đạt 320/320 unittest
+  (gồm AppTest), compileall và diff check; hai test bridge localhost được chạy
+  lại ngoài sandbox sau lỗi quyền bind socket. Không gửi email/report thật.
+
 - 2026-09-15 — Sửa Quick Report hiển thị `DeltaGenerator` và docstring dài
   sau khi mở form Google Safe Browsing/Microsoft SmartScreen: thay bốn
   conditional expression gọi `st.success`/`st.error` bằng `if/else` statement,

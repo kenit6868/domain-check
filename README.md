@@ -417,6 +417,20 @@ Luồng sử dụng hiện tại:
    xem**, đọc đúng nội dung sẽ gửi rồi xác nhận gửi trực tiếp. Trang không tạo hay
    chờ worker job gửi mail.
 
+Phần retry hiển thị số URL lỗi/dở dang và chưa xử lý sẽ chạy lại. Bảng hiện
+**Đang retry** cho URL đang xử lý và **Chờ retry** cho các URL trong hàng đợi,
+ưu tiên hơn kết quả lỗi của lần trước. Tiến độ chỉ tính URL của lần chạy hiện
+tại; thời gian nghỉ giữa batch vẫn theo cấu hình. Nếu kết nối SMTP tiếp tục
+timeout, domain vẫn được thử lại nhưng chỉ đổi kết quả khi lần gửi kết thúc.
+
+Sau khi job hoàn tất, bấm **Retry phần lỗi / còn thiếu** để gửi lại các lượt chưa
+thành công; nếu lần retry vẫn lỗi, có thể tiếp tục bấm retry sau khi xử lý nguyên
+nhân. Worker không tự lặp lại toàn bộ job. Nút **Dừng hẳn tiến trình** kết thúc
+worker; chỉ khi bạn bấm **Chạy lại phần lỗi / còn thiếu** và xác nhận gửi thì
+worker mới chạy tiếp. Nếu dừng khi precheck chưa xong, bấm **Chạy lại precheck**
+trước (chưa gửi email). Kết quả mỗi URL chỉ hiển thị lần xử lý mới nhất, không
+cộng dồn lỗi cũ. Delivery đã ghi nhận thành công trong ngày vẫn được bỏ qua.
+
 Worker chạy bằng process riêng nên vẫn tiếp tục nếu đóng hoặc refresh tab trình
 duyệt. Trang này hiển thị tiến độ ở trên, tiếp theo là cấu hình gửi worker, rồi
 đến bảng kết quả domain trong fragment real-time. Cột **Đã gửi đến** liệt kê các

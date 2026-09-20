@@ -3,6 +3,7 @@ import os
 import tempfile
 import threading
 import unittest
+from contextlib import nullcontext
 from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1228,6 +1229,170 @@ class DomainWorkerTests(unittest.TestCase):
             self.assertEqual(run_domain.call_count, 1)
             self.assertEqual(status["results"][-1]["sent_ok"], 1)
             self.assertEqual(status["results"][-1]["sent_failed"], 0)
+
+    def test_retry_twelve_failed_and_one_pending_reaches_smtp(self):
+        """Replay the observed job shape through real selection/draft/send code."""
+        with tempfile.TemporaryDirectory() as job_dir:
+            job_path = os.path.join(job_dir, "job.json")
+            status_path = os.path.join(job_dir, "status.json")
+            targets = [f"https://retry-{i}.example/path" for i in range(25)]
+            ready = [{"target_url": t, "domain": f"retry-{i}.example",
+                      "browser_evidence_terminal": True,
+                      "recipients": [{"channel": "registrar", "email": "abuse@example.org"}]}
+                     for i, t in enumerate(targets)]
+            previous = [{**item, "success": True, "sent_ok": int(i < 12),
+                         "sent_failed": int(i >= 12)} for i, item in enumerate(ready[:24])]
+            selected = domain_worker.pending_worker_items(ready, previous)
+            self.assertEqual(targets[12:], [r["target_url"] for r in selected])
+            domain_worker._atomic_json(job_path, {
+                "job_id": "smtp-retry", "domains": targets, "preflight_version": 4,
+                "batch_size": 2, "interval_seconds": 0,
+                "retry_targets": [r["target_url"] for r in selected],
+            })
+            domain_worker._atomic_json(status_path, {
+                "job_id": "smtp-retry", "state": "stopped", "results": previous,
+            })
+            domain_worker._atomic_json(os.path.join(job_dir, "preflight.json"), {
+                "version": 4, "complete": True, "ready": ready,
+            })
+            def investigate(target, *_args):
+                domain = domain_worker.pt.normalize_domain(target)
+                draft = Path(job_dir) / f"{domain}_registrar_report.txt"
+                draft.write_text(f"To: abuse@example.org\nSubject: Suspected phishing\n\n"
+                                 f"Reported URL: {target}\nPlease investigate this website.\n")
+                return {"domain": domain, "drafts": [str(draft)],
+                        "cloaking": {"verdict": "BLOCKED_OR_UNAVAILABLE", "score": 0}}
+            attempts = []
+            def smtp(_to, _subject, body, account, _proxy):
+                attempts.append(next(t for t in targets if t in body))
+                ok = len(attempts) > 2
+                return {"success": ok, "account": account["username"],
+                        "stage": "sent" if ok else "connect",
+                        "error": "" if ok else "Connection timed out"}
+            with (
+                patch.object(domain_worker.pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(domain_worker.pt, "SENT_LOG_PATH", os.path.join(job_dir, "sent.csv")),
+                patch.object(domain_worker.pt, "run_check", side_effect=investigate),
+                patch.object(domain_worker.pt, "send_report_email_single", side_effect=smtp),
+            ):
+                domain_worker.run_job(job_path)
+                self.assertEqual(targets[12:], attempts)
+                status = domain_worker._read_json(status_path, {})
+                self.assertEqual(13, status["run_processed"])
+                self.assertEqual(13, status["run_total"])
+                self.assertEqual([], status["pending_targets"])
+                self.assertEqual(2, sum(r.get("sent_failed", 0) for r in status["results"]))
+                domain_worker.run_job(job_path)
+                self.assertEqual(targets[12:14], attempts[13:])
+                status = domain_worker._read_json(status_path, {})
+                self.assertEqual(2, status["run_total"])
+                self.assertEqual(0, sum(r.get("sent_failed", 0) for r in status["results"]))
+
+    def test_failed_delivery_row_overrides_legacy_success_and_zero_counter(self):
+        result = {"target_url": "https://retry.example", "success": True,
+                  "sent_ok": 1, "sent_failed": 0,
+                  "sent_to": [{"ok": False, "status": "failed"}]}
+        self.assertEqual([result], domain_worker.pending_worker_items([result], [result]))
+
+    def test_repeated_retry_replaces_errors_and_resumes_interrupted_delivery(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            job_path = os.path.join(job_dir, "job.json")
+            status_path = os.path.join(job_dir, "status.json")
+            target = "https://retry.example/path"
+            prepared = {"target_url": target, "domain": "retry.example"}
+            domain_worker._atomic_json(job_path, {
+                "job_id": "repeat", "domains": [target], "preflight_version": 2,
+                "batch_size": 1, "interval_seconds": 0,
+            })
+            domain_worker._atomic_json(os.path.join(job_dir, "preflight.json"), {
+                "version": 2, "ready": [prepared],
+            })
+            failed = {**prepared, "success": True, "sent_ok": 1, "sent_failed": 1}
+            interrupted = {**prepared, "success": True, "sent_ok": 1, "sent_failed": 0}
+            success = {**prepared, "success": True, "sent_ok": 1, "sent_failed": 0,
+                       "already_sent": 1}
+            # Legacy append-only history: an earlier success must not mask the latest failure.
+            domain_worker._atomic_json(status_path, {
+                "job_id": "repeat", "results": [success, failed],
+            })
+            with (
+                patch.object(domain_worker.pt, "load_config", return_value={"smtp_accounts": [{}]}),
+                patch.object(domain_worker, "_successfully_sent_deliveries_today", return_value=set()),
+                patch.object(domain_worker, "_run_prechecked_domain", side_effect=[
+                    (failed, set(), False), (dict(failed), set(), False),
+                    (interrupted, set(), True), (success, set(), False),
+                ]) as send,
+            ):
+                for expected_state, expected_failed in [
+                    ("completed", 1), ("completed", 1), ("stopped", 0), ("completed", 0),
+                ]:
+                    domain_worker.run_job(job_path)
+                    status = domain_worker._read_json(status_path, {})
+                    self.assertEqual(expected_state, status["state"])
+                    self.assertEqual(1, len(status["results"]))
+                    self.assertEqual(1, status["total"])
+                    self.assertEqual(1, status["processed"])
+                    self.assertEqual(expected_failed, status["results"][0]["sent_failed"])
+                domain_worker.run_job(job_path)
+                self.assertEqual(4, send.call_count)
+
+    def test_launch_persists_new_pid_and_blocks_duplicate_launch(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            job_path = os.path.join(job_dir, "job.json")
+            status_path = os.path.join(job_dir, "status.json")
+            stop_path = os.path.join(job_dir, "stop.requested")
+            domain_worker._atomic_json(status_path, {"state": "stopped", "pid": 123})
+            Path(stop_path).touch()
+            with patch.object(domain_worker.subprocess, "Popen") as launch:
+                launch.return_value.pid = 456
+                domain_worker.launch_job_process(job_path)
+                status = domain_worker._read_json(status_path, {})
+                self.assertEqual("starting", status["state"])
+                self.assertEqual(456, status["pid"])
+                self.assertFalse(os.path.exists(stop_path))
+                with self.assertRaises(RuntimeError):
+                    domain_worker.launch_job_process(job_path)
+                launch.assert_called_once()
+
+    def test_launch_does_not_clear_stop_while_old_worker_holds_lock(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            stop_path = Path(job_dir) / "stop.requested"
+            stop_path.touch()
+            with domain_worker._exclusive_file_lock(os.path.join(job_dir, "process")):
+                with patch.object(domain_worker.subprocess, "Popen") as launch:
+                    with self.assertRaises(TimeoutError):
+                        domain_worker.launch_job_process(os.path.join(job_dir, "job.json"))
+                    launch.assert_not_called()
+                    self.assertTrue(stop_path.exists())
+
+    def test_stop_escalates_if_process_does_not_release_lock(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            status_path = os.path.join(job_dir, "status.json")
+            domain_worker._atomic_json(status_path, {"state": "running", "pid": 4321})
+            with (
+                patch.object(domain_worker.os, "name", "posix"),
+                patch.object(domain_worker.os, "killpg", create=True) as kill,
+                patch.object(domain_worker, "_exclusive_file_lock", side_effect=[
+                    TimeoutError(), nullcontext(),
+                ]),
+            ):
+                stopped, _ = domain_worker.stop_job_process(job_dir)
+            self.assertTrue(stopped)
+            self.assertEqual([domain_worker.signal.SIGTERM, domain_worker.signal.SIGKILL],
+                             [call.args[1] for call in kill.call_args_list])
+            self.assertEqual("stopped", domain_worker._read_json(status_path, {})["state"])
+
+    def test_stop_terminal_job_does_not_signal_stale_pid(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            domain_worker._atomic_json(os.path.join(job_dir, "status.json"), {
+                "state": "completed", "pid": 4321,
+            })
+            with patch.object(domain_worker.os, "killpg", create=True) as kill:
+                stopped, _ = domain_worker.stop_job_process(job_dir)
+                self.assertTrue(stopped)
+                kill.assert_not_called()
 
     def test_normal_worker_uses_only_ready_items_from_completed_v3_preflight(self):
         with tempfile.TemporaryDirectory() as job_dir:

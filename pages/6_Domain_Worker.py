@@ -459,6 +459,8 @@ def load_status(job_dir):
 def _render_job_metrics(status):
     """Render the compact progress bar beside the table it describes."""
     state = status.get("state", "?")
+    if state == "starting":
+        return
     if state == "prechecking":
         columns = st.columns(4)
         columns[0].metric("Trạng thái", "Đang precheck")
@@ -478,7 +480,7 @@ def _render_job_metrics(status):
     columns = st.columns(4)
     c1, c2, c3, c4 = columns
     c1.metric("Trạng thái", state)
-    c2.metric("Tiến độ", f"{status.get('processed', 0)}/{status.get('total', 0)}")
+    c2.metric("Tiến độ lần chạy này", f"{status.get('run_processed', status.get('processed', 0))}/{status.get('run_total', status.get('total', 0))}")
     c3.metric("Batch", f"{status.get('current_batch', 0)}/{status.get('total_batches', 0)}")
     c4.metric("Batch tiếp theo", f"{status.get('next_batch_in_seconds', 0)} giây")
 
@@ -540,17 +542,26 @@ def _render_live_domain_results(active_job_dir: str, latest: dict) -> None:
         result = result_by_target.get(target_url, prepared if not preflight_ready else {})
         domain_key = (result.get("domain") or prepared.get("domain", "")).lower().rstrip(".")
         cached_accounts = sent_accounts.get(domain_key, set())
-        fully_sent = result.get("skipped") == "already_sent"
-        if fully_sent and not result.get("sent_ok", 0):
+        fully_sent = result.get("skipped") == "already_sent" and not result.get("interrupted")
+        active = latest.get("state") in domain_worker.ACTIVE_JOB_STATES
+        if active and latest.get("current_domain") == target_url:
+            row_status = "🔄 Đang retry" if result else "🔄 Đang chạy"
+            sent_count = result.get("sent_ok", 0)
+        elif active and target_url in (latest.get("pending_targets") or []):
+            row_status = "⏳ Chờ retry" if result else "⏳ Chờ xử lý"
+            sent_count = result.get("sent_ok", 0)
+        elif fully_sent and not result.get("sent_ok", 0):
             row_status = "✅ Đã gửi trước đó"
             sent_count = len(cached_accounts)
         elif result:
-            if result.get("error"):
+            if result.get("interrupted"):
+                row_status = "⏸ Đã dừng — còn lượt chưa gửi"
+            elif result.get("error"):
                 row_status = "❌ Lỗi"
             elif result.get("skipped"):
                 row_status = skip_labels.get(result["skipped"], "⏭ Bỏ qua")
-            elif result.get("sent_failed", 0) and not result.get("sent_ok", 0):
-                row_status = "❌ Thất bại"
+            elif result.get("sent_failed", 0):
+                row_status = "⚠️ Gửi một phần" if result.get("sent_ok", 0) else "❌ Thất bại"
             elif result.get("sent_ok", 0):
                 row_status = "✅ Đã gửi"
             else:
@@ -798,7 +809,9 @@ def _render_live_worker_progress(active_job_dir: str) -> None:
         st.status("Đang khởi động worker...", state="running", expanded=True)
         return
     stage = _STAGE_LABELS.get(str(latest.get("current_stage") or ""), "Đang xử lý")
-    if state == "prechecking":
+    if state == "starting":
+        message, status_state = "Đang khởi động worker", "running"
+    elif state == "prechecking":
         message = (
             f"Precheck {latest.get('precheck_processed', 0)}/"
             f"{latest.get('precheck_total', 0)} URL — {stage}"
@@ -809,7 +822,8 @@ def _render_live_worker_progress(active_job_dir: str) -> None:
         status_state = "complete"
     elif state in {"running", "waiting"}:
         message = (
-            f"Worker {latest.get('processed', 0)}/{latest.get('total', 0)} URL — {stage}"
+            f"Lần chạy này {latest.get('run_processed', latest.get('processed', 0))}/"
+            f"{latest.get('run_total', latest.get('total', 0))} URL — {stage}"
         )
         status_state = "running"
     elif state == "failed":
@@ -881,7 +895,36 @@ else:
             _dataframe_with_copy(excluded_table)
 
     worker_state = status.get("state")
-    active_worker = worker_state in ("prechecking", "running", "waiting")
+    active_worker = worker_state in domain_worker.ACTIVE_JOB_STATES
+    resume_worker = worker_state in {"completed", "failed", "stopped"}
+    pending_items = domain_worker.pending_worker_items(ready_domains, status.get("results") or [])
+    if resume_worker:
+        failed_count = sum(
+            item.get("target_url") in {r.get("target_url") for r in status.get("results") or []}
+            for item in pending_items
+        )
+        st.caption(f"Phạm vi chạy lại: {len(pending_items)} URL — {failed_count} URL lỗi/dở dang, "
+                   f"{len(pending_items) - failed_count} URL chưa xử lý.")
+    precheck_incomplete = (
+        prepared_job_ui.get("preflight_version") in {3, 4}
+        and not cached_preflight.get("complete")
+    )
+    if worker_state in {"stopped", "failed"}:
+        st.info("Worker đã dừng. Bấm Chạy lại khi muốn tiếp tục; các delivery đã ghi nhận thành công sẽ được bỏ qua.")
+        if precheck_incomplete and st.button("▶ Chạy lại precheck"):
+            prepared_job_path = os.path.join(job_dir, "job.json")
+            try:
+                prepared_job = domain_worker._read_json(prepared_job_path, {})
+                prepared_job["precheck_only"] = True
+                prepared_job.pop("retry_targets", None)
+                domain_worker._atomic_json(prepared_job_path, prepared_job)
+                launch_job_process(prepared_job_path)
+            except (OSError, RuntimeError) as exc:
+                st.error(f"Không thể chạy lại precheck: {exc}")
+            else:
+                st.session_state["worker_poll_job_dir"] = job_dir
+                st.session_state["worker_poll_started_at"] = time.time()
+                st.rerun()
     # Các ngoại lệ đã có page review riêng và được gom tại khu
     # "Cần bạn xử lý"; không lặp lại bảng ở giữa trang.
     if status.get("state") == "ready" and not ready_domains:
@@ -898,8 +941,9 @@ else:
                 completed_sent = sum(int(item.get("sent_ok", 0) or 0) for item in completed_results)
                 completed_cached = sum(int(item.get("already_sent", 0) or 0) for item in completed_results)
                 completed_failed = sum(int(item.get("sent_failed", 0) or 0) for item in completed_results)
-                st.success(
-                    f"✅ Job đã chạy xong cho các account đã chọn: gửi mới **{completed_sent}** email; "
+                completion_notice = st.warning if completed_failed else st.success
+                completion_notice(
+                    f"Job đã chạy xong cho các account đã chọn: gửi mới **{completed_sent}** email; "
                     f"bỏ qua **{completed_cached}** lượt đã gửi thành công hôm nay; "
                     f"còn **{completed_failed}** lượt gửi lỗi."
                 )
@@ -911,7 +955,7 @@ else:
                     "Cache precheck hợp lệ. Bạn có thể chạy worker ngay bằng danh sách này, "
                     "hoặc bấm Check toàn bộ để cập nhật cache trước khi chạy."
                 )
-            st.subheader("Retry phần còn thiếu" if worker_state == "completed" else "Cấu hình gửi worker")
+            st.subheader("Retry phần lỗi / còn thiếu" if resume_worker else "Cấu hình gửi worker")
             job_selected_accounts = [
                 account for account in (prepared_job_ui.get("allowed_accounts") or [])
                 if account in _account_labels
@@ -931,7 +975,7 @@ else:
                 )
                 selected_accounts = job_selected_accounts
                 delivery_preview = domain_worker.build_preflight_delivery_preview(
-                    ready_domains, selected_accounts, include_vncert=bool(include_vncert),
+                    pending_items, selected_accounts, include_vncert=bool(include_vncert),
                 )
                 st.caption(
                     f"Dự kiến theo recipient đã precheck: **{delivery_preview['pending']}** "
@@ -946,9 +990,11 @@ else:
                     value=False,
                 )
                 start = st.form_submit_button(
-                    "↻ Retry phần còn thiếu" if worker_state == "completed" else "▶ Khởi chạy worker",
+                    "▶ Chạy lại phần lỗi / còn thiếu" if worker_state in {"stopped", "failed"} else (
+                        "↻ Retry phần lỗi / còn thiếu" if resume_worker else "▶ Khởi chạy worker"
+                    ),
                     type="primary",
-                    disabled=not _all_accounts,
+                    disabled=not _all_accounts or active_worker or precheck_incomplete or not pending_items,
                 )
 
             if start:
@@ -959,7 +1005,7 @@ else:
                 except (OSError, ValueError):
                     prepared_job = {}
                 latest_status = load_status(job_dir) or {}
-                if latest_status.get("state") in ("prechecking", "running", "waiting"):
+                if latest_status.get("state") in domain_worker.ACTIVE_JOB_STATES:
                     st.warning("Worker đang chạy hoặc đang chờ batch; không thể khởi chạy thêm tiến trình.")
                 elif prepared_job.get("preflight_version") not in {2, 3, 4}:
                     st.error("Kết quả precheck đã cũ. Hãy check lại danh sách.")
@@ -980,15 +1026,25 @@ else:
                         "allowed_accounts": selected_accounts,
                         "precheck_only": False,
                     })
-                    prepared_job.pop("retry_targets", None)
+                    retry_items = domain_worker.pending_worker_items(
+                        (_load_preflight(job_dir).get("ready") or []), latest_status.get("results") or [],
+                    )
+                    if not retry_items:
+                        st.info("Không còn URL lỗi hoặc chưa xử lý trong danh sách ready.")
+                        st.stop()
+                    prepared_job["retry_targets"] = [item["target_url"] for item in retry_items]
                     domain_worker._atomic_json(prepared_job_path, prepared_job)
-                    launch_job_process(prepared_job_path)
+                    try:
+                        launch_job_process(prepared_job_path)
+                    except (OSError, RuntimeError) as exc:
+                        st.error(f"Không thể chạy worker: {exc}")
+                        st.stop()
                     st.session_state["worker_job_dir"] = job_dir
                     st.session_state["worker_poll_job_dir"] = job_dir
                     st.session_state["worker_poll_started_at"] = time.time()
-                    action_text = "retry" if worker_state == "completed" else "xử lý"
+                    action_text = "retry" if resume_worker else "xử lý"
                     st.success(
-                        f"Đã yêu cầu worker {action_text} {len(ready_domains)} domain. "
+                        f"Đã yêu cầu worker {action_text} {len(retry_items)} domain. "
                         "Các email đã thành công hôm nay sẽ tự động được bỏ qua."
                     )
                     st.rerun()
@@ -1041,5 +1097,9 @@ else:
             st.rerun()
     if b.button("⏹ Dừng hẳn tiến trình", disabled=status.get("state") in ("ready", "completed", "failed", "stopped")):
         stopped, message = stop_job_process(job_dir)
-        (st.success if stopped else st.warning)(message)
-        st.rerun()
+        if stopped:
+            st.session_state.pop("worker_poll_job_dir", None)
+            st.session_state.pop("worker_poll_started_at", None)
+            st.rerun()
+        else:
+            st.warning(message)

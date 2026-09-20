@@ -276,6 +276,20 @@ no-email trong ngày. Trang **Cloaking Review** là nơi duy nhất để ngư�
 xem evidence, chọn từng URL và quyết định: gửi kèm evidence cloaking, gửi report
 thường sau khi loại evidence cloaking, hoặc bỏ qua.
 
+Khi theo dõi retry, xem **Phạm vi chạy lại**, **Tiến độ lần chạy này**, trạng thái
+**Đang retry / Chờ retry** và countdown nghỉ batch. Bảng lỗi cũ không chứng minh
+worker bỏ qua domain; kiểm tra event `domain_finished` của lần chạy mới và mã
+SMTP. `SMTP_CONNECTION_FAILED` do timeout có thể lặp lại trên cùng domain dù
+retry đã gọi SMTP. Không thay đổi cấu hình SMTP/proxy hoặc gửi thử thật tự động.
+
+Khi Domain Worker gửi lỗi, kiểm tra chi tiết lỗi rồi bấm **Retry phần lỗi / còn
+thiếu**; lần retry còn lỗi vẫn có thể thử lại thủ công. Bấm **Dừng hẳn tiến trình**
+để kết thúc worker, sau đó **Chạy lại phần lỗi / còn thiếu** nếu muốn tiếp tục.
+Precheck chưa hoàn tất có nút **Chạy lại precheck** riêng. Không tự restart sau
+khi dừng; cache delivery thành công được giữ. Với việc dừng cưỡng bức đúng lúc
+SMTP đang trả kết quả, có thể tồn tại thư đã được server nhận nhưng chưa kịp ghi
+ledger; kiểm tra thư đã gửi trước khi retry trong trường hợp này.
+
 Domain Worker dùng một ô nhập cho cả URL và nội dung thô. Parser giữ full
 path/query, loại trùng và bỏ qua ghi chú/token không hợp lệ; chỉ chặn khi không
 còn URL hợp lệ. Nút **Check toàn bộ, lọc email & cloaking** tạo preflight schema v3. Với từng

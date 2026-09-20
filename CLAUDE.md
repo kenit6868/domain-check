@@ -575,6 +575,24 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
 
 ### Domain Worker — chọn nhiều tài khoản và cache theo delivery
 
+- UI và worker dùng cùng predicate completion; `success=true` của pipeline không
+  đủ để kết luận delivery thành công khi đã có counter SMTP. Một delivery lỗi
+  trong `sent_to` giữ URL trong retry kể cả counter legacy bị thiếu/sai.
+  UI lưu chính xác `retry_targets` từ ready + kết quả mới nhất khi submit.
+- `run_total`, `run_processed`, `pending_targets` mô tả riêng lần chạy hiện tại;
+  bảng ưu tiên current/pending targets hơn kết quả cũ khi job active. Chỉ metric
+  tiến độ dùng counter theo lần chạy; kết quả/ledger lịch sử vẫn giữ để dedupe.
+
+- Retry thủ công dùng kết quả mới nhất theo full URL; thay dòng cũ thay vì append
+  nhiều attempt vào `status.results`. Lịch sử attempt vẫn nằm trong events.
+  Result `interrupted=true` không được coi là completed dù đã gửi được một phần.
+- `process.lock` khóa suốt vòng đời `run_job`; launch giữ cùng lock, ghi trạng thái
+  `starting` và PID mới trước khi child bắt đầu. Stop chỉ công bố `stopped` sau
+  khi lấy được lock; POSIX gửi SIGTERM rồi SIGKILL nếu worker không nhả lock sau
+  hai giây. Windows vẫn dùng taskkill /T /F. Không signal PID của job terminal.
+  UI khóa launch khi active; retry/chạy lại vẫn cần xác nhận gửi. Precheck dở
+  có nút chạy lại riêng, không tự gửi email.
+
 - Trang `pages/6_Domain_Worker.py` có một bộ chọn tài khoản SMTP và một ô nhập duy nhất nhận cả URL lẫn nội dung
   thô, mặc định toàn bộ account từ `config.ini`. Parser bỏ ghi chú/token lỗi và không chặn batch nếu vẫn còn URL
   hợp lệ. Lọc domain/hiển thị cache dùng đúng tập account đang chọn; lựa chọn

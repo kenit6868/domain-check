@@ -25,7 +25,7 @@ from domain_utils import extract_domains_from_text
 
 WORKER_DIR = pt._runtime_path("worker_jobs")
 CLOAKING_WORKER_DIR = pt._runtime_path("cloaking_send_jobs")
-ACTIVE_JOB_STATES = {"prechecking", "running", "waiting"}
+ACTIVE_JOB_STATES = {"starting", "prechecking", "running", "waiting"}
 # Log riêng các domain đã được worker check nhưng KHÔNG tìm được email report nào để gửi
 # (registrar chỉ nhận web form, chưa tra được abuse email...). Tách khỏi sent_log.csv vì
 # đây không phải 1 lần gửi thành/thất bại — chỉ là "đã thử, không có gì để gửi". Dùng để
@@ -118,23 +118,34 @@ def _read_json(path: str, default):
 
 
 def launch_job_process(job_path: str):
-    """Launch one persisted worker job without opening a visible console window."""
+    """Serialize launch/resume with the lifetime lock held by the child worker."""
     job_path = os.path.abspath(job_path)
-    stop_path = os.path.join(os.path.dirname(job_path), "stop.requested")
-    try:
-        os.remove(stop_path)
-    except FileNotFoundError:
-        pass
-    if getattr(sys, "frozen", False):
-        command = [sys.executable, "--worker-job", job_path]
-    else:
-        command = [sys.executable, os.path.abspath(__file__), job_path]
-    return subprocess.Popen(
-        command,
-        cwd=pt.BASE_DIR,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        start_new_session=os.name != "nt",
-    )
+    job_dir = os.path.dirname(job_path)
+    with _exclusive_file_lock(os.path.join(job_dir, "process"), timeout=0.1):
+        status_path = os.path.join(job_dir, "status.json")
+        status = _read_json(status_path, {})
+        if status.get("state") in ACTIVE_JOB_STATES:
+            raise RuntimeError("Worker đang chạy hoặc đang khởi động; hãy dừng trước khi chạy lại.")
+        stop_path = os.path.join(job_dir, "stop.requested")
+        try:
+            os.remove(stop_path)
+        except FileNotFoundError:
+            pass
+        if getattr(sys, "frozen", False):
+            command = [sys.executable, "--worker-job", job_path]
+        else:
+            command = [sys.executable, os.path.abspath(__file__), job_path]
+        process = subprocess.Popen(
+            command, cwd=pt.BASE_DIR,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            start_new_session=os.name != "nt",
+        )
+        # The child waits for this lock, so it cannot overwrite status before
+        # its PID is persisted. Stop immediately after launch targets this PID.
+        status.update({"state": "starting", "pid": process.pid,
+                       "current_stage": "starting", "finished_at": None})
+        _atomic_json(status_path, status)
+        return process
 
 
 def is_cloaking_review_job_dir(job_dir: str) -> bool:
@@ -423,6 +434,32 @@ def _successfully_sent_deliveries_today(
     return deliveries
 
 
+def _worker_result_is_complete(item: dict, retry_targets=()) -> bool:
+    """Pipeline success alone does not mean every SMTP delivery succeeded."""
+    if (item.get("error") or item.get("interrupted")
+            or int(item.get("sent_failed", 0) or 0)
+            or any(delivery.get("ok") is False or delivery.get("status") == "failed"
+                   for delivery in item.get("sent_to") or [])):
+        return False
+    if item.get("skipped") == "manual_review_required":
+        return item.get("target_url") not in retry_targets
+    if item.get("skipped") in {"already_sent", "no_sendable_email"}:
+        return True
+    if int(item.get("sent_ok", 0) or 0) or int(item.get("already_sent", 0) or 0):
+        return True
+    # Only legacy results without delivery counters may use this fallback.
+    return item.get("success") is True and not any(
+        key in item for key in ("sent_ok", "sent_failed", "sent_to")
+    )
+
+
+def pending_worker_items(ready_items: list[dict], results: list[dict]) -> list[dict]:
+    """Select the same failed/unattempted full URLs for the UI and worker."""
+    latest = {item.get("target_url"): item for item in results}
+    return [item for item in ready_items
+            if not _worker_result_is_complete(latest.get(item.get("target_url"), {}))]
+
+
 def build_preflight_delivery_preview(
     ready_items: list[dict], account_names: list[str], *, include_vncert: bool = False,
 ) -> dict:
@@ -515,8 +552,10 @@ def stop_job_process(job_dir: str) -> tuple[bool, str]:
             status = json.load(f)
     except (OSError, ValueError):
         return False, "Không đọc được PID của worker; đã lưu yêu cầu dừng."
+    if status.get("state") not in ACTIVE_JOB_STATES:
+        return True, "Worker đã dừng hoặc hoàn tất; có thể bấm chạy lại khi cần."
     pid = status.get("pid")
-    if not isinstance(pid, int) or pid <= 0:
+    if not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
         return False, "Worker chưa ghi PID; đã lưu yêu cầu dừng."
     try:
         if os.name == "nt":
@@ -532,15 +571,30 @@ def stop_job_process(job_dir: str) -> tuple[bool, str]:
         pass
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"Đã lưu yêu cầu dừng nhưng không thể kết thúc process: {exc}"
-    status.update({
-        "state": "stopped", "current_domain": None, "next_batch_in_seconds": 0,
-        "finished_at": _now(), "stop_forced": True,
-    })
-    _atomic_json(status_path, status)
+    for attempt in range(2):
+        try:
+            with _exclusive_file_lock(os.path.join(job_dir, "process"), timeout=2):
+                status = _read_json(status_path, status)
+                status.update({
+                    "state": "stopped", "current_domain": None, "next_batch_in_seconds": 0,
+                    "current_stage": "finished", "finished_at": _now(), "stop_forced": True,
+                })
+                _atomic_json(status_path, status)
+            break
+        except TimeoutError:
+            if attempt == 0 and os.name != "nt":
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except OSError as exc:
+                    return False, f"Không thể kết thúc worker: {exc}"
+            else:
+                return False, "Đã yêu cầu dừng; tiến trình chưa thoát. Hãy chờ rồi bấm dừng lại."
     _append_event(os.path.join(job_dir, "events.jsonl"), {
         "type": "job_force_stopped", "processed": status.get("processed", 0),
     })
-    return True, "Đã dừng hẳn worker. Các email gửi thành công trước đó đã nằm trong cache."
+    return True, "Đã dừng worker. Bấm Chạy lại khi muốn xử lý tiếp phần còn thiếu/lỗi."
 
 
 def _send_domain_drafts(
@@ -1478,7 +1532,7 @@ def _run_prechecked_domain(
             "evidence_attachments": evidence_attachments,
         }
         domain_result["send_mode"] = "preview"
-    if mail.get("drafts_sendable", 0) == 0 and not dry_run:
+    if mail.get("drafts_sendable", 0) == 0 and not dry_run and not stopped_during_send:
         domain_result["skipped"] = "no_sendable_email"
         _log_no_email(domain, target)
     elif mail.get("sent_ok", 0) == 0 and mail.get("sent_failed", 0) == 0 and mail.get("already_sent", 0):
@@ -1919,6 +1973,13 @@ def send_manual_evidence_item(
 
 
 def run_job(job_path: str):
+    """Only one process may execute a persisted job, including during restart."""
+    job_dir = os.path.dirname(os.path.abspath(job_path))
+    with _exclusive_file_lock(os.path.join(job_dir, "process"), timeout=15):
+        _run_job_locked(job_path)
+
+
+def _run_job_locked(job_path: str):
     job_path = os.path.abspath(job_path)
     job_dir = os.path.dirname(job_path)
     status_path = os.path.join(job_dir, "status.json")
@@ -1973,26 +2034,13 @@ def run_job(job_path: str):
                 previous_results = previous_status.get("results") or []
         except (OSError, ValueError, TypeError):
             pass
-    # A previous result is complete only when no delivery still needs retrying.
-    # In particular, keep fully and partially failed domains in ``ready``: the
-    # delivery cache below will skip accounts/recipients that already succeeded.
-    completed_targets = {
-        item.get("target_url")
-        for item in previous_results
+    previous_results = list({
+        item.get("target_url"): item for item in previous_results
         if item.get("target_url")
-        and not item.get("error")
-        and not int(item.get("sent_failed", 0) or 0)
-        and (
-            int(item.get("sent_ok", 0) or 0) > 0
-            # Backward compatibility for results written before delivery
-            # counters were added.
-            or item.get("success") is True
-            or item.get("skipped") in ("already_sent", "no_sendable_email")
-            or (
-                item.get("skipped") == "manual_review_required"
-                and item.get("target_url") not in (retry_targets or set())
-            )
-        )
+    }.values())
+    completed_targets = {
+        item.get("target_url") for item in previous_results
+        if _worker_result_is_complete(item, retry_targets or ())
     }
     status = {
         "job_id": job.get("job_id"), "state": "prechecking", "pid": os.getpid(),
@@ -2273,10 +2321,14 @@ def run_job(job_path: str):
                 if item.get("target_url") in retry_targets
             ]
 
+        pending_targets = {item.get("target_url") for item in ready}
         next_state = "ready" if precheck_only else "running"
         status.update({
-            "state": next_state, "total": len(previous_results) + len(ready),
-            "processed": len(previous_results),
+            "state": next_state,
+            "total": len({item.get("target_url") for item in previous_results + ready}),
+            "processed": sum(item.get("target_url") not in pending_targets for item in previous_results),
+            "run_total": len(ready), "run_processed": 0,
+            "pending_targets": [item["target_url"] for item in ready],
             "ready_total": len(ready), "current_domain": None,
             "current_stage": "ready" if precheck_only else "starting_delivery",
             "total_batches": (len(ready) + batch_size - 1) // batch_size,
@@ -2368,8 +2420,14 @@ def run_job(job_path: str):
                         evidence_review=evidence_review_items,
                     )
                     status["evidence_review_total"] = len(evidence_review_items)
+                domain_result["interrupted"] = bool(stopped_during_send)
+                status["results"] = [
+                    item for item in status["results"] if item.get("target_url") != target
+                ]
                 status["results"].append(domain_result)
                 status["processed"] += 1
+                status["run_processed"] += 1
+                status["pending_targets"] = [url for url in status["pending_targets"] if url != target]
                 status["current_domain"] = None
                 status["current_stage"] = "delivery_checkpoint"
                 _atomic_json(status_path, status)

@@ -20,6 +20,86 @@ PNG_1X1 = base64.b64decode(
 
 
 class DomainWorkerUiTests(unittest.TestCase):
+    def test_stop_then_restart_and_repeat_failed_retry(self):
+        with tempfile.TemporaryDirectory() as runtime_dir:
+            runtime = Path(runtime_dir)
+            job_dir = runtime / "worker_jobs" / "restart-ui"
+            job_dir.mkdir(parents=True)
+            target = "https://restart.example/path"
+            status_path = job_dir / "status.json"
+            job_path = job_dir / "job.json"
+            job_path.write_text(json.dumps({
+                "job_id": "restart-ui", "domains": [target],
+                "allowed_accounts": ["sender@example.org"], "preflight_version": 4,
+                "precheck_only": False,
+            }))
+            prepared = {"target_url": target, "domain": "restart.example", "recipients": [
+                {"channel": "registry", "email": "abuse@example.org"},
+            ]}
+            (job_dir / "preflight.json").write_text(json.dumps({
+                "version": 4, "complete": True, "ready": [prepared],
+            }))
+            def state(value):
+                status_path.write_text(json.dumps({
+                    "job_id": "restart-ui", "state": value, "pid": 4321,
+                    "results": [{**prepared, "sent_ok": 0, "sent_failed": 1}],
+                    "current_domain": target, "pending_targets": [target],
+                    "run_total": 1, "run_processed": 0, "processed": 12, "total": 25,
+                }))
+            state("running")
+            with (
+                patch.object(review_queue, "REVIEW_DIR", str(runtime / "review")),
+                patch.object(domain_worker, "WORKER_DIR", str(runtime / "worker_jobs")),
+                patch.object(domain_worker, "CLOAKING_WORKER_DIR", str(runtime / "legacy")),
+                patch.object(domain_worker, "NO_EMAIL_LOG_PATH", str(runtime / "no-email.csv")),
+                patch.object(pt, "SENT_LOG_PATH", str(runtime / "sent.csv")),
+                patch.object(pt, "load_config", return_value={
+                    "smtp_accounts": [{"username": "sender@example.org"}],
+                }),
+                patch.object(domain_worker.os, "killpg", create=True) as kill,
+                patch.object(domain_worker, "launch_job_process") as launch,
+            ):
+                app = AppTest.from_file(str(ROOT / "streamlit_app.py"), default_timeout=10).run()
+                app = app.switch_page("pages/6_Domain_Worker.py").run()
+                self.assertTrue(any("🔄 Đang retry" in h.proto.body for h in app.get("html")))
+                metric = next(m for m in app.metric if m.label == "Tiến độ lần chạy này")
+                self.assertEqual("0/1", metric.value)
+                current = json.loads(status_path.read_text())
+                current["current_domain"] = None
+                status_path.write_text(json.dumps(current))
+                app = app.run()
+                self.assertTrue(any("⏳ Chờ retry" in h.proto.body for h in app.get("html")))
+                start = next(b for b in app.button if b.label == "▶ Khởi chạy worker")
+                self.assertTrue(start.disabled)
+                app = next(b for b in app.button if b.label == "⏹ Dừng hẳn tiến trình").click().run()
+                kill.assert_called_once_with(4321, domain_worker.signal.SIGTERM)
+                launch.assert_not_called()
+                self.assertEqual("stopped", json.loads(status_path.read_text())["state"])
+                app = next(b for b in app.button if b.label == "▶ Chạy lại phần lỗi / còn thiếu").click().run()
+                launch.assert_not_called()  # confirmation is still required
+                confirm = next(c for c in app.checkbox if c.label.startswith("Tôi xác nhận"))
+                app = confirm.check().run()
+                app = next(b for b in app.button if b.label == "▶ Chạy lại phần lỗi / còn thiếu").click().run()
+                launch.assert_called_once_with(str(job_path))
+                self.assertEqual([target], json.loads(job_path.read_text())["retry_targets"])
+                for _ in range(2):
+                    state("completed")
+                    app.session_state["worker_poll_started_at"] = 0
+                    app = app.run()
+                    app = next(c for c in app.checkbox if c.label.startswith("Tôi xác nhận")).check().run()
+                    app = next(b for b in app.button if b.label == "↻ Retry phần lỗi / còn thiếu").click().run()
+                self.assertEqual(3, launch.call_count)
+                state("stopped")
+                (job_dir / "preflight.json").write_text(json.dumps({
+                    "version": 4, "complete": False, "ready": [],
+                }))
+                app.session_state["worker_poll_started_at"] = 0
+                app = app.run()
+                app = next(b for b in app.button if b.label == "▶ Chạy lại precheck").click().run()
+                self.assertEqual(4, launch.call_count)
+                self.assertTrue(json.loads(job_path.read_text())["precheck_only"])
+                self.assertEqual([], list(app.exception))
+
     def test_v4_ui_exposes_manual_evidence_send_flow(self):
         worker_source = (ROOT / "pages" / "6_Domain_Worker.py").read_text(encoding="utf-8")
         review_source = (ROOT / "pages" / "12_Domain_Evidence_Review.py").read_text(encoding="utf-8")
