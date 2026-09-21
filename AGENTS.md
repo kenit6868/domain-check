@@ -247,6 +247,15 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-21 — Phản hồi NCC đồng bộ thêm folder IMAP `2-Cloudflare` bên cạnh
+  Inbox và Junk/Spam; lỗi folder phụ được cô lập, thống kê và bảng email hiển
+  thị Cloudflare thành nhóm riêng, Seen all tiếp tục thao tác theo mailbox nguồn.
+  Page dùng thống kê của chính lượt fetch theo ngày địa phương thay vì mở lượt
+  đếm Inbox/Junk riêng. Thay đổi dùng chung cũng đưa folder này vào nguồn phản
+  hồi của Thống kê tổng quát. File chính: `provider_replies.py`,
+  `pages/9_Provider_Replies.py`, `general_statistics.py`, test và tài liệu; chỉ
+  kiểm thử bằng mock/AppTest, không kết nối IMAP hoặc gửi email thật.
+
 - 2026-09-17 — Điều tra retry bằng log thực: job chọn 13 URL nhưng hai lượt đầu
   tiếp tục timeout SMTP, rồi nghỉ batch theo cấu hình. Sửa bảng ưu tiên trạng thái
   đang/chờ retry thay vì che bởi kết quả lỗi cũ; hiển thị scope và tiến độ theo

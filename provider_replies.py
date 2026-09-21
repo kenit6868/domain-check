@@ -18,7 +18,9 @@ from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr, parsedate_to_datetime
 from html import unescape
 
-MODULE_VERSION = 6
+MODULE_VERSION = 7
+
+CLOUDFLARE_MAILBOX = "2-Cloudflare"
 
 # Proxy support — tái dùng từ phishing_toolkit để tránh duplicate code
 try:
@@ -447,12 +449,16 @@ def discover_junk_mailbox(account, timeout: int = 60):
 
 
 def fetch_provider_mail_all_folders(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None, timeout: int = 60):
-    """Fetch relevant provider mail from Inbox and Junk, with per-folder counts."""
+    """Fetch provider mail from Inbox, Junk and the dedicated Cloudflare folder."""
     inbox = account.get("imap_mailbox", "INBOX")
     junk = discover_junk_mailbox(account, timeout=timeout)
     folders = [("Inbox", inbox)]
     if junk and junk.lower() != inbox.lower():
         folders.append(("Thư rác", junk))
+    cloudflare_mailbox = str(account.get("imap_cloudflare_mailbox") or CLOUDFLARE_MAILBOX).strip()
+    known_mailboxes = {mailbox.lower() for _, mailbox in folders}
+    if cloudflare_mailbox and cloudflare_mailbox.lower() not in known_mailboxes:
+        folders.append(("Cloudflare", cloudflare_mailbox))
     mails, statistics = [], []
     for label, mailbox in folders:
         folder_account = dict(account, imap_mailbox=mailbox)

@@ -565,7 +565,9 @@ kê**. Chỉ lúc đó tool mới đọc IMAP theo ba lớp độc lập:
    Sent quan sát được không tự trở thành report: chỉ record khớp delivery rõ
    ràng trong `sent_log.csv` mới được tính vào hiệu quả/tỷ lệ, còn record chưa
    khớp chỉ có thể enrich evidence của delivery đó.
-3. Đọc Inbox + Junk/Spam cùng phạm vi để ghép phản hồi NCC với report. Luồng
+3. Đọc Inbox + Junk/Spam + `2-Cloudflare` cùng phạm vi để ghép phản hồi NCC với
+   report. Folder Cloudflare và Junk được cô lập lỗi, nên Inbox vẫn dùng được
+   nếu một folder phụ không tồn tại hoặc không mở được. Luồng
    **Phản hồi NCC** không bị thay đổi: page đó vẫn dành cho lọc, xem và phản hồi
    từng email. Thống kê tổng quát chỉ lấy email từ NCC đã nhận diện kèm domain/
    ticket, yêu cầu/kết quả rõ ràng hoặc delivery failure làm dữ liệu analytics; mail thường

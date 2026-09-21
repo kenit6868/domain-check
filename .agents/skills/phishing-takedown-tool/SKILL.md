@@ -275,6 +275,9 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   không vào analytics. Reply chỉ được nối với report cùng account theo
   Message-ID/ticket hoặc domain + provider/sender, không chỉ domain; record reply
   thiếu account bị loại. Snapshot phải whitelist field hiển thị và redact lỗi.
+  Đồng bộ Provider Replies phải đọc Inbox, Junk/Spam và folder `2-Cloudflare`;
+  mỗi mail giữ đúng `source_mailbox`, lỗi folder phụ không được làm mất Inbox và
+  UI không được gộp nhầm `2-Cloudflare` vào Thư rác.
   Evidence legacy thiếu metadata phải hiển thị `unknown`, không suy đoán có/không
   có ảnh.
 

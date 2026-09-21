@@ -9,14 +9,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 import streamlit as st
 import phishing_toolkit as pt
-import mail_statistics
-if getattr(mail_statistics, "MODULE_VERSION", 0) < 5:
-    mail_statistics = importlib.reload(mail_statistics)
 import provider_replies
-if getattr(provider_replies, "MODULE_VERSION", 0) < 6:
+if getattr(provider_replies, "MODULE_VERSION", 0) < 7:
     provider_replies = importlib.reload(provider_replies)
 from provider_replies import (
-    ACTION_REQUIRED_TYPES, browser_evidence_attachment_paths, build_reply, build_reply_vi, capture_dom_link_evidence, clear_mail_cache,
+    ACTION_REQUIRED_TYPES, CLOUDFLARE_MAILBOX, browser_evidence_attachment_paths, build_reply, build_reply_vi, capture_dom_link_evidence, clear_mail_cache,
     extract_reply_context, fetch_provider_mail_all_folders,
     instructed_reply_address, is_delivery_failure, load_mail_cache, mark_mails_seen,
     load_reply_log, needs_reply, provider_message_vi, received_datetime, record_reply_sent,
@@ -101,7 +98,7 @@ with cache_col:
     st.caption(f"Cache hiện có: {cached_count} email. Cache được giữ khi F5 và không chứa mật khẩu.")
 
 with sync_col:
-    sync_clicked = st.button("Đồng bộ Inbox + Thư rác", type="primary", disabled=date_from > date_to or bool(limit_error))
+    sync_clicked = st.button("Đồng bộ Inbox + Thư rác + Cloudflare", type="primary", disabled=date_from > date_to or bool(limit_error))
 if sync_clicked:
     try:
         progress_bar = st.progress(0, text="Đang chuẩn bị đọc inbox...")
@@ -113,25 +110,21 @@ if sync_clicked:
                 text=f"Đang quét {folder} {position}/{total} — tìm thấy {len(visible)} email đúng ngày đã chọn",
             )
         with st.spinner("Đang đồng bộ và lọc email theo ngày server..."):
-            st.session_state.provider_mails, _ = fetch_provider_mail_all_folders(
+            st.session_state.provider_mails, folder_statistics = fetch_provider_mail_all_folders(
                 account, limit, unread_only, date_from=date_from, date_to=date_to,
                 progress_callback=show_progress,
             )
-            try:
-                incoming_counts = mail_statistics.count_account_incoming(
-                    account, date_from, date_to, _local_tz,
-                )
-                st.session_state.provider_folder_statistics = [
-                    {"folder": "Inbox", "mailbox": incoming_counts["inbox_mailbox"],
-                     "matched": incoming_counts["received"], "status": "Thành công"},
-                    {"folder": "Thư rác", "mailbox": incoming_counts["junk_mailbox"],
-                     "matched": incoming_counts["junk"], "status": "Thành công"},
-                ]
-            except Exception as stats_exc:
-                st.session_state.provider_folder_statistics = [{
-                    "folder": "Inbox + Thư rác", "mailbox": "—", "matched": 0,
-                    "status": f"Không thống kê được: {stats_exc}",
-                }]
+            synced_for_day = [mail for mail in st.session_state.provider_mails if mail_is_in_selected_dates(mail)]
+            st.session_state.provider_folder_statistics = [
+                {
+                    **row,
+                    "matched": sum(
+                        mail.source_mailbox.lower() == str(row["mailbox"]).lower()
+                        for mail in synced_for_day
+                    ),
+                }
+                for row in folder_statistics
+            ]
             save_mail_cache(account_name, st.session_state.provider_mails)
             sent_sync = sync_sent_reply_status(
                 account, st.session_state.provider_mails,
@@ -144,7 +137,7 @@ if sync_clicked:
         st.success(f"Đã đồng bộ {len(synced_for_day)} email đúng ngày đã chọn{sent_note}.")
         if not sent_sync.get("success"):
             st.warning(f"Không đối soát được thư mục Đã gửi: {sent_sync.get('error')}")
-    except Exception as exc: st.error(f"Không đọc được Inbox/Thư rác: {exc}")
+    except Exception as exc: st.error(f"Không đọc được Inbox/Thư rác/Cloudflare: {exc}")
 
 all_mails = st.session_state.get("provider_mails", [])
 if not all_mails:
@@ -163,17 +156,16 @@ if not all_filtered:
 
 folder_statistics = st.session_state.get("provider_folder_statistics", [])
 if folder_statistics:
-    inbox_mailbox = account.get("imap_mailbox", "INBOX")
-    included_by_folder = {
-        "Inbox": sum(m.source_mailbox == inbox_mailbox for m in all_filtered),
-        "Thư rác": sum(m.source_mailbox != inbox_mailbox for m in all_filtered),
-    }
     st.subheader("Thống kê đồng bộ theo thư mục")
     st.dataframe(pd.DataFrame([{
         "Loại": row["folder"], "Thư mục IMAP": row["mailbox"],
         "Tổng email": row["matched"],
-        "Đưa vào danh sách NCC": included_by_folder.get(row["folder"], 0),
-        "Bị loại không liên quan": max(0, row["matched"] - included_by_folder.get(row["folder"], 0)),
+        "Đưa vào danh sách NCC": sum(
+            m.source_mailbox.lower() == str(row["mailbox"]).lower() for m in all_filtered
+        ),
+        "Bị loại không liên quan": max(0, row["matched"] - sum(
+            m.source_mailbox.lower() == str(row["mailbox"]).lower() for m in all_filtered
+        )),
         "Trạng thái": row["status"],
     } for row in folder_statistics]), width="stretch", hide_index=True)
     total_mail = sum(int(row.get("matched", 0)) for row in folder_statistics)
@@ -184,14 +176,21 @@ if folder_statistics:
     )
 
 st.subheader("1. Tất cả email NCC theo ngày")
-all_table = pd.DataFrame([{"Thư mục": "Thư rác" if m.source_mailbox != account.get("imap_mailbox", "INBOX") else "Inbox", "NCC": m.provider_label, "Domain": m.domain or "—", "Phân loại": m.request_label,
+def mailbox_label(mailbox):
+    if mailbox.lower() == str(account.get("imap_mailbox", "INBOX")).lower():
+        return "Inbox"
+    if mailbox.lower() == str(account.get("imap_cloudflare_mailbox") or CLOUDFLARE_MAILBOX).lower():
+        return "Cloudflare"
+    return "Thư rác"
+
+all_table = pd.DataFrame([{"Thư mục": mailbox_label(m.source_mailbox), "NCC": m.provider_label, "Domain": m.domain or "—", "Phân loại": m.request_label,
     "Cách phản hồi": {"email": "Email", "portal": "Portal", "no_reply": "Không reply", "manual": "Thủ công"}.get(m.channel, m.channel),
     "Ticket": m.ticket or "—", "Tiêu đề": m.subject, "Ngày": display_received_date(m)} for m in all_filtered])
 st.dataframe(all_table, width="stretch", hide_index=True)
 
 seen_col, count_col = st.columns([1, 4])
 with seen_col:
-    if st.button(f"Seen all ({len(all_day_mails)})", type="secondary", help="Đánh dấu đã đọc toàn bộ email đúng ngày trong Inbox và Thư rác, kể cả email không liên quan NCC"):
+    if st.button(f"Seen all ({len(all_day_mails)})", type="secondary", help="Đánh dấu đã đọc toàn bộ email đúng ngày trong Inbox, Thư rác và Cloudflare, kể cả email không liên quan NCC"):
         result = mark_mails_seen(account, all_day_mails)
         if result["success"]:
             st.success(f"Đã đánh dấu Seen {result['marked']} email.")

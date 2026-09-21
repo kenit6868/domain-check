@@ -197,7 +197,7 @@ def _sanitize_folder_statistics(rows, relevant_mails, account: dict) -> list[dic
         if not isinstance(raw, dict):
             continue
         label = str(raw.get("folder") or "Khác").strip()
-        if label not in {"Inbox", "Thư rác"}:
+        if label not in {"Inbox", "Thư rác", "Cloudflare"}:
             label = "Khác"
         mailbox = str(raw.get("mailbox") or ("INBOX" if label == "Inbox" else "")).strip().lower()
         result.append({

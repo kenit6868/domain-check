@@ -209,11 +209,12 @@ Các trang (xem sidebar bên trái):
   thư Sent quan sát được nhưng chưa khớp log chỉ dùng để bổ sung evidence và bị
   loại khỏi tỷ lệ. Mail Inbox/Junk không liên quan cũng không được tính là phản
   hồi NCC. Không cần mở menu khác trước.
-- **Phản hồi NCC** — khi đồng bộ sẽ đọc cả Inbox và thư mục có cờ IMAP `\\Junk`
-  (fallback theo tên Junk/Spam), gộp các phản hồi tìm được và hiển thị tổng số
-  thư Inbox/Thư rác theo đúng bộ đếm ngày địa phương của menu Thống kê email;
-  không tính thư Đã gửi. Nút **Seen all** nhóm UID theo mailbox nguồn để cập
-  nhật đúng toàn bộ Inbox và Thư rác, kể cả thư bị loại khỏi danh sách NCC; bảng
+- **Phản hồi NCC** — khi đồng bộ sẽ đọc Inbox, thư mục có cờ IMAP `\\Junk`
+  (fallback theo tên Junk/Spam) và folder `2-Cloudflare`, gộp các phản hồi tìm
+  được rồi hiển thị thống kê riêng cho từng folder theo ngày địa phương; không
+  tính thư Đã gửi. Lỗi đọc Junk hoặc `2-Cloudflare` không làm mất kết quả Inbox.
+  Nút **Seen all** nhóm UID theo mailbox nguồn để cập nhật đúng toàn bộ ba
+  folder, kể cả thư bị loại khỏi danh sách NCC; bảng
   đối soát hiển thị tổng, số đưa vào danh sách NCC và số không liên quan.
   Sau mỗi lần **Kiểm tra**, kết quả được lưu theo ngày vào
   `data/mail_statistics_cache.json` và tự hiện lại khi mở trang; nút **Xóa cache

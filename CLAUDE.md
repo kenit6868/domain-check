@@ -672,21 +672,22 @@ gì đã đổi và vì sao nó quan trọng về mặt kiến trúc, không ph�
   ghi `status.json` nguyên tử và chỉ publish cache ngày sau khi hoàn tất. Bản
   frozen đi qua cờ launcher `--mail-statistics-job`.
 
-Trang Phản hồi NCC dùng `fetch_provider_mail_all_folders()` để quét Inbox và
-Junk/Spam. Junk ưu tiên `imap_junk_mailbox`, sau đó cờ IMAP `\\Junk`, cuối cùng
-fallback tên thư mục phổ biến. Mỗi mail lưu `source_mailbox` trong cache; lỗi
-Junk được cô lập khỏi danh sách Inbox. Bảng số lượng gọi
-`mail_statistics.count_account_incoming()` để dùng cùng phép lọc `INTERNALDATE`
-theo ngày địa phương với trang Thống kê email và không SELECT thư mục Sent.
-Page kiểm tra `mail_statistics.MODULE_VERSION` và tự reload khi Streamlit còn giữ
-module cũ. `mark_mails_seen()` nhận message, nhóm theo `source_mailbox` rồi mới
+Trang Phản hồi NCC dùng `fetch_provider_mail_all_folders()` để quét Inbox,
+Junk/Spam và folder chuyên biệt `2-Cloudflare` (có thể override bằng
+`imap_cloudflare_mailbox` trong object account). Junk ưu tiên
+`imap_junk_mailbox`, sau đó cờ IMAP `\\Junk`, cuối cùng fallback tên thư mục phổ
+biến. Mỗi mail lưu `source_mailbox` trong cache; lỗi Junk hoặc Cloudflare được
+cô lập khỏi danh sách Inbox. Page lấy thống kê trực tiếp từ cùng lượt fetch và
+lọc `INTERNALDATE` theo ngày địa phương, nên không mở kết nối đếm lần hai và
+không SELECT thư mục Sent. `mark_mails_seen()` nhận message, nhóm theo
+`source_mailbox` rồi mới
 STORE `\\Seen`, vì UID chỉ duy nhất trong từng mailbox.
 UID lấy từ cache phải là chuỗi ASCII chỉ gồm chữ số; giá trị lỗi bị bỏ qua và
 STORE được chia batch tối đa 100 UID để tránh lệnh IMAP quá dài.
 Page kiểm tra cả `provider_replies.MODULE_VERSION` trước các `from import` để
 hot reload của Streamlit không giữ hàm Seen cũ.
 Đồng bộ Phản hồi NCC gọi fetch với `include_unrelated=True`: cache giữ toàn bộ
-Inbox/Junk đúng phạm vi để Seen all khớp tổng IMAP; UI mới lọc unknown +
+Inbox/Junk/Cloudflare đúng phạm vi để Seen all khớp tổng IMAP; UI mới lọc unknown +
 manual_review khỏi bảng NCC và hiển thị số bị loại để đối soát.
 
 - `mail_statistics.py` đếm toàn bộ UID trong Inbox và thư mục có cờ IMAP

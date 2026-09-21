@@ -10,6 +10,16 @@ import general_statistics as gs
 
 
 class GeneralStatisticsTests(unittest.TestCase):
+    def test_cloudflare_folder_statistics_keep_distinct_label(self):
+        mail = SimpleNamespace(source_mailbox="2-Cloudflare")
+        rows = [{
+            "folder": "Cloudflare", "mailbox": "2-Cloudflare",
+            "matched": 1, "status": "Thành công",
+        }]
+        sanitized = gs._sanitize_folder_statistics(rows, [mail], {})
+        self.assertEqual(sanitized[0]["folder"], "Cloudflare")
+        self.assertEqual(sanitized[0]["matched"], 1)
+
     def test_sync_collects_all_sources_and_persists_sanitized_snapshot(self):
         account = {
             "imap_host": "mail.example.test",

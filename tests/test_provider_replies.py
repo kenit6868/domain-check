@@ -218,15 +218,19 @@ Cloudflare Trust & Safety"""
     def test_fetch_provider_mail_all_folders_includes_junk_and_statistics(self):
         inbox_mail = self.make_mail("abuse@dynadot.com", "Inbox response", "Please provide the full URL")
         junk_mail = self.make_mail("abuse@cloudflare.com", "Junk response", "Please provide additional evidence")
+        cloudflare_mail = self.make_mail("noreply@notify.cloudflare.com", "Cloudflare response", "Report received")
         account = {"username": "reporter@example.com", "imap_mailbox": "INBOX"}
         with (
             patch.object(pr, "discover_junk_mailbox", return_value="Junk Email"),
-            patch.object(pr, "fetch_provider_mail", side_effect=[[inbox_mail], [junk_mail]]) as fetch,
+            patch.object(pr, "fetch_provider_mail", side_effect=[[inbox_mail], [junk_mail], [cloudflare_mail]]) as fetch,
         ):
             mails, statistics = pr.fetch_provider_mail_all_folders(account)
-        self.assertEqual(fetch.call_count, 2)
-        self.assertEqual([mail.source_mailbox for mail in mails], ["INBOX", "Junk Email"])
-        self.assertEqual([(row["folder"], row["matched"]) for row in statistics], [("Inbox", 1), ("Thư rác", 1)])
+        self.assertEqual(fetch.call_count, 3)
+        self.assertEqual([mail.source_mailbox for mail in mails], ["INBOX", "Junk Email", "2-Cloudflare"])
+        self.assertEqual(
+            [(row["folder"], row["mailbox"], row["matched"]) for row in statistics],
+            [("Inbox", "INBOX", 1), ("Thư rác", "Junk Email", 1), ("Cloudflare", "2-Cloudflare", 1)],
+        )
         self.assertTrue(all(call.kwargs.get("include_unrelated") for call in fetch.call_args_list))
 
     def test_fetch_provider_mail_all_folders_keeps_inbox_when_junk_fails(self):
@@ -234,12 +238,24 @@ Cloudflare Trust & Safety"""
         account = {"username": "reporter@example.com", "imap_mailbox": "INBOX"}
         with (
             patch.object(pr, "discover_junk_mailbox", return_value="Spam"),
-            patch.object(pr, "fetch_provider_mail", side_effect=[[inbox_mail], RuntimeError("denied")]),
+            patch.object(pr, "fetch_provider_mail", side_effect=[[inbox_mail], RuntimeError("denied"), []]),
         ):
             mails, statistics = pr.fetch_provider_mail_all_folders(account)
         self.assertEqual(mails, [inbox_mail])
         self.assertEqual(statistics[1]["matched"], 0)
         self.assertIn("denied", statistics[1]["status"])
+
+    def test_fetch_provider_mail_all_folders_isolates_missing_cloudflare_folder(self):
+        inbox_mail = self.make_mail("abuse@dynadot.com", "Inbox response", "Please provide the full URL")
+        account = {"username": "reporter@example.com", "imap_mailbox": "INBOX"}
+        with (
+            patch.object(pr, "discover_junk_mailbox", return_value=""),
+            patch.object(pr, "fetch_provider_mail", side_effect=[[inbox_mail], RuntimeError("mailbox missing")]),
+        ):
+            mails, statistics = pr.fetch_provider_mail_all_folders(account)
+        self.assertEqual(mails, [inbox_mail])
+        self.assertEqual(statistics[-1]["mailbox"], "2-Cloudflare")
+        self.assertIn("mailbox missing", statistics[-1]["status"])
 
     def test_mark_seen_groups_same_uid_by_source_mailbox(self):
         inbox_mail = self.make_mail("abuse@dynadot.com", "Inbox", "Please provide the full URL")
