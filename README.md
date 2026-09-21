@@ -138,7 +138,11 @@ Các trang (xem sidebar bên trái):
 - **Case Log** — xem/lọc/sửa `case_log.csv`
 - **Report Drafts** — xem, copy, tải các email báo cáo đã sinh sẵn
 - **Quick Report** — kiểm tra nhanh nhiều URL, hiển thị cloaking và cho phép xác
-  minh thụ động bằng Playwright khi HTTP chưa đủ kết luận. Trong **Browser
+  minh thụ động bằng Playwright khi HTTP chưa đủ kết luận. Mỗi kết quả hiển thị
+  một dòng nhỏ phía trên cloaking cho biết email
+  tố cáo Registrar/Registry tìm được từ WHOIS, RDAP và bảng registry tĩnh. Đây là
+  lookup nhẹ, không chạy precheck Domain Worker, không mở website hay chụp bằng
+  chứng để quyết định có hiển thị email. Trong **Browser
   Blocking**, Google Safe Browsing và Microsoft SmartScreen mở form chính thức
   trên Chrome profile hiện tại qua Web Form Assistant. Google được điền URL,
   nội dung và taxonomy đã chọn; Microsoft được điền URL. Cả hai chỉ `fill_only`,

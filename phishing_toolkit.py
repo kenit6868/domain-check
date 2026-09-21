@@ -648,6 +648,66 @@ def lookup_registrar_abuse_email(registrar: str) -> str | None:
     return None
 
 
+def resolve_quick_report_recipients(
+    domain: str,
+    who: dict | None = None,
+    registry_contact: dict | None = None,
+    rdap: dict | None = None,
+) -> list[dict]:
+    """Return lightweight registrar/registry report contacts for Quick Report.
+
+    This intentionally omits hosting discovery, browser access and evidence
+    capture. It reuses already-fetched WHOIS/registry data and only needs the
+    caller's one RDAP fallback result.
+    """
+    who = who if isinstance(who, dict) else {}
+    registry_contact = registry_contact if isinstance(registry_contact, dict) else {}
+    rdap = rdap if isinstance(rdap, dict) else {}
+    registrar = str(who.get("registrar") or rdap.get("registrar") or "").strip()
+    whois_emails = who.get("emails") or []
+    if isinstance(whois_emails, str):
+        whois_emails = [whois_emails]
+    usable_whois = [
+        str(value).strip()
+        for value in whois_emails
+        if str(value).strip()
+        and not any(private in str(value).lower() for private in WHOIS_PRIVACY_DOMAINS)
+        and not is_blocked_report_recipient(str(value))
+    ]
+
+    recipients = []
+    registrar_uses_webform = bool(
+        registrar and any(key in registrar.lower() for key in WEB_FORM_REGISTRARS)
+    )
+    if not registrar_uses_webform:
+        registrar_email = ", ".join(usable_whois)
+        if not registrar_email:
+            registrar_email = str(rdap.get("abuse_email") or "").strip()
+        if not registrar_email and registrar:
+            registrar_email = lookup_registrar_abuse_email(registrar) or ""
+        if registrar_email and not is_blocked_report_recipient(registrar_email):
+            recipients.append({
+                "channel": "registrar", "label": "Registrar",
+                "email": registrar_email,
+            })
+
+    registry_email = str(registry_contact.get("abuse_email") or "").strip()
+    if registry_email and not is_blocked_report_recipient(registry_email):
+        recipients.append({
+            "channel": "registry", "label": "Registry",
+            "email": registry_email,
+        })
+
+    unique = []
+    seen = set()
+    for recipient in recipients:
+        key = recipient["email"].lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(recipient)
+    return unique
+
+
 # RDAP bootstrap cache (TLD → RDAP server URL). Load 1 lần per process.
 # RDAP là chuẩn mới của ICANN thay thế WHOIS text — trả về JSON có cấu trúc,
 # có entity role "abuse" rõ ràng, đáng tin cậy hơn python-whois parse text nhiều.
@@ -3359,6 +3419,19 @@ def run_cdn_check(target: str, cfg: dict | None = None) -> dict:
         cdn_detected = []
     # Tra TLD registry từ bảng tĩnh (không cần mạng, không fallback IANA)
     registry_contact = _static_registry_lookup(domain)
+    report_recipients = resolve_quick_report_recipients(
+        domain, who=who, registry_contact=registry_contact, rdap={},
+    )
+    registrar_uses_webform = bool(
+        registrar and any(key in registrar.lower() for key in WEB_FORM_REGISTRARS)
+    )
+    if not registrar_uses_webform and not any(
+        item.get("channel") == "registrar" for item in report_recipients
+    ):
+        report_recipients = resolve_quick_report_recipients(
+            domain, who=who, registry_contact=registry_contact,
+            rdap=get_rdap_abuse_email(domain),
+        )
     cloaking = run_cloaking_check(target, mode="full", cfg=cfg)
     return {
         "domain": domain,
@@ -3366,6 +3439,7 @@ def run_cdn_check(target: str, cfg: dict | None = None) -> dict:
         "cdn_detected": cdn_detected,
         "registrar": registrar,
         "registry_contact": registry_contact,
+        "report_recipients": report_recipients,
         "cloaking": cloaking,
     }
 

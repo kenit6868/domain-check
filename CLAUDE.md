@@ -4,6 +4,12 @@ Quick Report: `_render_results` chỉ có timer khi còn pending; khi thu hoạc
 
 Quick Report đặt `runtime_version` trong resource cache dùng chung, không trong session state: session mới sau F5 không được invalidate results/pending futures. Khôi phục `qr_domain_input` từ targets trước khi tạo widget nếu thiếu key; clear dùng callback để reset widget hợp lệ. Cache kết quả chỉ ở RAM, không ghi cfg/credential xuống disk.
 
+Quick Report gắn `report_recipients` vào kết quả `run_cdn_check()` và hiển thị
+caption email Registrar/Registry ngay trước khối cloaking. Helper chỉ dùng WHOIS,
+RDAP fallback và bảng registry tĩnh; không gọi precheck Domain Worker, không tìm
+origin hosting, mở trang hoặc capture evidence. Registrar có web form chính thức
+không bị trình bày như kênh email; `abuse@cloudflare.com` và WHOIS privacy bị loại.
+
 Quick Report: các nút mở/tự điền form dùng Chrome đã cài trên Windows, macOS
 (`/Applications` hoặc `~/Applications`) và Linux (`google-chrome` hoặc
 `google-chrome-stable` trong PATH). Chrome cần có Web Form Assistant trong

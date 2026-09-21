@@ -180,6 +180,10 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   điều tra, xác nhận rồi áp dụng chính sách.
   Pool GSB và Cloudflare phải tách riêng theo thẩm quyền xử lý, có ít nhất 5 biến
   thể mỗi nhóm và chọn ổn định theo domain + ngày để rerun không đổi nội dung.
+- Quick Report có thể hiển thị lookup email tố cáo Registrar/Registry bằng
+  WHOIS, RDAP fallback và bảng registry tĩnh, nhưng không được gọi precheck
+  Domain Worker, khám phá origin hosting hoặc yêu cầu Browser Evidence chỉ để
+  hiển thị dòng thông tin này. Phải loại WHOIS privacy và recipient bị chặn.
 - Domain Worker normal-report capture ưu tiên DOM destination: chụp source rồi mở
   URL HTTP(S) được khai báo trong Register/Login control ở tab mới cùng context/referrer
   để chụp destination. Không có URL tĩnh hoặc mở đích lỗi thì fallback passive source;

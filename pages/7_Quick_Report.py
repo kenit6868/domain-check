@@ -26,7 +26,7 @@ from community_report_ui import render_community_report_buttons
 
 _MAX_CHECK_WORKERS = 1
 _FILTER_CACHE_PATH = pt._runtime_path("quick_report_filter_cache.json")
-_QUICK_REPORT_RUNTIME_VERSION = 2
+_QUICK_REPORT_RUNTIME_VERSION = 3
 # Quick Report is a manual web-form workflow. Keep the legacy automation code in
 # the core for now, but do not expose it here until it is explicitly enabled.
 _ENABLE_PLAYWRIGHT_FORM_AUTOMATION = False
@@ -224,6 +224,18 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
         if show_registry: tags.append(f"🌐 {registry_info.get('registry','Registry')[:20]}")
         if tags:
             st.caption("  ·  ".join(tags))
+
+        report_recipients = result.get("report_recipients") or []
+        if report_recipients:
+            contact_text = " · ".join(
+                f"{item.get('label') or item.get('channel', 'Email').title()}: {item['email']}"
+                for item in report_recipients
+                if item.get("email")
+            )
+            if contact_text:
+                st.caption(f"Email tố cáo: {contact_text}")
+        else:
+            st.caption("Email tố cáo: Không tìm thấy email registrar/registry")
 
         cloaking = result.get("cloaking") or {}
         render_cloaking_details(cloaking)

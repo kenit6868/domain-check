@@ -10,7 +10,7 @@ import phishing_toolkit as pt
 class QuickReportRestoreTests(unittest.TestCase):
     def test_cdn_check_returns_all_webform_routing_fields_without_name_error(self):
         whois = {
-            "registrar": "NameSilo, LLC",
+            "registrar": "Example Registrar, LLC",
             "name_servers": ["alice.ns.cloudflare.com"],
         }
         registry = {
@@ -19,6 +19,7 @@ class QuickReportRestoreTests(unittest.TestCase):
         }
         with (
             patch.object(pt, "get_whois_info", return_value=whois),
+            patch.object(pt, "get_rdap_abuse_email", return_value={"abuse_email": "abuse@namesilo.com"}),
             patch.object(pt, "is_cloudflare", return_value=True),
             patch.object(pt, "detect_cdn", return_value=["akamai"]),
             patch.object(pt, "_static_registry_lookup", return_value=registry),
@@ -29,14 +30,15 @@ class QuickReportRestoreTests(unittest.TestCase):
         self.assertEqual("example.test", result["domain"])
         self.assertTrue(result["cloudflare"])
         self.assertEqual(["akamai"], result["cdn_detected"])
-        self.assertEqual("NameSilo, LLC", result["registrar"])
+        self.assertEqual("Example Registrar, LLC", result["registrar"])
         self.assertEqual(registry, result["registry_contact"])
+        self.assertEqual("abuse@namesilo.com", result["report_recipients"][0]["email"])
 
     def test_page_invalidates_stale_runtime_results_after_core_fix(self):
         source = (
             Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"
         ).read_text(encoding="utf-8")
-        self.assertIn("_QUICK_REPORT_RUNTIME_VERSION = 2", source)
+        self.assertIn("_QUICK_REPORT_RUNTIME_VERSION = 3", source)
         self.assertIn('cache.get("runtime_version")', source)
         self.assertIn("cache.clear()", source)
 
@@ -142,6 +144,42 @@ class QuickReportRestoreTests(unittest.TestCase):
         self.assertIn("get_registry_webform_draft_text", source)
         self.assertIn("target_url=original_url", source)
         self.assertIn("st.code(registry_text", source)
+
+    def test_page_shows_lightweight_report_emails_before_cloaking(self):
+        source = (
+            Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('result.get("report_recipients")', source)
+        self.assertIn('st.caption(f"Email tố cáo: {contact_text}")', source)
+        self.assertLess(source.index('result.get("report_recipients")'), source.index("render_cloaking_details(cloaking)"))
+
+    def test_lightweight_recipients_include_registrar_and_registry_without_hosting(self):
+        recipients = pt.resolve_quick_report_recipients(
+            "example.test",
+            who={"registrar": "Example Registrar", "emails": ["abuse@registrar.test"]},
+            registry_contact={"abuse_email": "abuse@registry.test"},
+            rdap={},
+        )
+        self.assertEqual(
+            [
+                {"channel": "registrar", "label": "Registrar", "email": "abuse@registrar.test"},
+                {"channel": "registry", "label": "Registry", "email": "abuse@registry.test"},
+            ],
+            recipients,
+        )
+
+    def test_cdn_check_does_not_run_rdap_for_registrar_webform(self):
+        with (
+            patch.object(pt, "get_whois_info", return_value={"registrar": "GoDaddy.com, LLC"}),
+            patch.object(pt, "get_rdap_abuse_email") as rdap,
+            patch.object(pt, "is_cloudflare", return_value=False),
+            patch.object(pt, "detect_cdn", return_value=[]),
+            patch.object(pt, "_static_registry_lookup", return_value=None),
+            patch.object(pt, "run_cloaking_check", return_value={"verdict": "NO_SIGNAL"}),
+        ):
+            result = pt.run_cdn_check("example.test", {})
+        rdap.assert_not_called()
+        self.assertEqual([], result["report_recipients"])
 
     def test_page_uses_profile_extension_for_browser_blocking_forms(self):
         source = (

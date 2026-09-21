@@ -247,6 +247,15 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-21 — Quick Report hiển thị caption email tố cáo Registrar/Registry
+  ngay trên khối cloaking. Lookup nhẹ dùng WHOIS sẵn có, RDAP khi registrar chưa
+  có email và bảng registry tĩnh; không chạy precheck Domain Worker, không tìm
+  origin hosting, mở website hoặc capture evidence. Recipient privacy/Cloudflare
+  không được hiển thị, registrar có web form giữ route form. Bump runtime cache
+  để loại result cũ thiếu field; 14/14 test Quick Report và compileall đạt. Full
+  suite chạy 327 test còn 7 lỗi đa nền tảng có sẵn ở Chrome/Domain Worker trên
+  Windows (`PosixPath`, `fcntl`, `SIGKILL`/`killpg`), không thuộc thay đổi này.
+
 - 2026-09-21 — Phản hồi NCC đồng bộ thêm folder IMAP `2-Cloudflare` bên cạnh
   Inbox và Junk/Spam; lỗi folder phụ được cô lập, thống kê và bảng email hiển
   thị Cloudflare thành nhóm riêng, Seen all tiếp tục thao tác theo mailbox nguồn.
