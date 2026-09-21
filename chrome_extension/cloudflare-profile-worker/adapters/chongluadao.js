@@ -10,7 +10,7 @@
   };
   const adapter = {
     id: "chongluadao",
-    version: "1.0.0",
+    version: "1.1.0",
     successMessage: "Chống Lừa Đảo confirmed receipt of the report.",
     matches: (loc) => loc.hostname === "chongluadao.vn" && loc.pathname.includes("/report/reportphishing"),
     detectSuccess: (doc) => /gửi báo cáo thành công|report submitted successfully|thank you/i.test(doc.body?.innerText || ""),
@@ -20,19 +20,26 @@
     },
     waitUntilReady: async ({document: doc, status, sleep}) => {
       for (let i = 0; i < 80; i += 1) {
-        const email = [...doc.querySelectorAll('input[type="email"], input[placeholder="Your Email"]')].find(visible);
-        const url = [...doc.querySelectorAll('input[placeholder="Malicious URL"]')].find(visible);
-        const type = [...doc.querySelectorAll("select")].find(visible);
-        const details = [...doc.querySelectorAll('textarea[placeholder="Further details"]')].find(visible);
+        const form = [...doc.querySelectorAll("form")].find((item) =>
+          item.querySelector('input[type="email"]') && item.querySelector("select") && item.querySelector("textarea")
+        );
+        const email = [...(form?.querySelectorAll('input[type="email"]') || [])].find(visible);
+        const url = [...(form?.querySelectorAll('input[type="url"], input[type="text"][required]') || [])].find(visible);
+        const type = [...(form?.querySelectorAll("select") || [])].find(visible);
+        const textareas = [...(form?.querySelectorAll("textarea") || [])].filter(visible);
+        const details = textareas.at(-1);
         if (email && url && type && details) return {email, url, type, details};
-        status(`chongluadao@1.0.0; waiting… inputs=${doc.querySelectorAll("input").length}, textareas=${doc.querySelectorAll("textarea").length}`);
+        status(`chongluadao@1.1.0; waiting… forms=${doc.querySelectorAll("form").length}, inputs=${doc.querySelectorAll("input").length}, textareas=${doc.querySelectorAll("textarea").length}`);
         await sleep(250);
       }
       return null;
     },
     fill: async (task, fields) => {
       const wanted = task.report_type || "Phishing";
-      const option = [...fields.type.options].find((item) => item.textContent.trim().toLowerCase() === wanted.toLowerCase());
+      const option = [...fields.type.options].find((item) =>
+        item.value.toUpperCase() === "2:PHISHING" ||
+        item.textContent.trim().toLowerCase() === wanted.toLowerCase()
+      );
       if (option) {
         fields.type.value = option.value;
         fields.type.dispatchEvent(new Event("change", {bubbles:true}));
@@ -41,7 +48,8 @@
       setValue(fields.url, task.target_url);
       setValue(fields.details, task.draft);
       const valid = !!task.contact_email && fields.email.value === task.contact_email &&
-        fields.url.value === task.target_url && fields.details.value === task.draft && !!option;
+        fields.url.value === task.target_url && fields.details.value === task.draft &&
+        fields.type.value.toUpperCase() === "2:PHISHING";
       return {
         valid,
         status: valid ? "fields filled" : "fields partially filled",
@@ -49,7 +57,8 @@
       };
     },
     validate: (fields) => ({
-      valid: !!fields.email.value && !!fields.url.value && !!fields.details.value && !!fields.type.value,
+      valid: !!fields.email.value && !!fields.url.value && !!fields.details.value &&
+        fields.type.value.toUpperCase() === "2:PHISHING",
       message: "Email, URL, report type or details are missing.",
     }),
     submit: () => false,

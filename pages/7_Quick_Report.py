@@ -447,6 +447,29 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                                     "Đã mở form Registry Co. Extension sẽ tự điền; "
                                     "bạn tự thêm evidence, xác nhận, giải CAPTCHA và submit."
                                 )
+                    elif "gen.xyz/account/submitticket.php" in registry_form_url.lower():
+                        if st.button(
+                            "Mở & tự điền form XYZ.COM",
+                            key=f"quick_xyz_registry_autofill_{idx}",
+                            type="primary",
+                            icon=":material/open_in_browser:",
+                            help=(
+                                "Mở ticket Anti-Abuse của XYZ.COM LLC và điền người báo cáo, "
+                                "loại phishing, domain cùng nội dung. Bạn tự thêm attachment "
+                                "và submit."
+                            ),
+                        ):
+                            opened = cfw.open_profile_form(
+                                "xyz_registry_abuse", registry_form_url,
+                                original_url, registry_text, cfg,
+                            )
+                            if opened.get("error"):
+                                st.error(opened["error"])
+                            else:
+                                st.success(
+                                    "Đã mở ticket XYZ.COM. Extension sẽ tự điền; "
+                                    "bạn tự kiểm tra, thêm attachment và submit."
+                                )
                     else:
                         st.link_button(
                             f"↗ Form {reg_name[:18]}", registry_form_url, type="primary"

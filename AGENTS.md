@@ -247,6 +247,24 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-21 — Web Form Assistant v2.8.0 bổ sung adapter XYZ.COM LLC v1.0.0
+  cho ticket Anti-Abuse `gen.xyz/account/submitticket.php?step=2&deptid=6`.
+  Quick Report và bảng Registry của `.xyz` cùng họ TLD XYZ dùng endpoint mới;
+  extension điền reporter, loại Phishing, domain và draft nhưng không sửa CSRF,
+  upload attachment, xử lý CAPTCHA hoặc submit. Host permission chỉ thêm
+  `gen.xyz`; có test contract adapter, allowlist, URL mapping và UI source.
+  Đã đạt 36/36 test tập trung, syntax check toàn bộ JavaScript, compileall và
+  diff check. Full suite chạy 331 test, còn 1 failure + 6 error Windows baseline
+  ở mock macOS `PosixPath` và stop process dùng `fcntl`/`SIGKILL`/`killpg`, không
+  thuộc adapter XYZ. Không mở form bằng task thật hoặc submit report.
+
+- 2026-09-21 — Web Form Assistant v2.7.1 sửa adapter Chống Lừa Đảo v1.1.0 theo
+  form SolidJS mới của provider: bỏ selector placeholder tiếng Anh đã mất, scope
+  email/URL/select/textarea trong form và chọn loại bằng value `2:PHISHING` thay
+  vì text `Phishing`. Giữ `fill_only`, không upload/CAPTCHA/submit; kiểm tra DOM
+  công khai chỉ đọc, không dùng task token và không gửi form thật. Đã đạt 9/9
+  test extension, syntax check toàn bộ JavaScript, compileall và diff check.
+
 - 2026-09-21 — Quick Report hiển thị caption email tố cáo Registrar/Registry
   ngay trên khối cloaking. Lookup nhẹ dùng WHOIS sẵn có, RDAP khi registrar chưa
   có email và bảng registry tĩnh; không chạy precheck Domain Worker, không tìm

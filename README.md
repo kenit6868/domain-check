@@ -175,6 +175,12 @@ Các trang (xem sidebar bên trái):
   Extension v2.1.0 thêm adapter Google Safe Browsing và Microsoft SmartScreen;
   quyền host chỉ giới hạn ở ba form chính thức và localhost. Hai adapter mới
   chỉ tự điền từ Quick Report, không tự xử lý CAPTCHA hoặc submit.
+  Extension v2.7.1 cập nhật adapter Chống Lừa Đảo theo form SolidJS mới: scope
+  control trong form báo cáo, nhận URL `input[type=text][required]`, textarea
+  bằng chứng và chọn loại bằng value `2:PHISHING`; vẫn không submit/CAPTCHA.
+  Extension v2.8.0 bổ sung adapter XYZ.COM LLC cho ticket Anti-Abuse tại
+  `gen.xyz/account/submitticket.php?step=2&deptid=6`: tự điền người báo cáo,
+  loại Phishing, domain và nội dung; attachment, CAPTCHA và submit vẫn thủ công.
   Extension v2.6.5 chỉ điền URL trên Microsoft SmartScreen; trường ngôn ngữ được
   giữ nguyên mặc định của website, không mở dropdown hoặc chọn thay người dùng.
   Extension v2.6.0 có popup mini khi bấm icon: hiển thị phiên bản extension,
@@ -594,6 +600,13 @@ form Registry Co**. Web Form Assistant v2.7.0 mở form chính thức
 cáo, loại phishing, brand, domain, full URL/path và nội dung report. Evidence
 upload, xác nhận thiện chí, reCAPTCHA và submit luôn do người vận hành
 thực hiện; extension không tự tích, giải CAPTCHA hay gửi form.
+
+Với `.xyz` và các TLD cùng registry như `.monster`, `.quest`, `.baby`,
+`.cars`, `.beauty`, `.hair`, `.homes`, `.game`, `.lol`, `.mom`, `.pics`,
+`.hosting`, `.audio`, `.diet`, `.ceo`, Quick Report hiển thị nút **Mở & tự
+điền form XYZ.COM**. Web Form Assistant v2.8.0 mở ticket Anti-Abuse chính thức,
+điền tên/email người báo cáo, loại `Phishing`, domain và nội dung report. Người
+vận hành phải tự kiểm tra, thêm attachment, xử lý CAPTCHA nếu có và submit.
 
 Quick Report hiển thị thông báo gọn sau khi mở form Google/Microsoft;
 không render đối tượng nội bộ `DeltaGenerator` ra giao diện.

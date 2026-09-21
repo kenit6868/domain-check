@@ -44,6 +44,8 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Adapter Chống Lừa Đảo và Cốc Cốc Safe cũng chỉ `fill_only`, dùng nội dung
   community trung lập thay vì draft gọi đích danh Google/Cloudflare, chọn đúng
   loại phishing và không thao tác reCAPTCHA hoặc nút gửi.
+  Chống Lừa Đảo dùng form SolidJS: selector phải scope trong form và chọn option
+  theo value `2:PHISHING`, không phụ thuộc placeholder/text dịch theo locale.
   Với Cốc Cốc, loại vi phạm là Material UI Select: phải phát `mousedown`, chọn
   option `data-value="1"` và xác minh hidden `input[name="type"]` bằng `1`; chỉ
   tìm thấy text option chưa đủ để báo `FILLED`.
@@ -63,6 +65,9 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Adapter Registry Co phishing chỉ match `registry.co/report-abuse/form`, điền
   reporter/type phishing/brand/domain/full URL/draft và luôn `fill_only`; không
   chọn evidence, tích good-faith, xử lý reCAPTCHA hoặc submit thay operator.
+  Adapter XYZ.COM chỉ match `gen.xyz/account/submitticket.php` với `deptid=6`,
+  điền reporter/type Phishing/domain/draft và luôn `fill_only`; không sửa CSRF,
+  chọn attachment, xử lý CAPTCHA hoặc submit thay operator.
 - `run_check()` là pipeline dùng chung giữa CLI và UI. Không tạo một pipeline
   kiểm tra domain khác trong page Streamlit.
 - Bản PyInstaller phải bundle Chromium cùng Playwright, không dựa vào browser

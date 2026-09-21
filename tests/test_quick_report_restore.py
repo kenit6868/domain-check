@@ -237,6 +237,21 @@ class QuickReportRestoreTests(unittest.TestCase):
         self.assertIn('"Mở & tự điền form Registry Co"', source)
         self.assertIn('if "registry.co/report-abuse/form" in registry_form_url.lower():', source)
 
+    def test_xyz_registry_uses_fill_only_extension_adapter(self):
+        source = (Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py").read_text(encoding="utf-8")
+        self.assertIn('"xyz_registry_abuse", registry_form_url', source)
+        self.assertIn('"Mở & tự điền form XYZ.COM"', source)
+        self.assertIn('elif "gen.xyz/account/submitticket.php" in registry_form_url.lower():', source)
+
+    def test_xyz_registry_uses_current_anti_abuse_ticket_url(self):
+        expected = "https://gen.xyz/account/submitticket.php?step=2&deptid=6"
+        for suffix in (
+            "xyz", "monster", "quest", "baby", "cars", "beauty", "hair",
+            "homes", "game", "lol", "mom", "pics", "hosting", "audio",
+            "diet", "ceo",
+        ):
+            self.assertEqual(expected, pt.CCTLD_REGISTRY_CONTACTS[suffix]["report_webform"])
+
     def test_form_status_messages_are_statements_not_magic_rendered_expressions(self):
         page = Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"
         tree = ast.parse(page.read_text(encoding="utf-8"))

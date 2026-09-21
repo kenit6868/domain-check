@@ -84,6 +84,10 @@ profile sử dụng; chạy ứng dụng trên cùng máy với Chrome.
     nội dung report trung lập và loại phishing tương ứng. Hai adapter luôn
     `fill_only`; CAPTCHA và submit vẫn do người vận hành thực hiện. **Check
     Domain** tiếp tục dùng hai link mở thủ công.
+    Chống Lừa Đảo hiện dùng form SolidJS: adapter v1.1.0 scope control trong form,
+    điền URL vào text input required, nội dung vào textarea bằng chứng và chọn
+    value `2:PHISHING`; placeholder có thể đổi theo ngôn ngữ nên không dùng làm
+    selector chính. Adapter vẫn không upload ảnh, xử lý CAPTCHA hoặc submit.
     Cốc Cốc là Material UI Select: adapter mở dropdown bằng `mousedown`, chọn
     option `data-value="1"` và xác minh `input[name="type"] == "1"` trước khi
     trả trạng thái `FILLED`.
@@ -211,7 +215,12 @@ Khi gặp một đuôi ccTLD lạ, IT truy cập trực tiếp cơ sở dữ li�
 *   **Tên miền `.hk` (Hồng Kông)**: HKIRC (`abuse@hkirc.hk`).
 *   **Tên miền `.us` (Mỹ)**: GoDaddy Registry (`abuse@about.us`).
 *   **Tên miền `.me` (Montenegro)**: doMEn (`abuse@domain.me`).
-*   **Tên miền `.xyz`**: XYZ.COM LLC (`abuse@xyz.xyz`).
+*   **Tên miền `.xyz` và họ TLD XYZ**: XYZ.COM LLC
+    (`xyz_abuse@gen.xyz`) hoặc ticket Anti-Abuse chính thức
+    `https://gen.xyz/account/submitticket.php?step=2&deptid=6`. Quick Report có
+    thể mở và tự điền form bằng Web Form Assistant v2.8.0. Extension chỉ điền
+    thông tin người báo cáo, loại Phishing, domain và nội dung; attachment,
+    CAPTCHA và submit phải do người vận hành thực hiện.
 *   **Tên miền `.top`**: .top registry (`abuse@nic.top`).
 *   **Tên miền `.club`**: GoDaddy Registry (`clubabuse@godaddy.com`).
 *   **Tên miền `.co`**: Registry Co (`abuse@registry.co`) hoặc form phishing

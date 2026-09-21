@@ -34,7 +34,7 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
     def test_extension_is_restricted_to_supported_forms_and_localhost(self):
         root = Path(__file__).resolve().parents[1]
         manifest = json.loads((root / "chrome_extension/cloudflare-profile-worker/manifest.json").read_text())
-        self.assertEqual(manifest["version"], "2.7.0")
+        self.assertEqual(manifest["version"], "2.8.0")
         expected_icons = {
             "16": "icons/icon16.png",
             "32": "icons/icon32.png",
@@ -57,6 +57,7 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
             "https://safe.coccoc.com/*",
             "https://legalportal.godaddy.com/*",
             "https://registry.co/*",
+            "https://gen.xyz/*",
         ])
         self.assertNotIn("<all_urls>", manifest["host_permissions"])
         self.assertEqual(manifest["background"]["service_worker"], "background.js")
@@ -70,6 +71,7 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
             "adapters/coccoc_safe.js",
             "adapters/godaddy_phishing.js",
             "adapters/registry_co.js",
+            "adapters/xyz_registry.js",
             "content.js",
         ])
         self.assertIn("PhishingToolFormAdapters", coordinator)
@@ -108,7 +110,7 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
         for name in (
             "cloudflare.js", "google_gsb.js", "microsoft_smartscreen.js",
             "chongluadao.js", "coccoc_safe.js", "godaddy_phishing.js",
-            "registry_co.js",
+            "registry_co.js", "xyz_registry.js",
         ):
             adapter = (root / "chrome_extension/cloudflare-profile-worker/adapters" / name).read_text(encoding="utf-8")
             for member in ("matches:", "waitUntilReady:", "fill:", "validate:", "captchaPending:", "submit:", "detectSuccess:"):
@@ -142,6 +144,27 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
         self.assertIn('data-value") === "1"', adapter)
         self.assertIn('input[name="type"]', adapter)
         self.assertIn('fields.typeInput.value === "1"', adapter)
+
+    def test_chongluadao_adapter_matches_current_solidjs_form(self):
+        root = Path(__file__).resolve().parents[1]
+        adapter = (root / "chrome_extension/cloudflare-profile-worker/adapters/chongluadao.js").read_text(encoding="utf-8")
+        self.assertIn('version: "1.1.0"', adapter)
+        self.assertIn('doc.querySelectorAll("form")', adapter)
+        self.assertIn('input[type="text"][required]', adapter)
+        self.assertIn('const details = textareas.at(-1)', adapter)
+        self.assertIn('item.value.toUpperCase() === "2:PHISHING"', adapter)
+        self.assertIn('fields.type.value.toUpperCase() === "2:PHISHING"', adapter)
+        self.assertIn("submit: () => false", adapter)
+
+    def test_xyz_registry_adapter_fills_ticket_but_leaves_attachment_and_submit_manual(self):
+        root = Path(__file__).resolve().parents[1]
+        adapter = (root / "chrome_extension/cloudflare-profile-worker/adapters/xyz_registry.js").read_text(encoding="utf-8")
+        for selector in ("#name", "#email", "#customfield7", "#subject", "#message"):
+            self.assertIn(selector, adapter)
+        self.assertIn('selectValue(fields.type, "Phishing")', adapter)
+        self.assertIn('new URLSearchParams(loc.search).get("deptid") === "6"', adapter)
+        self.assertIn("submit: () => false", adapter)
+        self.assertNotIn('input[type="file"]', adapter)
 
     def test_microsoft_adapter_leaves_provider_language_default_untouched(self):
         root = Path(__file__).resolve().parents[1]

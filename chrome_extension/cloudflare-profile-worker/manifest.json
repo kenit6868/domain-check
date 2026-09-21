@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PhishingTool Web Form Assistant",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "description": "Fills supported official abuse forms from local, operator-approved tasks.",
   "icons": {
     "16": "icons/icon16.png",
@@ -27,6 +27,7 @@
     "https://safe.coccoc.com/*",
     "https://legalportal.godaddy.com/*",
     "https://registry.co/*",
+    "https://gen.xyz/*",
     "http://127.0.0.1/*"
   ],
   "content_scripts": [{
@@ -37,7 +38,8 @@
       "https://chongluadao.vn/*",
       "https://safe.coccoc.com/*",
       "https://legalportal.godaddy.com/*",
-      "https://registry.co/*"
+      "https://registry.co/*",
+      "https://gen.xyz/*"
     ],
     "js": [
       "adapters/cloudflare.js",
@@ -47,6 +49,7 @@
       "adapters/coccoc_safe.js",
       "adapters/godaddy_phishing.js",
       "adapters/registry_co.js",
+      "adapters/xyz_registry.js",
       "content.js"
     ],
     "run_at": "document_idle"

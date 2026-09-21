@@ -568,6 +568,12 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
   full URL, contact email và taxonomy cố định `Phishing`/`Trang web lừa đảo`;
   hai adapter chỉ điền, không submit hoặc giải reCAPTCHA. Helper community giữ
   link thủ công khi được gọi từ Check Domain mà không có task context.
+- Extension v2.7.1 nâng adapter Chống Lừa Đảo lên v1.1.0 sau khi provider chuyển
+  form sang SolidJS và đổi placeholder/option. Adapter scope đúng `form`, nhận
+  email + URL text required + select + textarea cuối, chọn value
+  `2:PHISHING`, xác minh state thật và vẫn `fill_only`; không upload, CAPTCHA hay
+  submit. Không còn phụ thuộc `Malicious URL`, `Further details` hoặc text option
+  tiếng Anh cũ.
 - Extension v2.2.1 sửa Cốc Cốc Material UI Select: không gọi `click()` trên
   control để mở menu; phải phát `mousedown`, chọn option `data-value="1"` và
   xác minh hidden input `name="type"` thực sự bằng `1`. Không được trả `FILLED`
@@ -802,6 +808,14 @@ khối TLD Registry của Quick Report. Adapter điền `#ar-name`, `#ar-email`,
 `#ar-type=phishing`, `#ar-brand`, `#ar-domains`, full URL và description; không
 chọn file evidence, không tích `Input.GoodFaithConfirmed`, không xử lý
 reCAPTCHA và không submit.
+
+XYZ.COM adapter v1.0.0 (extension v2.8.0) chỉ match hostname `gen.xyz`, path
+`/account/submitticket.php` và query `deptid=6`. Task `xyz_registry_abuse`
+`fill_only` từ khối TLD Registry của Quick Report điền `#name`, `#email`, chọn
+`Phishing` ở `#customfield7`, ghi hostname vào `#subject` và draft vào
+`#message`. Adapter không sửa CSRF token, không chọn `attachments[]`, không xử
+lý CAPTCHA và không submit. `.xyz` cùng các suffix XYZ đã biết dùng URL ticket
+Anti-Abuse này thay cho endpoint `/account/abuse.php` cũ.
 
 Status sau các nút mở Google/Microsoft trong Quick Report phải dùng khối
 `if/else` statement. Không dùng conditional expression trả về
