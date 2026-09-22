@@ -357,6 +357,11 @@ registry) luôn
 ghi đúng full URL/path. Mẫu không chèn kết quả scan bên thứ ba và không
 tự khẳng định đã lấy OTP/thông tin thanh toán khi chưa có quan sát chứng minh;
 thay vào đó yêu cầu nhà cung cấp điều tra và áp dụng chính sách nếu xác nhận.
+Riêng mẫu Registrar/Registry mô tả rõ luồng nghi vấn có control đăng ký/đăng
+nhập dẫn tới nội dung giả mạo, nguy cơ người dùng cung cấp credential/thông tin
+cá nhân và hậu quả có thể gồm chiếm quyền tài khoản, gian lận hoặc thiệt hại tài
+chính. Các nhận định này luôn dùng ngôn ngữ điều kiện (`suspected`, `may`, `if
+confirmed`) để không biến nguy cơ chưa xác minh thành kết luận sự thật.
 GSB và Cloudflare có hai pool riêng, mỗi pool 5 biến thể: GSB yêu cầu cảnh báo/
 chặn ở Safe Browsing, còn Cloudflare yêu cầu xử lý dịch vụ liên quan hoặc chuyển
 tiếp tới origin hosting provider. Biến thể được chọn ổn định theo domain + ngày.

@@ -247,6 +247,18 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-22 — Nâng nội dung webform Registrar/Registry để mô tả rõ suspected
+  phishing/brand impersonation, luồng registration/sign-in có thể dẫn tới nội
+  dung lừa đảo, nguy cơ cung cấp credential/thông tin cá nhân và hậu quả account
+  compromise, fraud hoặc financial loss. Narrative vẫn dùng `appears`/`may`/`if
+  confirmed`, không tự khẳng định thu thập OTP/payment; Registrar yêu cầu điều
+  tra toàn flow và bảo toàn record, Registry yêu cầu phối hợp sponsoring
+  registrar và áp dụng biện pháp tương xứng. Có test giữ full URL, câu rủi ro,
+  ngôn ngữ điều kiện và chặn claim/scan không có bằng chứng. Đã đạt 26/26 test
+  tập trung gồm AppTest Quick Report. Full suite chạy 331 test, còn 1 failure +
+  6 error Windows baseline ở mock macOS `PosixPath` và stop process dùng
+  `fcntl`/`SIGKILL`/`killpg`, không thuộc formatter webform. Không gửi report thật.
+
 - 2026-09-21 — Web Form Assistant v2.8.0 bổ sung adapter XYZ.COM LLC v1.0.0
   cho ticket Anti-Abuse `gen.xyz/account/submitticket.php?step=2&deptid=6`.
   Quick Report và bảng Registry của `.xyz` cùng họ TLD XYZ dùng endpoint mới;

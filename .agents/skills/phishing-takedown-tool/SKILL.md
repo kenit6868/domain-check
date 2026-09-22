@@ -183,6 +183,10 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   và không khẳng định hành vi thu thập OTP/payment nếu không có bằng chứng quan
   sát tương ứng. Ưu tiên mô tả suspected phishing/impersonation và yêu cầu provider
   điều tra, xác nhận rồi áp dụng chính sách.
+  Formatter Registrar/Registry có thể mô tả luồng nghi vấn registration/sign-in,
+  khả năng cung cấp credential/thông tin cá nhân và rủi ro account compromise,
+  fraud/financial loss, nhưng phải giữ dạng `suspected`/`may`/`if confirmed`,
+  không biến nguy cơ chung thành dữ kiện đã quan sát.
   Pool GSB và Cloudflare phải tách riêng theo thẩm quyền xử lý, có ít nhất 5 biến
   thể mỗi nhóm và chọn ổn định theo domain + ngày để rerun không đổi nội dung.
 - Quick Report có thể hiển thị lookup email tố cáo Registrar/Registry bằng

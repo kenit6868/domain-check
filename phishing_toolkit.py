@@ -618,18 +618,24 @@ def get_webform_draft_text(
 
     t_url = target_url or f"https://{domain}"
     evidence_lines = (
-        f"The reported URL displays content that appears to impersonate "
-        f"{brand} without authorization and may mislead visitors into "
-        f"submitting sensitive information.\n\n"
+        f"We are reporting the URL below for suspected phishing and "
+        f"unauthorized impersonation of {brand}.\n\n"
+        f"The reported page appears to use {brand} branding to present itself "
+        f"as an authorized service. The suspected flow may present registration "
+        f"or sign-in controls that direct visitors to deceptive content and "
+        f"induce them to submit account credentials, personal information, or "
+        f"other sensitive data. If confirmed, this activity may expose affected "
+        f"users to account compromise, fraud, or financial loss.\n\n"
         f"Reported URL: {t_url}\n"
-        f"Domain:       {domain}\n"
+        f"Registered domain: {domain}\n"
     )
 
     evidence_lines += (
-        f"Detected:     {detected_date}\n\n"
-        f"Please investigate the reported URL and, if the violation is "
-        f"confirmed, take appropriate registrar-level action under your "
-        f"abuse policy.\n\n"
+        f"First detected: {detected_date}\n\n"
+        f"Please investigate the complete user flow, including any registration "
+        f"or sign-in destination, preserve relevant registration and access "
+        f"records, and take appropriate registrar-level action under your "
+        f"phishing and abuse policies if the violation is confirmed.\n\n"
         f"Reported by: {contact_name} <{contact_email}>"
     )
 
@@ -2292,14 +2298,22 @@ def get_registry_webform_draft_text(
     reported_url = target_url or f"https://{domain}"
     detected_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return (
-        f"The reported URL displays content that appears to impersonate {brand} "
-        f"without authorization and is suspected of phishing.\n\n"
+        f"We request a registry-level review of suspected phishing and "
+        f"unauthorized impersonation of {brand} under the registered domain "
+        f"below.\n\n"
+        f"The reported page appears to use {brand} branding to present itself "
+        f"as an authorized service. The suspected flow may present registration "
+        f"or sign-in controls leading visitors to deceptive content and may "
+        f"induce them to submit account credentials, personal information, or "
+        f"other sensitive data. If confirmed, this activity may expose affected "
+        f"users to account compromise, fraud, or financial loss.\n\n"
         f"Reported URL: {reported_url}\n"
         f"Registered domain: {domain}\n"
         f"First detected: {detected_date}\n\n"
-        "Please investigate this report and coordinate with the sponsoring "
-        "registrar or take appropriate registry-level action under your abuse "
-        "policy if the violation is confirmed.\n\n"
+        "Please investigate the reported domain and complete user flow, "
+        "coordinate prompt mitigation with the sponsoring registrar, and apply "
+        "proportionate registry-level measures under your abuse policy if the "
+        "violation is confirmed.\n\n"
         f"Reported by: {contact_name} <{contact_email}>"
     )
 

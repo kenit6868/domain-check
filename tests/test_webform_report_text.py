@@ -21,8 +21,14 @@ class WebformReportTextTests(unittest.TestCase):
             self.cfg, target_url=self.url,
         )
         self.assertIn(self.url, text)
+        self.assertIn("suspected phishing", text)
+        self.assertIn("registration or sign-in controls", text)
+        self.assertIn("account compromise, fraud, or financial loss", text)
+        self.assertIn("if the violation is confirmed", text)
         self.assertNotIn("URLScan", text)
         self.assertNotIn("urlscan.io", text.lower())
+        self.assertNotIn("OTP", text)
+        self.assertNotIn("payment", text.lower())
 
     def test_browser_form_templates_use_full_url_and_avoid_unverified_claims(self):
         for text in (
@@ -85,6 +91,9 @@ class WebformReportTextTests(unittest.TestCase):
             )
             text = Path(paths[0]).read_text(encoding="utf-8")
         self.assertIn(self.url, text)
+        self.assertIn("registration or sign-in controls", text)
+        self.assertIn("account compromise, fraud, or financial loss", text)
+        self.assertIn("if the violation is confirmed", text)
         self.assertNotIn("URLScan", text)
         self.assertNotIn("VirusTotal", text)
         self.assertNotIn("OTP", text)
@@ -120,6 +129,9 @@ class WebformReportTextTests(unittest.TestCase):
         )
         self.assertIn(self.url, text)
         self.assertIn("Example Brand", text)
+        self.assertIn("registration or sign-in controls", text)
+        self.assertIn("account compromise, fraud, or financial loss", text)
+        self.assertIn("proportionate registry-level measures", text)
         self.assertNotIn("URLScan", text)
         self.assertNotIn("VirusTotal", text)
         self.assertNotIn("OTP", text)

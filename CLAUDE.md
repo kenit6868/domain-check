@@ -10,6 +10,15 @@ RDAP fallback và bảng registry tĩnh; không gọi precheck Domain Worker, kh
 origin hosting, mở trang hoặc capture evidence. Registrar có web form chính thức
 không bị trình bày như kênh email; `abuse@cloudflare.com` và WHOIS privacy bị loại.
 
+`get_webform_draft_text()` và `get_registry_webform_draft_text()` dùng chung
+narrative webform thận trọng: suspected phishing/brand impersonation, luồng có
+thể xuất hiện control registration/sign-in dẫn tới nội dung lừa đảo, khả năng
+người dùng cung cấp credential/thông tin cá nhân và rủi ro account compromise,
+fraud hoặc financial loss. Không khẳng định control hay hành vi thu thập đã được
+xác minh, không tự thêm OTP/payment và chỉ yêu cầu hành động nếu provider xác
+nhận. Registrar được yêu cầu xem toàn bộ flow và bảo toàn record; Registry được
+yêu cầu phối hợp registrar và áp dụng biện pháp tương xứng theo chính sách.
+
 Quick Report: các nút mở/tự điền form dùng Chrome đã cài trên Windows, macOS
 (`/Applications` hoặc `~/Applications`) và Linux (`google-chrome` hoặc
 `google-chrome-stable` trong PATH). Chrome cần có Web Form Assistant trong

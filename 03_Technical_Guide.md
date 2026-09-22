@@ -529,6 +529,13 @@ vào manual review và vẫn cho draft thường tiếp tục; trạng thái ter
 Mẫu GSB và Cloudflare nhận full URL/path, mô tả suspected phishing/brand
 impersonation và yêu cầu điều tra; không tự tạo tuyên bố về OTP/payment collection
 nếu pipeline không có bằng chứng trực tiếp cho hành vi đó.
+Mẫu webform Registrar/Registry bổ sung mô tả luồng nghi vấn đăng ký/đăng nhập dẫn
+tới nội dung giả mạo, khả năng làm người dùng cung cấp credential hoặc thông tin
+cá nhân, cùng nguy cơ chiếm quyền tài khoản, gian lận và thiệt hại tài chính.
+Các câu này phải giữ dạng điều kiện `suspected`/`may`/`if confirmed`; không được
+chuyển thành khẳng định đã quan sát việc thu thập dữ liệu nếu evidence chưa chứng
+minh. Registrar điều tra toàn bộ flow và bảo toàn record; Registry phối hợp với
+sponsoring registrar và chỉ áp dụng biện pháp tương xứng sau xác minh.
 Hai generator giữ pool 5 biến thể riêng và tiếp tục dùng `_draft_rng(domain +
 UTC date)`: cùng domain trong ngày không đổi text khi Streamlit rerun, còn domain
 hoặc ngày khác có thể đổi biến thể. Mọi biến thể GSB nhắm tới browser warning;
