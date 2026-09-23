@@ -426,6 +426,12 @@ CCTLD_REGISTRY_CONTACTS = {
         "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6",
         "note": "Áp dụng cho 35+ TLD của XYZ (monster, quest, baby, cars, beauty, hair, homes, game, lol, mom, pics, hosting, audio, diet, ceo...). Nhiều domain cùng lúc gửi email xyz_abuse@gen.xyz. Hiệu quả — thường hôm sau bị khoá.",
     },
+    "lat": {
+            "registry": "XYZ.COM LLC",
+            "abuse_email": "xyz_abuse@gen.xyz",
+            "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6",
+            "note": "Áp dụng cho 35+ TLD của XYZ (monster, quest, baby, cars, beauty, hair, homes, game, lol, mom, pics, hosting, audio, diet, ceo...). Nhiều domain cùng lúc gửi email xyz_abuse@gen.xyz. Hiệu quả — thường hôm sau bị khoá.",
+    },
     # XYZ TLD family — cùng registry/abuse contact với .xyz
     "monster":  {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
     "quest":    {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
