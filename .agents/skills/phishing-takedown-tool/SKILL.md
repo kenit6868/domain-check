@@ -32,6 +32,36 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Submit phishing phải dùng `abuse_phishing` cho cả route
   `abuse-reports/{report_param}` và field `act`; workflow công khai danh tính
   doanh nghiệp dùng `send` cho cả host/owner notification.
+- Cloudflare Dashboard session là adapter riêng với API chính thức: nhận Cookie
+  do operator nhập sau preview, không yêu cầu `x-atok`, POST đúng host
+  `dash.cloudflare.com` với Origin/Referer/x-cross-site-security đã xác minh và
+  không sao chép browser telemetry khác. Cookie chỉ giữ trong RAM, không được
+  đưa vào queue, ledger, snapshot, log hoặc error. Batch gửi tuần tự; auth lỗi
+  dừng `WAITING_FOR_SESSION`, rate limit/challenge dừng `PAUSED`, mất response
+  thành `UNKNOWN` và không tự retry. Chỉ nhận `result=success` khi có
+  `abuse_rand` không rỗng (hoặc response tương thích `success=true`). Resume auth cần phiên mới; pause/stop không
+  được ngắt một request đang gửi. `error_code`/`err_code=dedupe` phải giữ `msg`
+  đã sanitize, chuyển terminal `ALREADY_SUBMITTED` và không retry. Idempotency
+  dùng full URL + report version. Page Cloudflare Worker chỉ dùng adapter Cookie,
+  không hiển thị fallback API/extension; cache input và job status theo ngày.
+  UI tách bảng thực hiện, bảng loại và bảng tiến trình; tiến trình chỉ lấy đúng
+  `record_ids` của active job. Lỗi xác định của từng URL thành `FAILED` rồi
+  tiếp tục, và retry chỉ nhận `FAILED`. Xóa cache không được xóa `SUBMITTED`,
+  `ALREADY_SUBMITTED` hoặc `UNKNOWN`. Các bảng chỉ render record thuộc full URL
+  trong input hiện tại; record đang submit phải được sort lên đầu và có dấu hiệu
+  trực quan. URL terminal/không Cloudflare không nằm trong bảng thực hiện.
+  Bảng loại chỉ chốt record bị loại ở precheck. Record đã vào job phải ở nguyên
+  bảng tiến trình sau terminal; retry merge `record_ids` cũ, không chuyển success
+  sang bảng loại hoặc làm biến mất khỏi job. Job legacy thiếu `record_ids` phải
+  recover một lần theo timestamp/tổng item rồi lưu `job_id` trên từng record.
+  UI phải dùng một bảng kết quả chung từ sau precheck đến hết job, cập nhật state
+  tại chỗ; bảng loại mặc định ẩn và chỉ render khi operator bật toggle.
+  Trước khi precheck đủ scope chỉ hiện input + action kiểm tra; sau đó mới render
+  Cookie config rồi bảng kết quả. State terminal phải báo rõ job đã hoàn thành.
+  Checkpoint JSON của Cloudflare Worker phải chịu được Windows sharing violation:
+  retry `PermissionError` có giới hạn và vẫn surface lỗi kéo dài lên UI.
+  Thứ tự bảng kết quả Cloudflare phải cố định theo input/precheck; không sort
+  `current_id` lên đầu. Focus URL đang chạy bằng state/callout tại chỗ.
 - Web Form Assistant extension phải giữ coordinator không chứa selector provider;
   mỗi adapter riêng tuân theo contract `matches`, `waitUntilReady`, `fill`,
   `validate`, `captchaPending`, `submit`, `detectSuccess`. Thêm provider không

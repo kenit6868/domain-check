@@ -1,4 +1,4 @@
-"""Cloudflare batch report page with API-first delivery and form fallback."""
+"""Persistent Cookie-only Cloudflare Dashboard batch worker."""
 
 from __future__ import annotations
 
@@ -11,98 +11,90 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 import streamlit as st
 
-import cloudflare_abuse_api as cf_api
 import cloudflare_form_worker as cfw
 import phishing_toolkit as pt
 
 
+st.set_page_config(
+    page_title="Cloudflare Worker",
+    page_icon=":material/cloud:",
+    layout="wide",
+)
 st.title("Cloudflare Worker")
 st.caption(
-    "Lọc URL đang dùng Cloudflare, preview nội dung và gửi report phishing qua "
-    "Cloudflare Abuse Reports API. Extension Chrome được giữ làm phương án dự phòng."
+    "Kiểm tra URL dùng Cloudflare, lưu danh sách trong ngày và gửi tuần tự qua "
+    "Dashboard bằng Cookie do người vận hành cung cấp."
 )
 
 
-def _parse(raw: str) -> tuple[list[str], list[str]]:
-    valid, invalid, seen = [], [], set()
+def _parse(raw: str) -> tuple[list[str], list[str], list[str]]:
+    valid, invalid, duplicates, seen = [], [], [], set()
     for value in re.split(r"[\n,;]+", raw):
         value = value.strip()
         if not value:
             continue
         try:
             normalized = cfw.normalize_target(value)
-        except ValueError:
+        except (ValueError, TypeError):
             invalid.append(value)
             continue
-        if normalized not in seen:
-            seen.add(normalized)
-            valid.append(normalized)
-    return valid, invalid
+        if normalized in seen:
+            duplicates.append(value)
+            continue
+        seen.add(normalized)
+        valid.append(normalized)
+    return valid, invalid, duplicates
 
+
+def _state_label(value: str) -> str:
+    return {
+        "READY": "🟢 Sẵn sàng", "QUEUED": "⏳ Chờ gửi",
+        "SUBMITTING": "▶ Đang gửi", "SUBMITTED": "✅ Đã gửi",
+        "ALREADY_SUBMITTED": "✅ Đã gửi gần đây", "UNKNOWN": "❔ Chưa rõ kết quả",
+        "WAITING_FOR_SESSION": "🔑 Chờ Cookie mới", "PAUSED": "⏸ Đã tạm dừng",
+        "FAILED": "❌ Lỗi — có thể thử lại", "NEEDS_REVIEW": "⚠ Cần rà soát",
+        "NOT_CLOUDFLARE": "➖ Không dùng Cloudflare",
+    }.get(str(value or ""), str(value or ""))
+
+
+def _save_input() -> None:
+    cfw.save_daily_input(st.session_state.get("cfw_domain_lines", ""))
+
+
+worker = cfw.session_batch_worker()
+initial_status = worker.snapshot()
+st.session_state.setdefault("cfw_domain_lines", cfw.load_daily_input())
+st.session_state.setdefault("cfw_invalid", [])
+st.session_state.setdefault("cfw_duplicates", [])
+st.session_state.setdefault("cfw_cookie_value", "")
+st.session_state.setdefault("cfw_cookie_visible", False)
+if st.session_state.pop("cfw_clear_cookie_on_rerun", False):
+    st.session_state["cfw_cookie_value"] = ""
 
 cfg = pt.load_config()
-api_configured = bool(cfg.get("cloudflare_api_token") and cfg.get("cloudflare_account_id"))
+account_configured = bool(cfg.get("cloudflare_account_id"))
 
 with st.container(border=True):
-    st.subheader("Kết nối Cloudflare API")
-    if api_configured:
-        st.success("Đã tìm thấy API Token và Account ID trong config.ini.")
-    else:
-        st.warning(
-            "Chưa cấu hình [cloudflare] api_token và account_id. "
-            "Bạn vẫn có thể dùng extension ở chế độ dự phòng."
-        )
-    if st.button(
-        "Kiểm tra kết nối API",
-        icon=":material/lan:",
-        disabled=not api_configured,
-        key="cfw_verify_api",
-    ):
-        try:
-            checked = cf_api.verify_access(cfg)
-            st.session_state["cfw_api_verified"] = True
-            st.success(
-                f"Token {checked['token_status']}; API truy cập được. "
-                f"Cloudflare đang trả về {checked['report_count']} report."
-            )
-        except cf_api.CloudflareAbuseApiError as exc:
-            st.session_state["cfw_api_verified"] = False
-            st.error(str(exc))
-        except Exception as exc:
-            st.session_state["cfw_api_verified"] = False
-            st.error(f"Không thể kiểm tra Cloudflare API: {exc}")
-
-with st.expander("Extension Chrome dự phòng"):
-    st.markdown(
-        "Dùng khi API không khả dụng. Mở trang quản lý extension của Chrome, bật "
-        "**Developer mode**, chọn **Load unpacked** và nạp thư mục dưới đây. "
-        "Nếu đã cài, bấm **Reload** để nhận phiên bản mới."
-    )
-    st.code(str(cfw.extension_directory()), language=None)
-    extension_ready = st.checkbox(
-        "Tôi đã cài và bật Web Form Assistant trên Chrome profile hiện tại.",
-        key="cfw_extension_ready",
-    )
-
-with st.form("cfw_prepare_form"):
+    st.subheader("Kiểm tra URL")
     raw = st.text_area(
-        "Danh sách URL/domain",
-        height=150,
+        "Danh sách domain/URL", height=180,
         placeholder="https://example.com/login\nexample.net",
-        help="Mỗi dòng một URL. Nên giữ đúng path chứa nội dung phishing.",
+        help="Mỗi dòng một URL. Danh sách được lưu cục bộ theo ngày.",
+        key="cfw_domain_lines", on_change=_save_input,
+        disabled=bool(initial_status.get("busy")),
     )
-    prepare = st.form_submit_button(
-        "Kiểm tra và lọc Cloudflare",
-        type="primary",
-        icon=":material/filter_alt:",
+    prepare = st.button(
+        "Kiểm tra Cloudflare", type="primary", icon=":material/domain_verification:",
+        disabled=bool(initial_status.get("busy")), key="cfw_prepare_batch",
     )
 
 if prepare:
-    values, invalid = _parse(raw)
-    if invalid:
-        st.warning("Không hợp lệ: " + ", ".join(invalid))
+    cfw.save_daily_input(raw)
+    values, invalid, duplicates = _parse(raw)
+    st.session_state["cfw_invalid"] = invalid
+    st.session_state["cfw_duplicates"] = duplicates
     if not values:
-        st.error("Chưa có URL hợp lệ.")
+        st.warning("Không tìm thấy URL hợp lệ.")
     else:
         progress = st.progress(0, text="Đang kiểm tra Cloudflare...")
         for index, value in enumerate(values, start=1):
@@ -111,170 +103,243 @@ if prepare:
         progress.empty()
         st.rerun()
 
-records = cfw.today_records()
-cloudflare_records = [item for item in records if item.get("cloudflare")]
-excluded = [item for item in records if not item.get("cloudflare")]
+if st.session_state["cfw_invalid"]:
+    st.warning("URL không hợp lệ: " + ", ".join(st.session_state["cfw_invalid"]))
+if st.session_state["cfw_duplicates"]:
+    st.info("URL trùng trong nội dung nhập đã được bỏ qua: " + ", ".join(st.session_state["cfw_duplicates"]))
 
-if not records:
-    st.info("Nhập danh sách và bấm kiểm tra để tạo danh sách Cloudflare trong ngày.")
-    st.stop()
 
-if excluded:
-    with st.expander(f"Không phát hiện Cloudflare ({len(excluded)})"):
-        st.dataframe(
-            pd.DataFrame([
-                {"URL": item.get("target_url"), "Lý do": item.get("last_error")}
-                for item in excluded
-            ]),
-            hide_index=True,
-            width="stretch",
-        )
+scope_urls, _, _ = _parse(st.session_state.get("cfw_domain_lines", ""))
+scope_ids = {cfw.record_id(url) for url in scope_urls}
+scope_order = {url: index for index, url in enumerate(scope_urls)}
 
-selectable = [item for item in cloudflare_records if item.get("state") != "SUBMITTED"]
-submitted = [item for item in cloudflare_records if item.get("state") == "SUBMITTED"]
-st.subheader("URL Cloudflare")
-selected_ids = []
-if not selectable:
-    st.success("Không còn URL Cloudflare nào đang chờ trong ngày.")
-else:
-    frame = pd.DataFrame([
-        {
-            "id": item["id"],
-            "URL": item["target_url"],
-            "Trạng thái": item.get("state"),
-            "Kênh": item.get("channel") or "Chưa gửi",
-            "Số lần thử": item.get("attempts", 0),
-            "Kết quả/lỗi": item.get("result") or item.get("last_error") or "",
-        }
-        for item in selectable
-    ])
-    event = st.dataframe(
-        frame.drop(columns=["id"]),
-        hide_index=True,
-        width="stretch",
-        on_select="rerun",
-        selection_mode="multi-row",
-        key="cfw_table",
-    )
-    rows = list(event.selection.rows) if event and event.selection else []
-    selected_ids = [frame.iloc[index]["id"] for index in rows if index < len(frame)]
-    st.caption(f"Đã chọn {len(selected_ids)}/{len(selectable)} URL.")
 
-selected = [item for item in selectable if item.get("id") in selected_ids]
-if selected:
-    st.subheader("Preview report")
-    for item in selected:
-        with st.expander(
-            f"{item['target_url']} · {item.get('state')}",
-            expanded=len(selected) == 1,
-        ):
-            st.code(item.get("draft") or "", language=None)
-            try:
-                payload = cf_api.build_phishing_payload(
-                    item["target_url"], item.get("draft") or "", cfg
-                )
-                st.json(payload)
-            except cf_api.CloudflareAbuseApiError as exc:
-                st.error(str(exc))
+def _scoped_records() -> list[dict]:
+    return [item for item in cfw.today_records() if item.get("id") in scope_ids]
 
-channel = st.segmented_control(
-    "Kênh xử lý",
-    ["Cloudflare API", "Extension dự phòng"],
-    default="Cloudflare API",
-    key="cfw_channel",
+
+scoped_records = _scoped_records()
+precheck_complete = bool(scope_ids) and scope_ids.issubset(
+    {str(item.get("id") or "") for item in scoped_records}
 )
 
-if channel == "Cloudflare API":
-    confirmed = st.checkbox(
-        "Tôi đã kiểm tra URL và nội dung; tôi xác nhận gửi các report đã chọn qua Cloudflare API.",
-        key="cfw_api_confirmed",
-    )
-    if st.button(
-        "Gửi danh sách đã chọn qua API",
-        type="primary",
-        icon=":material/send:",
-        disabled=not (selected and api_configured and confirmed),
-        key="cfw_submit_api",
-    ):
-        progress = st.progress(0, text="Đang gửi Cloudflare API...")
-        results = []
-        for index, item in enumerate(selected, start=1):
-            results.extend(cfw.submit_api_records([item], cfg))
-            progress.progress(index / len(selected), text=f"Đã xử lý {index}/{len(selected)}")
-        progress.empty()
-        succeeded = sum(bool(item.get("ok")) for item in results)
-        failed = len(results) - succeeded
-        if succeeded:
-            st.success(f"Đã gửi thành công {succeeded} report.")
-        if failed:
-            st.error(f"Có {failed} report gửi thất bại; trạng thái đã được lưu để retry.")
-        st.rerun()
-else:
-    mode_label = st.segmented_control(
-        "Chế độ extension",
-        ["Chỉ điền", "Điền và submit sau xác nhận"],
-        default="Chỉ điền",
-        key="cfw_extension_mode",
-    )
-    mode = "fill_only" if mode_label == "Chỉ điền" else "submit"
-    delay = st.number_input("Delay giữa các URL (giây)", 0, 120, 8, 1)
-    confirmed = st.checkbox(
-        "Tôi cho phép extension submit các form đã chọn sau khi CAPTCHA được xác nhận.",
-        disabled=mode != "submit",
-        key="cfw_extension_confirmed",
-    )
-    worker = cfw.browser_worker()
-    status = worker.snapshot()
-    st.caption(status["status"])
-    if st.button(
-        "Mở Chrome và chạy danh sách",
-        type="primary",
-        icon=":material/open_in_browser:",
-        disabled=(
-            not selected or not extension_ready or status["busy"]
-            or (mode == "submit" and not confirmed)
-        ),
-        key="cfw_run_extension",
-    ):
-        runtime_records = []
-        for item in selected:
-            runtime_item = dict(item)
-            runtime_item["_contact_name"] = cfg.get("contact_name", "")
-            runtime_item["_contact_email"] = cfg.get("contact_email", "")
-            runtime_item["_brand_name"] = cfg.get("brand_name", "")
-            runtime_records.append(runtime_item)
-        result = worker.start(
-            runtime_records,
-            mode=mode,
-            delay_seconds=int(delay),
-            confirmed=confirmed,
-        )
-        if result.get("error"):
-            st.error(result["error"])
-        else:
-            st.success(f"Đã bắt đầu xử lý {result['count']} URL trên Chrome.")
-            st.rerun()
-    if status["busy"]:
-        st.info("Extension Worker đang chạy; checkpoint từng URL vẫn được lưu.")
 
-if submitted:
-    with st.expander(f"Đã gửi thành công hôm nay ({len(submitted)})"):
-        st.dataframe(
-            pd.DataFrame([
-                {
-                    "URL": item.get("target_url"),
-                    "Kênh": item.get("channel") or item.get("mode"),
-                    "Report ID": item.get("report_id") or "",
-                    "Kết quả": item.get("result"),
-                    "Cập nhật": item.get("updated_at"),
-                }
-                for item in submitted
-            ]),
-            hide_index=True,
-            width="stretch",
+def _result_row(item: dict) -> dict:
+    return {
+        "URL": item.get("target_url") or "",
+        "Trạng thái": _state_label(item.get("state")),
+        "Lần thử": int(item.get("attempts") or 0),
+        "Cập nhật": item.get("submitted_at") or item.get("updated_at") or "",
+        "Mã report": item.get("report_id") or "",
+        "Kết quả/lỗi": item.get("last_error") or item.get("result") or "",
+    }
+
+
+@st.fragment(run_every=2 if initial_status.get("busy") else None)
+def _render_tables() -> None:
+    snapshot = cfw.session_batch_worker().snapshot()
+    scoped = _scoped_records()
+    if not snapshot.get("record_ids"):
+        persisted = cfw.load_job_status()
+        if persisted and not snapshot.get("job_id"):
+            for key in ("job_id", "state", "status", "current_id", "processed", "total"):
+                snapshot[key] = persisted.get(key, snapshot.get(key))
+        snapshot["record_ids"] = persisted.get("record_ids") or cfw.recover_job_record_ids()
+    job_id = str(snapshot.get("job_id") or "")
+    job_ids = {str(value) for value in (snapshot.get("record_ids") or []) if value}
+    if job_id:
+        job_ids.update(
+            str(item.get("id")) for item in scoped
+            if item.get("id") and item.get("job_id") == job_id
         )
+    current_id = str(snapshot.get("current_id") or "")
+    progress_rows = [item for item in scoped if item.get("id") in job_ids]
+    progress_rows.sort(key=lambda item: scope_order.get(item.get("target_url") or "", len(scope_order)))
+    actionable = [
+        item for item in scoped
+        if item.get("id") not in job_ids and item.get("cloudflare")
+        and item.get("state") in {"READY", "FAILED", "NEEDS_REVIEW", "QUEUED"}
+    ]
+    actionable.sort(key=lambda item: scope_order.get(item.get("target_url") or "", len(scope_order)))
+    visible_rows = [*progress_rows, *actionable]
+    visible_rows.sort(key=lambda item: scope_order.get(item.get("target_url") or "", len(scope_order)))
+    excluded = [
+        item for item in scoped
+        if item.get("id") not in job_ids and (
+            not item.get("cloudflare")
+            or item.get("state") in {"SUBMITTED", "ALREADY_SUBMITTED", "UNKNOWN"}
+        )
+    ]
+    excluded.sort(key=lambda item: scope_order.get(item.get("target_url") or "", len(scope_order)))
+
+    with st.container(border=True):
+        st.subheader("Kết quả URL")
+        st.caption("Một danh sách duy nhất sau precheck; trạng thái gửi được cập nhật trực tiếp trên từng URL.")
+        if snapshot.get("state") == "COMPLETED" and progress_rows:
+            succeeded = sum(
+                item.get("state") in {"SUBMITTED", "ALREADY_SUBMITTED"}
+                for item in progress_rows
+            )
+            failed = sum(item.get("state") == "FAILED" for item in progress_rows)
+            notice = st.warning if failed else st.success
+            notice(
+                f"Job đã hoàn thành: **{succeeded}** URL thành công/đã gửi gần đây"
+                + (f", **{failed}** URL lỗi có thể thử lại." if failed else ".")
+            )
+        if progress_rows and snapshot.get("total"):
+            total = int(snapshot.get("total") or 0)
+            processed = int(snapshot.get("processed") or 0)
+            st.progress(
+                processed / total if total else 0.0,
+                text=f"{processed}/{total} · {snapshot.get('status') or 'Sẵn sàng'}",
+            )
+        current = next((item for item in visible_rows if item.get("id") == current_id), None)
+        if current:
+            st.info(f"▶ Đang xử lý: {current.get('target_url')}")
+        if visible_rows:
+            st.dataframe(
+                pd.DataFrame([_result_row(item) for item in visible_rows]),
+                hide_index=True, width="stretch",
+            )
+        else:
+            st.info("Không có URL đủ điều kiện để thực hiện.")
+
+    if excluded:
+        show_excluded = st.toggle(
+            f"Hiện URL bị loại ({len(excluded)})",
+            value=False,
+            key="cfw_show_excluded",
+        )
+        if show_excluded:
+            with st.container(border=True):
+                st.subheader("Bảng loại")
+                st.caption(
+                    "Kết quả bị loại ngay sau precheck: đã gửi từ trước, Cloudflare báo trùng, "
+                    "không dùng Cloudflare hoặc chưa rõ kết quả. Record đã vào job không chuyển sang đây."
+                )
+                st.dataframe(
+                    pd.DataFrame([_result_row(item) for item in excluded]),
+                    hide_index=True, width="stretch",
+                )
+
+records = [item for item in _scoped_records() if item.get("cloudflare")]
+ready_records = [
+    item for item in records
+    if item.get("state") in {"READY", "QUEUED"} and str(item.get("draft") or "").strip()
+]
+failed_records = [
+    item for item in records
+    if item.get("state") == "FAILED" and str(item.get("draft") or "").strip()
+]
+status = worker.snapshot()
+
+if precheck_complete:
+    with st.container(border=True):
+        st.subheader("Cấu hình gửi")
+        if not account_configured:
+            st.error("Thiếu `[cloudflare] account_id` trong config.ini; chưa thể gửi batch.")
+        st.caption(
+            f"Sẵn sàng gửi mới: **{len(ready_records)}** · Có thể thử lại: **{len(failed_records)}**. "
+            "Cookie chỉ giữ trong RAM và bị xóa sau khi worker nhận."
+        )
+        st.toggle("Hiện Cookie", key="cfw_cookie_visible")
+        st.text_input(
+            "Cookie Cloudflare",
+            type="default" if st.session_state["cfw_cookie_visible"] else "password",
+            key="cfw_cookie_value",
+            help="Chấp nhận giá trị thuần hoặc chuỗi bắt đầu bằng Cookie:.",
+        )
+        delay = st.number_input(
+            "Thời gian chờ trước URL tiếp theo (giây)", min_value=0,
+            max_value=cfw.MAX_BATCH_DELAY_SECONDS, value=30, step=1,
+            key="cfw_delay_seconds",
+        )
+        confirmed = st.checkbox(
+            "Tôi đã kiểm tra danh sách và xác nhận gửi report.",
+            key="cfw_dashboard_confirmed",
+        )
+
+        with st.container(horizontal=True):
+            if st.button(
+                "Bắt đầu gửi", type="primary", icon=":material/send:",
+                disabled=not (
+                    ready_records and account_configured and confirmed
+                    and st.session_state.get("cfw_cookie_value") and not status.get("busy")
+                ), key="cfw_start_dashboard_batch",
+            ):
+                try:
+                    result = worker.start(
+                        ready_records, cfg, cookie_value=st.session_state["cfw_cookie_value"],
+                        delay_seconds=int(delay), confirmed=confirmed,
+                    )
+                except OSError as exc:
+                    result = {"error": f"Không thể lưu trạng thái job: {exc}"}
+                if result.get("error"):
+                    st.error(result["error"])
+                else:
+                    st.session_state["cfw_clear_cookie_on_rerun"] = True
+                    st.rerun()
+
+            if st.button(
+                "Thử lại URL lỗi", icon=":material/replay:",
+                disabled=not (
+                    failed_records and account_configured and confirmed
+                    and st.session_state.get("cfw_cookie_value") and not status.get("busy")
+                ), key="cfw_retry_failed_batch",
+            ):
+                try:
+                    result = worker.start(
+                        failed_records, cfg, cookie_value=st.session_state["cfw_cookie_value"],
+                        delay_seconds=int(delay), confirmed=confirmed,
+                    )
+                except OSError as exc:
+                    result = {"error": f"Không thể lưu trạng thái job: {exc}"}
+                if result.get("error"):
+                    st.error(result["error"])
+                else:
+                    st.session_state["cfw_clear_cookie_on_rerun"] = True
+                    st.rerun()
+
+            if st.button(
+                "Tiếp tục", icon=":material/play_arrow:",
+                disabled=not status.get("busy") or status.get("state") not in {"PAUSED", "WAITING_FOR_SESSION"},
+                key="cfw_resume_dashboard_batch",
+            ):
+                result = worker.resume(cookie_value=st.session_state.get("cfw_cookie_value", ""))
+                if result.get("error"):
+                    st.error(result["error"])
+                else:
+                    st.session_state["cfw_clear_cookie_on_rerun"] = True
+                st.rerun()
+
+            if st.button(
+                "Dừng", icon=":material/stop:", disabled=not status.get("busy"),
+                key="cfw_stop_dashboard_batch",
+            ):
+                worker.stop()
+                st.rerun()
+
+        if any(item.get("state") == "UNKNOWN" for item in records):
+            st.warning(
+                "Có URL chưa rõ kết quả do mất response. Các URL này không được tự retry; "
+                "hãy đối chiếu với Cloudflare trước."
+            )
+
+    _render_tables()
+
+    if st.button(
+        "Xóa cache kiểm tra hôm nay", icon=":material/delete_sweep:",
+        disabled=bool(status.get("busy")), key="cfw_clear_daily_cache",
+        help="Chỉ xóa ô nhập và kết quả chưa gửi; lịch sử đã gửi/chưa rõ vẫn được giữ.",
+    ):
+        removed = cfw.clear_daily_cache()
+        st.session_state["cfw_domain_lines"] = ""
+        st.session_state["cfw_invalid"] = []
+        st.session_state["cfw_duplicates"] = []
+        st.success(f"Đã xóa {removed} kết quả kiểm tra chưa gửi. Lịch sử gửi được giữ nguyên.")
+        st.rerun()
 
 st.caption(
-    "Ledger chỉ lưu URL, draft, kênh, Report ID và trạng thái. "
-    "API Token, CAPTCHA, cookie và nội dung trình duyệt không được ghi vào ledger."
+    "Cache và job status chỉ lưu URL, trạng thái, fingerprint, thời gian và mã report. "
+    "Cookie không được ghi vào file, ledger hoặc giao diện kết quả."
 )

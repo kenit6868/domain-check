@@ -68,24 +68,51 @@ Chrome hiển thị icon lá chắn của Web Form Assistant sau khi người d�
 **Load unpacked** với thư mục extension. Nếu extension đã được nạp từ trước,
 vào trang quản lý extension của Chrome và bấm **Reload** để nhận icon mới.
 
-### Cloudflare Worker qua API
+### Cloudflare Worker theo phiên Dashboard
 
 Thêm cấu hình bí mật vào file `config.ini` cục bộ:
 
 ```ini
 [cloudflare]
-api_token = YOUR_CLOUDFLARE_API_TOKEN
 account_id = YOUR_CLOUDFLARE_ACCOUNT_ID
 ```
 
-Token cần quyền **Account → Trust and Safety → Write** và account cần entitlement
-`abuse-reports`. Menu **Cloudflare Worker** dùng cùng phép lọc nameserver của
-Quick Report, chỉ giữ URL có Cloudflare, cho preview payload rồi mới gửi các dòng
-được chọn qua API. Mỗi URL được checkpoint ngay với Report ID; URL đã thành công
-trong ngày không được gửi lại. Nút **Kiểm tra kết nối API** chỉ verify token và
-đọc danh sách report, không tạo report. Extension Chrome vẫn là fallback.
-Báo cáo phishing dùng route `abuse-reports/abuse_phishing` và cho phép
-Cloudflare chuyển danh tính người báo cáo tới host/owner (`send`).
+`account_id` cũng được dùng cho luồng phiên Dashboard. Trên menu **Cloudflare
+Worker**, người vận hành dán danh sách URL, kiểm tra Cloudflare rồi nhập header
+`Cookie` lấy từ phiên Dashboard để bấm **Bắt đầu gửi**. Ô nhập và ledger được
+lưu theo ngày; page tự phục hồi danh sách/job khi quay lại. **Danh sách thực hiện**
+chỉ chứa URL Cloudflare chưa gửi/cần retry; **Bảng loại** chứa URL đã gửi, bị
+Cloudflare dedupe, không dùng Cloudflare hoặc chưa rõ kết quả. **Tiến trình gửi**
+chỉ xuất hiện khi job submit đang chạy và lấy đúng `record_ids` của job, không
+suy từ toàn bộ ledger. Các bảng chỉ xét URL trong ô nhập hiện tại; ledger cũ vẫn
+được giữ để chống gửi trùng. Bảng loại được chốt sau precheck; một URL đã vào
+job sẽ ở nguyên trong Tiến trình gửi kể cả sau khi thành công hoặc job hoàn tất.
+Job cũ thiếu `record_ids` được phục hồi một lần từ mốc bắt đầu và tổng số item,
+sau đó từng record được gắn `job_id` để reload không đẩy nhầm URL sang Bảng loại.
+Sau precheck và trong lúc gửi chỉ dùng một bảng **Kết quả URL**; trạng thái job
+được cập nhật ngay trên chính các dòng đó. Bảng loại mặc định ẩn và chỉ render
+khi người vận hành bật toggle **Hiện URL bị loại**.
+Trang mở theo trạng thái: trước precheck chỉ hiện ô URL và nút kiểm tra; sau khi
+toàn bộ URL hiện tại có kết quả mới hiện **Cấu hình gửi**, rồi **Kết quả URL** ở
+bên dưới. Job terminal hiển thị thông báo hoàn thành và số URL thành công/lỗi.
+Cloudflare Worker dùng layout rộng toàn vùng nội dung giống Domain Worker để ô
+nhập, cấu hình và bảng URL tận dụng màn hình desktop.
+Thứ tự dòng của **Kết quả URL** được cố định theo input sau precheck; worker chỉ
+đổi trạng thái tại chỗ và thông báo URL đang xử lý, không đưa dòng đó lên đầu.
+Trên Windows, checkpoint JSON tự retry ngắn khi `os.replace` gặp sharing
+violation tạm thời; lỗi ghi kéo dài được hiển thị trong page thay vì làm văng UI.
+URL đang xử lý được đưa lên đầu với `▶ Đang gửi`.
+Cookie chỉ nằm trong RAM của batch, không ghi ledger/log/UI kết quả; ứng dụng
+không có phép kiểm tra phiên chỉ-đọc nên chỉ xác minh khi gửi item đầu tiên.
+Authentication error dừng ở trạng thái chờ phiên mới; mất response chuyển
+`unknown` và không tự retry; rate limit/challenge tạm dừng batch. Response
+`error_code=dedupe` được hiển thị bằng thông báo `msg`, đánh dấu **Đã gửi gần
+đây** và không tự gửi lại URL đó. Mỗi lần submit chạy tuần tự và chỉ chờ giãn
+cách sau khi thao tác trước kết thúc. Lỗi xác định của một URL được checkpoint
+rồi worker tiếp tục; sau khi hoàn tất có nút **Thử lại URL lỗi**. Nút xóa cache
+chỉ xóa ô nhập/kết quả chưa gửi, không xóa lịch sử đã gửi hoặc chưa rõ kết quả.
+Page này không còn kênh dự phòng API/extension; extension vẫn được Quick Report
+và các adapter webform khác sử dụng độc lập.
 
 ### Tự điền form phishing GoDaddy
 
@@ -151,9 +178,13 @@ Các trang (xem sidebar bên trái):
   Chrome profile có extension và tự điền URL/draft/contact/company. Quick Report
   chỉ điền, không submit; nút mở form Cloudflare thủ công cũ đã được thay thế.
 - **Cloudflare Form Worker** — dùng cùng phép kiểm tra nameserver Cloudflare của
-  Quick Report, chỉ đưa URL được người vận hành chọn vào hàng chờ trong ngày,
-  hiển thị full URL và draft trước khi chạy. **Chỉ điền** mở Chrome để kiểm tra;
-  submit chỉ bật sau xác nhận. Form được điền bởi extension cục bộ cài trên đúng
+  Quick Report, chỉ đưa URL được người vận hành nhập vào hàng chờ trong ngày,
+  hiển thị full URL và trạng thái trong một bảng duy nhất. Luồng nhận
+  Cookie thủ công và gửi tuần tự qua endpoint Dashboard sau xác nhận; có nút
+  tiếp tục bằng phiên mới, dừng và retry riêng URL lỗi. Ledger schema v4 checkpoint theo
+  URL + fingerprint nội dung nhưng không lưu phiên. Kết quả mất response là
+  `unknown`, phải đối chiếu trước khi thử lại. API/extension không xuất hiện trên
+  page này; extension của Quick Report vẫn mở Chrome để điền form trên đúng
   Chrome profile cá nhân đang mở (không dùng profile Playwright). Ledger checkpoint
   theo URL để retry/resume và không sao chép/lưu cookie, CAPTCHA hay HTML.
   Extension điền `Confirm email address`, lấy `Company name` từ `brand_name` và

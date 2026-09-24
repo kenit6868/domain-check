@@ -24,12 +24,32 @@ import phishing_toolkit as pt
 
 
 FORM_URL = "https://abuse.cloudflare.com/phishing"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 LEDGER_PATH = Path(pt._runtime_path("cloudflare_form_worker.json"))
+INPUT_CACHE_PATH = Path(pt._runtime_path("cloudflare_form_input.json"))
+JOB_STATUS_PATH = Path(pt._runtime_path("cloudflare_form_job.json"))
 TERMINAL_STATES = {"SUBMITTED"}
 RETRYABLE_STATES = {"READY", "FAILED", "NEEDS_MANUAL", "FILLED"}
+SESSION_BATCH_STATES = {
+    "QUEUED", "SUBMITTING", "SUBMITTED", "ALREADY_SUBMITTED", "UNKNOWN", "WAITING_FOR_SESSION",
+    "PAUSED", "FAILED", "NEEDS_REVIEW",
+}
+MAX_BATCH_DELAY_SECONDS = 300
 _FILE_LOCK = threading.RLock()
 _API_SEND_LOCK = threading.Lock()
+_REPLACE_ATTEMPTS = 10
+
+
+def _replace_file_with_retry(source: Path, destination: Path) -> None:
+    """Retry transient Windows sharing violations, then surface persistent failures."""
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt + 1 >= _REPLACE_ATTEMPTS:
+                raise
+            time.sleep(0.02 * (attempt + 1))
 
 
 def current_day() -> str:
@@ -125,7 +145,96 @@ def save_ledger(data: dict, path: Path | str = LEDGER_PATH) -> None:
     temp = path.with_name(f"{path.name}.tmp.{os.getpid()}.{threading.get_ident()}")
     with _FILE_LOCK:
         temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temp, path)
+        _replace_file_with_retry(temp, path)
+
+
+def _atomic_json(path: Path | str, payload: dict) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f"{path.name}.tmp.{os.getpid()}.{threading.get_ident()}")
+    with _FILE_LOCK:
+        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        _replace_file_with_retry(temp, path)
+
+
+def load_daily_input(path: Path | str = INPUT_CACHE_PATH) -> str:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return ""
+    return str(data.get("value") or "") if data.get("day") == current_day() else ""
+
+
+def save_daily_input(value: str, path: Path | str = INPUT_CACHE_PATH) -> None:
+    _atomic_json(path, {
+        "day": current_day(), "value": str(value or ""),
+        "updated_at": datetime.now().astimezone().isoformat(),
+    })
+
+
+def load_job_status(path: Path | str = JOB_STATUS_PATH) -> dict:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return data if isinstance(data, dict) and data.get("day") == current_day() else {}
+
+
+def recover_job_record_ids(
+    *, ledger_path: Path | str = LEDGER_PATH,
+    job_status_path: Path | str = JOB_STATUS_PATH,
+) -> list[str]:
+    """Recover membership for jobs created by the pre-record_ids runtime."""
+    status = load_job_status(job_status_path)
+    existing = [str(value) for value in (status.get("record_ids") or []) if value]
+    if existing:
+        return existing
+    job_id = str(status.get("job_id") or "")
+    total = int(status.get("total") or 0)
+    if not job_id or total <= 0:
+        return []
+    try:
+        started = datetime.strptime(job_id, "%Y%m%dT%H%M%S%z")
+    except ValueError:
+        return []
+    candidates = []
+    for item in today_records(ledger_path):
+        try:
+            updated = datetime.fromisoformat(str(item.get("updated_at") or ""))
+        except ValueError:
+            continue
+        jobish = (
+            item.get("state") in {"QUEUED", "SUBMITTING", "WAITING_FOR_SESSION", "PAUSED"}
+            or item.get("channel") == "dashboard_session"
+        )
+        if jobish and updated >= started:
+            candidates.append(item)
+    candidates.sort(key=lambda item: str(item.get("updated_at") or ""))
+    recovered = [str(item.get("id") or "") for item in candidates[:total] if item.get("id")]
+    if not recovered:
+        return []
+    status["record_ids"] = recovered
+    _atomic_json(job_status_path, status)
+    for item_id in recovered:
+        update_record(item_id, ledger_path, job_id=job_id)
+    return recovered
+
+
+def clear_daily_cache(
+    *, ledger_path: Path | str = LEDGER_PATH,
+    input_path: Path | str = INPUT_CACHE_PATH,
+) -> int:
+    """Clear today's editable/check cache while preserving delivery truth."""
+    data = load_ledger(ledger_path)
+    protected = {"SUBMITTED", "ALREADY_SUBMITTED", "UNKNOWN", "SUBMITTING", "WAITING_FOR_SESSION"}
+    before = len(data["records"])
+    data["records"] = [
+        item for item in data["records"]
+        if item.get("day") != current_day() or item.get("state") in protected
+    ]
+    save_ledger(data, ledger_path)
+    save_daily_input("", input_path)
+    return before - len(data["records"])
 
 
 def today_records(path: Path | str = LEDGER_PATH) -> list[dict]:
@@ -137,7 +246,17 @@ def _clean_error(value: object) -> str:
     text = " ".join(str(value or "").split())
     # Avoid writing query-string tokens accidentally returned by a browser error.
     text = re.sub(r"([?&](?:token|key|captcha|cf-turnstile-response)=)[^&\s]+", r"\1[REDACTED]", text, flags=re.I)
+    text = re.sub(r"(?i)((?:x-atok|cookie)\s*[:=]\s*)[^\r\n]+", r"\1[REDACTED]", text)
     return text[:500]
+
+
+def report_version(draft: str) -> str:
+    return hashlib.sha256(str(draft or "").encode("utf-8")).hexdigest()[:16]
+
+
+def idempotency_key(target_url: str, draft: str) -> str:
+    raw = f"{normalize_target(target_url)}\0{report_version(draft)}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def update_record(item_id: str, path: Path | str = LEDGER_PATH, **changes) -> dict | None:
@@ -147,7 +266,8 @@ def update_record(item_id: str, path: Path | str = LEDGER_PATH, **changes) -> di
         if item.get("id") == item_id:
             allowed = {
                 "state", "attempts", "last_error", "updated_at", "mode", "result",
-                "channel", "report_id", "http_status",
+                "channel", "report_id", "http_status", "submitted_at",
+                "job_id",
             }
             for key, value in changes.items():
                 if key in allowed:
@@ -158,6 +278,24 @@ def update_record(item_id: str, path: Path | str = LEDGER_PATH, **changes) -> di
     if found:
         save_ledger(data, path)
     return found
+
+
+def recover_interrupted_dashboard_records(path: Path | str = LEDGER_PATH) -> int:
+    """Fail closed after process restart: an in-flight POST has unknown outcome."""
+    data = load_ledger(path)
+    changed = 0
+    now = datetime.now().astimezone().isoformat()
+    for item in data["records"]:
+        if item.get("channel") == "dashboard_session" and item.get("state") == "SUBMITTING":
+            item["state"] = "UNKNOWN"
+            item["last_error"] = (
+                "Worker khởi động lại khi request đang gửi; cần đối chiếu Cloudflare trước khi gửi lại."
+            )
+            item["updated_at"] = now
+            changed += 1
+    if changed:
+        save_ledger(data, path)
+    return changed
 
 
 def prepare_urls(
@@ -181,7 +319,7 @@ def prepare_urls(
             continue
         seen.add(item_id)
         prior = existing.get(item_id)
-        if prior and prior.get("state") == "SUBMITTED":
+        if prior:
             output.append(dict(prior))
             continue
         try:
@@ -200,7 +338,13 @@ def prepare_urls(
         item.update({
             "cloudflare": is_cf,
             "draft": draft,
-            "state": item.get("state") if is_cf and item.get("state") in RETRYABLE_STATES else ("READY" if is_cf else "NOT_CLOUDFLARE"),
+            "report_version": report_version(draft) if draft else "",
+            "idempotency_key": idempotency_key(target_url, draft) if draft else "",
+            "state": (
+                item.get("state")
+                if is_cf and item.get("state") in (RETRYABLE_STATES | SESSION_BATCH_STATES)
+                else ("READY" if is_cf and draft.strip() else ("NEEDS_REVIEW" if is_cf else "NOT_CLOUDFLARE"))
+            ),
             "last_error": error,
             "updated_at": now,
         })
@@ -309,6 +453,379 @@ def browser_worker() -> CloudflareBrowserWorker:
         if _BROWSER_WORKER is None:
             _BROWSER_WORKER = CloudflareBrowserWorker()
         return _BROWSER_WORKER
+
+
+class CloudflareSessionBatchWorker:
+    """Sequential Dashboard-session batch with pause/resume/stop controls.
+
+    The cookie value only lives on this object while a batch is active. It is
+    never placed in the work queue, ledger, snapshot, exception text, or result.
+    """
+
+    def __init__(
+        self, *, ledger_path: Path | str = LEDGER_PATH,
+        job_status_path: Path | str = JOB_STATUS_PATH, submitter=None,
+    ):
+        self.ledger_path = Path(ledger_path)
+        requested_status_path = Path(job_status_path)
+        self.job_status_path = (
+            self.ledger_path.with_name("cloudflare_form_job.json")
+            if requested_status_path == JOB_STATUS_PATH and self.ledger_path != LEDGER_PATH
+            else requested_status_path
+        )
+        recover_interrupted_dashboard_records(self.ledger_path)
+        self._submitter = submitter
+        self._lock = threading.RLock()
+        self._wake = threading.Event()
+        self._stop_requested = False
+        self._thread: threading.Thread | None = None
+        self._cookie_value = ""
+        self._records: list[dict] = []
+        self._cfg: dict = {}
+        self._delay = 0
+        self._status = "Sẵn sàng"
+        self._state = "IDLE"
+        self._current_id = ""
+        self._processed = 0
+        self._total = 0
+        self._job_id = ""
+        self._job_record_ids: list[str] = []
+        interrupted = load_job_status(self.job_status_path)
+        if interrupted.get("state") in {"RUNNING", "STOPPING"}:
+            interrupted.update({
+                "state": "INTERRUPTED",
+                "status": "Ứng dụng đã khởi động lại; các URL chưa gửi có thể chạy lại.",
+                "updated_at": datetime.now().astimezone().isoformat(),
+            })
+            _atomic_json(self.job_status_path, interrupted)
+
+    def _persist_status(self) -> None:
+        _atomic_json(self.job_status_path, {
+            "version": 1,
+            "day": current_day(),
+            "job_id": self._job_id,
+            "record_ids": list(self._job_record_ids),
+            "state": self._state,
+            "status": self._status,
+            "current_id": self._current_id,
+            "processed": self._processed,
+            "total": self._total,
+            "delay_seconds": self._delay,
+            "updated_at": datetime.now().astimezone().isoformat(),
+        })
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            live = {
+                "busy": bool(self._thread and self._thread.is_alive()),
+                "job_id": self._job_id,
+                "state": self._state,
+                "status": self._status,
+                "current_id": self._current_id,
+                "processed": self._processed,
+                "total": self._total,
+                "delay_seconds": self._delay,
+                "record_ids": list(self._job_record_ids),
+            }
+            if live["busy"] or self._job_id:
+                return live
+        saved = load_job_status(self.job_status_path)
+        if saved:
+            saved["busy"] = False
+            return saved
+        return live
+
+    def start(
+        self,
+        records: list[dict],
+        cfg: dict,
+        *,
+        cookie_value: str,
+        delay_seconds: int,
+        confirmed: bool,
+    ) -> dict:
+        cookie_value = str(cookie_value or "").strip()
+        if not confirmed:
+            return {"error": "Bạn phải xác nhận preview trước khi gửi."}
+        if not cookie_value:
+            return {"error": "Chưa nhập Cookie của phiên Cloudflare."}
+        try:
+            delay = int(delay_seconds)
+        except (TypeError, ValueError):
+            return {"error": "Giãn cách phải là số nguyên."}
+        if delay < 0 or delay > MAX_BATCH_DELAY_SECONDS:
+            return {"error": f"Giãn cách phải từ 0 đến {MAX_BATCH_DELAY_SECONDS} giây."}
+
+        latest = {item.get("id"): item for item in today_records(self.ledger_path)}
+        prepared = []
+        submitted_keys = {
+            item.get("idempotency_key") for item in load_ledger(self.ledger_path)["records"]
+            if item.get("state") == "SUBMITTED" and item.get("idempotency_key")
+        }
+        for source in records:
+            item = latest.get(source.get("id"), source)
+            if not item.get("id") or item.get("state") in {"SUBMITTED", "ALREADY_SUBMITTED", "UNKNOWN"}:
+                continue
+            if not str(item.get("draft") or "").strip():
+                update_record(item["id"], self.ledger_path, state="NEEDS_REVIEW",
+                              last_error="Thiếu nội dung report đã sinh.")
+                continue
+            if item.get("idempotency_key") in submitted_keys:
+                update_record(item["id"], self.ledger_path, state="SUBMITTED",
+                              result="already_submitted", channel="dashboard_session")
+                continue
+            prepared.append(dict(item))
+        if not prepared:
+            return {"error": "Không có report đủ điều kiện để gửi."}
+
+        with self._lock:
+            if self._thread and self._thread.is_alive():
+                return {"error": "Đang có một batch Cloudflare dùng phiên thủ công."}
+            self._records = prepared
+            self._cfg = {
+                key: cfg.get(key, "") for key in (
+                    "cloudflare_account_id", "cloudflare_reported_country",
+                    "contact_email", "contact_name", "brand_name",
+                )
+            }
+            self._delay = delay
+            self._cookie_value = cookie_value
+            self._stop_requested = False
+            self._processed = 0
+            self._total = len(prepared)
+            self._current_id = ""
+            self._job_id = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%z")
+            prepared_ids = [str(item.get("id") or "") for item in prepared]
+            previous_ids = [
+                str(value) for value in (load_job_status(self.job_status_path).get("record_ids") or [])
+                if value
+            ]
+            # A retry/resume remains the same visible job, like Domain Worker:
+            # successful rows stay in the progress table while failed/pending rows rerun.
+            if set(prepared_ids) & set(previous_ids):
+                self._job_record_ids = list(dict.fromkeys([*previous_ids, *prepared_ids]))
+            else:
+                self._job_record_ids = prepared_ids
+            self._state = "RUNNING"
+            self._status = f"Đã nhận {len(prepared)} report"
+            for item in prepared:
+                update_record(
+                    item["id"], self.ledger_path, state="QUEUED", last_error="",
+                    job_id=self._job_id,
+                )
+            self._persist_status()
+            self._wake.set()
+            self._thread = threading.Thread(
+                target=self._run, daemon=True, name="cloudflare-session-batch"
+            )
+            self._thread.start()
+        return {"status": "started", "count": len(prepared)}
+
+    def pause(self) -> dict:
+        with self._lock:
+            if not self._thread or not self._thread.is_alive():
+                return {"error": "Không có batch đang chạy."}
+            self._state = "PAUSED"
+            self._status = "Đã tạm dừng; không bắt đầu submit mới."
+            self._wake.clear()
+            self._persist_status()
+        return {"status": "paused"}
+
+    def resume(self, *, cookie_value: str = "") -> dict:
+        with self._lock:
+            if not self._thread or not self._thread.is_alive():
+                return {"error": "Không có batch để tiếp tục."}
+            if cookie_value:
+                self._cookie_value = str(cookie_value).strip()
+            if self._state == "WAITING_FOR_SESSION" and not self._cookie_value:
+                return {"error": "Hãy nhập Cookie Cloudflare mới trước khi tiếp tục."}
+            self._state = "RUNNING"
+            self._status = "Đang tiếp tục batch."
+            self._wake.set()
+            self._persist_status()
+        return {"status": "running"}
+
+    def stop(self) -> dict:
+        with self._lock:
+            if not self._thread or not self._thread.is_alive():
+                return {"error": "Không có batch đang chạy."}
+            self._stop_requested = True
+            self._state = "STOPPING"
+            self._status = "Đang dừng sau thao tác hiện tại."
+            self._wake.set()
+            self._persist_status()
+        return {"status": "stopping"}
+
+    def _wait_until_runnable(self) -> bool:
+        while True:
+            with self._lock:
+                if self._stop_requested:
+                    return False
+                runnable = self._state == "RUNNING"
+            if runnable:
+                return True
+            self._wake.wait(0.25)
+
+    def _interruptible_delay(self) -> bool:
+        deadline = time.monotonic() + self._delay
+        while time.monotonic() < deadline:
+            with self._lock:
+                if self._stop_requested:
+                    return False
+            if not self._wait_until_runnable():
+                return False
+            time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
+        return True
+
+    def _run(self) -> None:
+        from cloudflare_dashboard_session import (
+            CloudflareDashboardError,
+            CloudflareDashboardDuplicateError,
+            CloudflareDashboardRateLimitError,
+            CloudflareDashboardSessionError,
+            CloudflareDashboardUnknownError,
+            submit_dashboard_report,
+        )
+
+        submitter = self._submitter or submit_dashboard_report
+        try:
+            for index, source in enumerate(self._records):
+                if not self._wait_until_runnable():
+                    break
+                latest = next(
+                    (item for item in today_records(self.ledger_path)
+                     if item.get("id") == source.get("id")), source,
+                )
+                if latest.get("state") in {"SUBMITTED", "ALREADY_SUBMITTED", "UNKNOWN"}:
+                    with self._lock:
+                        self._processed += 1
+                    continue
+                item_id = str(latest.get("id") or "")
+                with self._lock:
+                    self._current_id = item_id
+                    self._status = f"Đang gửi {latest.get('target_url')}"
+                    cookie_value = self._cookie_value
+                    self._persist_status()
+                update_record(
+                    item_id, self.ledger_path, state="SUBMITTING",
+                    mode="dashboard_session", channel="dashboard_session",
+                    attempts=int(latest.get("attempts") or 0) + 1, last_error="",
+                )
+                should_count = True
+                try:
+                    sent = submitter(
+                        latest["target_url"], latest.get("draft") or "",
+                        self._cfg, cookie_value,
+                    )
+                    update_record(
+                        item_id, self.ledger_path, state="SUBMITTED",
+                        mode="dashboard_session", channel="dashboard_session",
+                        result=sent.get("result") or "success",
+                        report_id=sent.get("report_id") or "",
+                        http_status=sent.get("http_status") or 200,
+                        submitted_at=datetime.now().astimezone().isoformat(),
+                        last_error="",
+                    )
+                except CloudflareDashboardSessionError as exc:
+                    message = _clean_error(exc)
+                    if cookie_value:
+                        message = message.replace(cookie_value, "[REDACTED]")
+                    update_record(item_id, self.ledger_path, state="WAITING_FOR_SESSION",
+                                  last_error=message, result="")
+                    with self._lock:
+                        self._cookie_value = ""
+                        self._state = "WAITING_FOR_SESSION"
+                        self._status = message
+                        self._wake.clear()
+                        self._persist_status()
+                    should_count = False
+                    if not self._wait_until_runnable():
+                        break
+                    update_record(item_id, self.ledger_path, state="QUEUED", last_error="")
+                    source["state"] = "QUEUED"
+                    # Retry this same item only after the operator supplied a new session.
+                    self._records.insert(index + 1, source)
+                except CloudflareDashboardDuplicateError as exc:
+                    message = _clean_error(exc)
+                    update_record(
+                        item_id, self.ledger_path, state="ALREADY_SUBMITTED",
+                        result="dedupe", last_error=message, http_status=200,
+                    )
+                except CloudflareDashboardRateLimitError as exc:
+                    message = _clean_error(exc)
+                    update_record(item_id, self.ledger_path, state="PAUSED", last_error=message)
+                    with self._lock:
+                        self._state = "PAUSED"
+                        self._status = message
+                        self._wake.clear()
+                        self._persist_status()
+                    should_count = False
+                    if not self._wait_until_runnable():
+                        break
+                    update_record(item_id, self.ledger_path, state="QUEUED", last_error="")
+                    source["state"] = "QUEUED"
+                    self._records.insert(index + 1, source)
+                except CloudflareDashboardUnknownError as exc:
+                    message = _clean_error(exc)
+                    update_record(item_id, self.ledger_path, state="UNKNOWN", last_error=message)
+                    with self._lock:
+                        self._state = "PAUSED"
+                        self._status = message
+                        self._wake.clear()
+                        self._persist_status()
+                    if not self._wait_until_runnable():
+                        break
+                except CloudflareDashboardError as exc:
+                    message = _clean_error(exc)
+                    if cookie_value:
+                        message = message.replace(cookie_value, "[REDACTED]")
+                    update_record(item_id, self.ledger_path, state="FAILED",
+                                  last_error=message, result="")
+                except Exception as exc:
+                    message = _clean_error(exc)
+                    if cookie_value:
+                        message = message.replace(cookie_value, "[REDACTED]")
+                    update_record(item_id, self.ledger_path, state="UNKNOWN",
+                                  last_error=message or "Không xác định được kết quả gửi.")
+                    with self._lock:
+                        self._state = "PAUSED"
+                        self._status = "Không xác định được kết quả; cần đối chiếu trước khi tiếp tục."
+                        self._wake.clear()
+                        self._persist_status()
+                    if not self._wait_until_runnable():
+                        break
+                if should_count:
+                    with self._lock:
+                        self._processed += 1
+                        self._persist_status()
+                if index + 1 < len(self._records) and self._delay:
+                    with self._lock:
+                        self._status = f"Chờ {self._delay} giây trước report tiếp theo."
+                    if not self._interruptible_delay():
+                        break
+        finally:
+            with self._lock:
+                stopped = self._stop_requested
+                self._cookie_value = ""
+                self._cfg = {}
+                self._records = []
+                self._current_id = ""
+                self._state = "STOPPED" if stopped else "COMPLETED"
+                self._status = "Đã dừng batch." if stopped else "Batch đã kết thúc."
+                self._wake.set()
+                self._persist_status()
+
+
+_SESSION_BATCH_WORKER: CloudflareSessionBatchWorker | None = None
+_SESSION_BATCH_LOCK = threading.Lock()
+
+
+def session_batch_worker() -> CloudflareSessionBatchWorker:
+    global _SESSION_BATCH_WORKER
+    with _SESSION_BATCH_LOCK:
+        if _SESSION_BATCH_WORKER is None:
+            _SESSION_BATCH_WORKER = CloudflareSessionBatchWorker()
+        return _SESSION_BATCH_WORKER
 
 
 def open_quick_report_form(target_url: str, draft: str, cfg: dict) -> dict:

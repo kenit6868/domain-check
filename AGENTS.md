@@ -247,6 +247,50 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-25 — Cloudflare Form Worker phục hồi membership của job cũ sau
+  reload/chuyển trang: snapshot RAM hoặc status thiếu `record_ids` được recover
+  theo timestamp + tổng item và checkpoint `job_id` lên ledger. Mọi URL đã vào
+  job tiếp tục nằm trong **Tiến trình gửi**; **Bảng loại** chỉ chứa kết quả bị
+  loại sau precheck, mặc định ẩn sau toggle để ưu tiên theo dõi job. Có AppTest
+  cho worker singleton mới với job lưu trên đĩa và toggle bảng loại.
+  Precheck và tiến trình gửi dùng chung một dataframe **Kết quả URL**; không tách
+  thêm bảng “Danh sách thực hiện” khi job đã tồn tại.
+  Page mở dần theo trạng thái: trước precheck chỉ có input + nút kiểm tra; sau
+  precheck mới hiện cấu hình Cookie rồi bảng kết quả bên dưới. Job `COMPLETED`
+  hiển thị thông báo hoàn thành với tổng URL thành công/lỗi.
+  Page dùng native Streamlit `layout="wide"` giống Domain Worker để tận dụng
+  toàn bộ vùng nội dung desktop, không chèn CSS phụ thuộc DOM.
+  Atomic replace của ledger/job/input retry có giới hạn khi Windows trả
+  `PermissionError` tạm thời; lỗi ghi kéo dài hiển thị trong page thay vì làm
+  crash Streamlit. Có test mô phỏng hai sharing violation rồi thành công.
+  Bảng **Kết quả URL** cố định thứ tự theo input/precheck trong toàn bộ vòng đời
+  job; `current_id` chỉ cập nhật trạng thái/callout, không được dùng để reorder.
+
+- 2026-09-24 — Cloudflare Worker bổ sung batch theo Cookie phiên Dashboard
+  dựa trên đặc tả `cloudflare-abuse-batch-spec (1).md`: nhập nhiều URL, preview
+  report đã sinh, giãn cách 0–300 giây và các action gửi/tiếp tục/dừng/retry lỗi.
+  Sau phép thử thực tế, adapter chỉ yêu cầu `Cookie`, không yêu cầu `x-atok`, và
+  giữ Origin/Referer/x-cross-site-security. Adapter POST đúng host Dashboard và
+  nhận response thực tế `result=success` khi có `abuse_rand` không rỗng (vẫn
+  tương thích `success=true`); response dedupe hiển thị `msg`, đánh dấu đã gửi
+  gần đây và không retry; auth lỗi
+  chờ phiên mới, rate limit/challenge tạm dừng, mất response thành `UNKNOWN`
+  không tự retry. Page 14 được rút gọn còn Cookie Dashboard, bỏ fallback API và
+  extension khỏi UI; input/job status cache theo ngày, quay lại page vẫn theo dõi
+  thread đang chạy. UI tách **Danh sách thực hiện**, **Bảng loại** và **Tiến trình
+  gửi**; tiến trình chỉ dùng `record_ids` của active job, không suy từ ledger. Lỗi xác định của một
+  URL thành `FAILED` rồi tiếp tục; retry chỉ lấy URL lỗi. Nút xóa cache giữ nguyên
+  lịch sử `SUBMITTED`/`ALREADY_SUBMITTED`/`UNKNOWN`. Phiên chỉ ở RAM; ledger schema
+  v4 và job status sanitize không chứa Cookie. Các bảng chỉ hiển thị scope URL
+  trong input hiện tại. Bảng loại chốt sau precheck cho URL đã xử lý từ trước/không
+  Cloudflare; record đã vào job giữ nguyên trong tiến trình kể cả terminal và retry
+  merge `record_ids` cũ. URL đang gửi được sort lên đầu với icon `▶`. Record cũ ngoài scope không hiện nhưng vẫn chống gửi trùng. Extension
+  Quick Report vẫn độc lập.
+  Đã đạt 16/16 test tập trung gồm AppTest giữ terminal trong tiến trình và merge
+  job khi retry; compileall và diff check đạt. Full suite chạy 347 test, còn đúng baseline Windows đã biết: 1 failure + 6
+  error ở mock macOS `PosixPath` và stop process dùng `fcntl`/`SIGKILL`/`killpg`.
+  Test chỉ dùng mock, không mở form hay gửi report thật.
+
 - 2026-09-22 — Nâng nội dung webform Registrar/Registry để mô tả rõ suspected
   phishing/brand impersonation, luồng registration/sign-in có thể dẫn tới nội
   dung lừa đảo, nguy cơ cung cấp credential/thông tin cá nhân và hậu quả account

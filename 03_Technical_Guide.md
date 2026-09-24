@@ -32,13 +32,39 @@ profile sử dụng; chạy ứng dụng trên cùng máy với Chrome.
     origin hosting. Không gửi `abuse@cloudflare.com`; dùng form chính thức
     [Cloudflare Phishing Abuse](https://abuse.cloudflare.com/phishing) khi cần báo cáo lớp này.
     Với danh sách nhiều URL, dùng **Cloudflare Worker**: lọc Cloudflare bằng cùng
-    lõi với Quick Report, preview URL/payload rồi gửi tuần tự qua Abuse Reports
-    API sau xác nhận. API Token chỉ đọc từ `[cloudflare]` trong `config.ini`,
-    không ghi ledger/UI/log; mỗi kết quả checkpoint Report ID và chống gửi trùng
-    full URL trong ngày. Extension unpacked trong
-    `chrome_extension/cloudflare-profile-worker` là fallback khi API không dùng
-    được và vẫn nhận task một lần qua localhost.
-    API phishing phải POST tới `abuse-reports/abuse_phishing` với
+    lõi với Quick Report, cache danh sách theo ngày, nhập `Cookie` của phiên Dashboard
+    rồi gửi tuần tự sau xác nhận. Page tách danh sách thực hiện, bảng loại và bảng
+    tiến trình theo đúng `record_ids` của job; không trộn URL đã gửi/không Cloudflare
+    vào danh sách chờ. Bảng loại được chốt sau precheck; record đã vào job luôn
+    ở bảng tiến trình kể cả terminal, và retry giữ toàn bộ record ID cũ. Job cũ
+    thiếu `record_ids` được recover theo timestamp/tổng item rồi gắn `job_id` lên
+    ledger. Page tự phục hồi job khi chuyển trang, chỉ lấy URL thuộc ô
+    nhập hiện tại. Precheck và tiến trình gửi dùng chung một bảng kết quả, cập
+    nhật trạng thái tại chỗ. Bảng loại là thông tin phụ, mặc định ẩn sau toggle.
+    Trước precheck chỉ render input + nút kiểm tra; khi precheck đủ toàn bộ scope
+    mới mở cấu hình Cookie, rồi bảng kết quả. Job hoàn tất phải có thông báo tổng
+    số URL thành công và lỗi có thể retry.
+    Ledger/job/input JSON giữ temp-file + atomic replace; riêng sharing violation
+    tạm thời trên Windows được retry có giới hạn, không retry vô hạn hay bỏ qua
+    lỗi ghi thật.
+    Bảng kết quả giữ nguyên thứ tự URL từ input/precheck trong suốt job; URL hiện
+    hành được nhận biết bằng trạng thái và callout, không thay đổi vị trí dòng.
+    nhập hiện tại và đưa URL đang gửi lên đầu với icon `▶`. Phiên chỉ giữ
+    trong RAM, không ghi ledger/UI/log;
+    auth lỗi dừng chờ phiên mới, mất response thành `unknown` không tự retry,
+    rate limit/challenge tạm dừng. Lỗi xác định của một URL được ghi `FAILED` rồi
+    tiếp tục; sau batch chỉ retry các URL lỗi. Có thể resume/stop và đặt giãn cách
+    tối đa 300 giây giữa hai submit. Page không có fallback API/extension. Mỗi kết
+    quả checkpoint Report ID và fingerprint URL + report version; input/job status
+    sanitize được lưu riêng theo ngày và không chứa Cookie.
+    Adapter Dashboard phải POST đúng `dash.cloudflare.com/api/v4/accounts/{account_id}/abuse-reports/abuse_phishing`
+    với `Cookie`, `Origin`, `Referer` và `x-cross-site-security`; không yêu cầu
+    `x-atok` và không
+    sao chép `sec-ch-ua`, baggage, tracing hoặc telemetry trình duyệt. Xác nhận
+    response `result=success` phải có `abuse_rand` không rỗng.
+    Response `result=error` với `error_code=dedupe` hiển thị `msg`, đánh dấu URL
+    đã gửi gần đây và không tự gửi lại.
+    API chính thức phải POST tới `abuse-reports/abuse_phishing` với
     `act=abuse_phishing`. Mặc định dùng `send` cho cả host/owner notification
     vì workflow này chủ động công khai danh tính doanh nghiệp.
     CAPTCHA không được tự động vượt qua. Trạng thái checkpoint theo URL để

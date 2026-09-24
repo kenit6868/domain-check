@@ -78,14 +78,19 @@ trước khi content script publish trạng thái mới.
 Microsoft SmartScreen adapter v1.0.5 chỉ điền URL. Không tìm, mở hoặc thay đổi MWF
 language combo; trường này luôn giữ mặc định do Microsoft cung cấp.
 
-Cloudflare Worker ưu tiên `cloudflare_abuse_api.py`: verify token bằng endpoint
-user token, kiểm tra entitlement bằng GET Abuse Reports và chỉ POST
-`/accounts/{account_id}/abuse-reports/abuse_phishing` sau preview + xác nhận;
-payload cũng dùng `act=abuse_phishing` và notification `send` cho host/owner.
-Cấu hình
-`[cloudflare]` chỉ nạp vào bộ nhớ; ledger không được chứa token. Batch gửi tuần
-tự, checkpoint từng URL và khóa cục bộ để hai Streamlit session không gửi trùng.
-Extension/form là fallback, không phải pipeline API.
+Page Cloudflare Worker chỉ dùng
+`cloudflare_dashboard_session.py` với Cookie do operator nhập sau preview;
+endpoint là `dash.cloudflare.com/api/v4/accounts/{account_id}/abuse-reports/abuse_phishing`,
+không được đổi sang API host hoặc bổ sung browser telemetry. Request tối thiểu
+giữ `Origin`, `Referer` và `x-cross-site-security`. Phiên chỉ giữ trong
+RAM của worker, không nằm trong queue/ledger/snapshot/log và bị xóa khi batch kết
+thúc. Response được xác nhận bởi `success=true` hoặc `result=success` kèm
+`abuse_rand` không rỗng; auth chuyển `WAITING_FOR_SESSION`, mất
+response chuyển `UNKNOWN` không tự retry, còn rate limit/challenge chuyển
+`PAUSED`. Response `error_code`/`err_code=dedupe` chuyển terminal
+`ALREADY_SUBMITTED`, giữ `msg` đã sanitize để UI hiển thị và không retry. API
+chính thức và extension không còn là kênh dự phòng trên page 14; các adapter
+extension dùng bởi Quick Report vẫn độc lập và không bị xóa.
 
 Adapter `godaddy_phishing` chỉ có host permission cho
 `legalportal.godaddy.com`, dùng task `fill_only` từ Quick Report và điền bốn
@@ -550,8 +555,36 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
 - `cloudflare_form_worker.py` dùng lõi check/draft chung với Quick Report nhưng
   chỉ enqueue URL Cloudflare được chọn; không nhập vào Domain Worker email.
 - Ledger `data/cloudflare_form_worker.json` dedupe ngày địa phương + full URL,
-  checkpoint từng trạng thái và không ghi cookie, CAPTCHA, HTML/browser profile.
-- Page 14 preview rồi mở form bằng browser mặc định. Extension MV3 giới hạn ở
+  schema v4 giữ report-version/idempotency fingerprint, checkpoint từng trạng
+  thái và không ghi Cookie Dashboard, API token, CAPTCHA, HTML/browser profile.
+- Page 14 cache ô nhập theo ngày, tự phục hồi mọi record hôm nay và chỉ render một
+  ba bảng không trùng nguồn: thực hiện, loại và tiến trình submit. Tất cả scope
+  theo full URL trong input cache hiện tại. Tiến trình chỉ render khi worker còn
+  busy và dùng đúng `record_ids` lưu trong job status; current record được sort
+  lên đầu và gắn `▶`. Bảng loại chỉ nhận kết quả đã loại tại precheck; mọi record
+  đã vào job giữ nguyên trong bảng tiến trình sau khi hoàn tất. Retry phải merge
+  `record_ids` cũ để các dòng success không biến khỏi job. Job legacy thiếu
+  membership được phục hồi từ timestamp/tổng item và checkpoint `job_id` lên
+  ledger. `data/cloudflare_form_job.json` lưu tiến độ
+  UI dùng một dataframe `Kết quả URL` chung cho item sau precheck và item thuộc
+  job; progress/current URL nằm ngay phía trên bảng này. Excluded dataframe chỉ
+  render khi toggle `cfw_show_excluded` được bật, mặc định `False`.
+  Send config và results chỉ render khi mọi ID trong input hiện tại đã tồn tại
+  trong daily ledger; thứ tự là input/precheck → Cookie config → result table.
+  State `COMPLETED` phải có success/warning summary ngay trong result fragment.
+  Page 14 gọi `st.set_page_config(layout="wide")` trước mọi element để không rơi
+  về centered layout mặc định.
+  `visible_rows` luôn sort duy nhất theo `scope_order`; `current_id` chỉ dùng cho
+  callout/trạng thái, tuyệt đối không tham gia sort vì sẽ làm bảng nhảy mỗi item.
+  Atomic JSON replace retry tối đa 10 lần với backoff ngắn khi gặp
+  `PermissionError` trên Windows; các `OSError` khi start/retry được page bắt và
+  hiển thị, không để exception phá toàn bộ Streamlit run.
+  sanitize để quay lại page vẫn theo dõi được; Cookie không nằm trong file này.
+  Batch chỉ chạy tuần tự, chờ delay sau khi một submit kết thúc. Lỗi xác định của
+  từng URL thành `FAILED` rồi tiếp tục; retry chỉ nhận `FAILED`. Resume sau auth bắt
+  buộc phiên mới; `UNKNOWN` không được tự gửi lại. Không có request thử phiên vì
+  endpoint Dashboard không cung cấp phép xác minh chỉ-đọc đáng tin cậy.
+- Extension MV3 dùng bởi Quick Report giới hạn ở
   `abuse.cloudflare.com` nhận task one-time qua localhost và chạy trong đúng
   profile Chrome đã cài extension; không attach DevTools hoặc đọc cookie. Submit
   cần xác nhận; CAPTCHA/success không xác minh được thì chuyển manual.

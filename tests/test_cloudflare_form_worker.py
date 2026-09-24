@@ -1,5 +1,6 @@
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -8,6 +9,17 @@ import cloudflare_form_worker as cfw
 
 
 class CloudflareFormWorkerTests(unittest.TestCase):
+    def test_atomic_ledger_save_retries_transient_windows_permission_error(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(
+            cfw.os, "replace",
+            side_effect=[PermissionError(13, "busy"), PermissionError(13, "busy"), None],
+        ) as replace:
+            path = Path(folder) / "ledger.json"
+            with patch.object(cfw.time, "sleep") as sleep:
+                cfw.save_ledger({"records": []}, path)
+            self.assertEqual(replace.call_count, 3)
+            self.assertEqual(sleep.call_count, 2)
+
     def test_open_installed_chrome_macos_system_and_user_install(self):
         url = "https://www.microsoft.com/wdsi/support/report-unsafe-site-guest#task=test"
         paths = [Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
@@ -58,6 +70,8 @@ class CloudflareFormWorkerTests(unittest.TestCase):
             self.assertEqual(rows[1]["state"], "NOT_CLOUDFLARE")
             self.assertEqual(checker.call_count, 2)
             self.assertEqual(len(cfw.load_ledger(path)["records"]), 2)
+            self.assertTrue(rows[0]["report_version"])
+            self.assertTrue(rows[0]["idempotency_key"])
 
     def test_submitted_url_is_not_checked_again_on_same_day(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -69,6 +83,23 @@ class CloudflareFormWorkerTests(unittest.TestCase):
             again = cfw.prepare_urls(["example.com"], {"brand_name": "X"}, checker=checker, path=path)[0]
             self.assertEqual(again["state"], "SUBMITTED")
             checker.assert_not_called()
+
+    def test_daily_input_cache_and_safe_clear_preserve_terminal_records(self):
+        with tempfile.TemporaryDirectory() as folder:
+            ledger = Path(folder) / "ledger.json"
+            input_cache = Path(folder) / "input.json"
+            cfw.save_daily_input("example.com", input_cache)
+            self.assertEqual(cfw.load_daily_input(input_cache), "example.com")
+            rows = cfw.prepare_urls(
+                ["sent.example", "ready.example"], {"brand_name": "X"},
+                checker=lambda *_: {"cloudflare": True}, path=ledger,
+            )
+            cfw.update_record(rows[0]["id"], ledger, state="SUBMITTED")
+            removed = cfw.clear_daily_cache(ledger_path=ledger, input_path=input_cache)
+            self.assertEqual(removed, 1)
+            self.assertEqual(cfw.load_daily_input(input_cache), "")
+            saved = cfw.today_records(ledger)
+            self.assertEqual([item["state"] for item in saved], ["SUBMITTED"])
 
     def test_api_submit_checkpoints_report_id_and_prevents_same_day_resend(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -110,6 +141,169 @@ class CloudflareFormWorkerTests(unittest.TestCase):
             self.assertNotIn("secret", raw)
             self.assertNotIn("private", raw)
             self.assertNotIn("cookie", raw.lower())
+
+    def test_dashboard_batch_keeps_session_out_of_ledger_and_checkpoints_success(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "ledger.json"
+            row = cfw.prepare_urls(
+                ["https://example.com/login"],
+                {"brand_name": "X"}, checker=lambda *_: {"cloudflare": True}, path=path,
+            )[0]
+            submitter = Mock(return_value={
+                "ok": True, "result": "success", "report_id": "dashboard-1",
+                "http_status": 200,
+            })
+            worker = cfw.CloudflareSessionBatchWorker(ledger_path=path, submitter=submitter)
+            result = worker.start(
+                [row], {}, cookie_value="cookie-super-secret",
+                delay_seconds=0, confirmed=True,
+            )
+            self.assertEqual(result["status"], "started")
+            worker._thread.join(timeout=2)
+            self.assertFalse(worker._thread.is_alive())
+            saved = cfw.today_records(path)[0]
+            self.assertEqual(saved["state"], "SUBMITTED")
+            self.assertEqual(saved["channel"], "dashboard_session")
+            self.assertEqual(saved["report_id"], "dashboard-1")
+            self.assertNotIn("cookie-super-secret", path.read_text(encoding="utf-8"))
+            self.assertNotIn("cookie-super-secret", str(worker.snapshot()))
+
+    def test_dashboard_unknown_is_not_retried_automatically(self):
+        from cloudflare_dashboard_session import CloudflareDashboardUnknownError
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "ledger.json"
+            row = cfw.prepare_urls(
+                ["https://example.com/login"],
+                {"brand_name": "X"}, checker=lambda *_: {"cloudflare": True}, path=path,
+            )[0]
+            submitter = Mock(side_effect=CloudflareDashboardUnknownError("response lost"))
+            worker = cfw.CloudflareSessionBatchWorker(ledger_path=path, submitter=submitter)
+            worker.start(
+                [row], {}, cookie_value="cookie",
+                delay_seconds=0, confirmed=True,
+            )
+            deadline = time.time() + 2
+            while worker.snapshot()["state"] != "PAUSED" and time.time() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(cfw.today_records(path)[0]["state"], "UNKNOWN")
+            self.assertEqual(submitter.call_count, 1)
+            worker.resume()
+            worker._thread.join(timeout=2)
+            self.assertEqual(submitter.call_count, 1)
+
+    def test_dashboard_definite_item_error_continues_to_next_url(self):
+        from cloudflare_dashboard_session import CloudflareDashboardError
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "ledger.json"
+            rows = cfw.prepare_urls(
+                ["https://first.example/login", "https://second.example/login"],
+                {"brand_name": "X"}, checker=lambda *_: {"cloudflare": True}, path=path,
+            )
+            submitter = Mock(side_effect=[
+                CloudflareDashboardError("invalid report"),
+                {"ok": True, "result": "success", "report_id": "report-2", "http_status": 200},
+            ])
+            worker = cfw.CloudflareSessionBatchWorker(ledger_path=path, submitter=submitter)
+            worker.start(rows, {}, cookie_value="secret-cookie", delay_seconds=0, confirmed=True)
+            worker._thread.join(timeout=2)
+            saved = {item["target_url"]: item for item in cfw.today_records(path)}
+            self.assertEqual(saved["https://first.example/login"]["state"], "FAILED")
+            self.assertEqual(saved["https://second.example/login"]["state"], "SUBMITTED")
+            self.assertEqual(submitter.call_count, 2)
+            job_status = cfw.load_job_status(path.with_name("cloudflare_form_job.json"))
+            self.assertEqual(job_status["state"], "COMPLETED")
+            self.assertEqual(job_status["record_ids"], [item["id"] for item in rows])
+            self.assertNotIn("secret-cookie", json.dumps(job_status))
+            retry_submitter = Mock(return_value={
+                "ok": True, "result": "success", "report_id": "report-1-retry",
+                "http_status": 200,
+            })
+            worker._submitter = retry_submitter
+            worker.start(
+                [saved["https://first.example/login"]], {}, cookie_value="retry-cookie",
+                delay_seconds=0, confirmed=True,
+            )
+            worker._thread.join(timeout=2)
+            retried_status = cfw.load_job_status(path.with_name("cloudflare_form_job.json"))
+            self.assertEqual(retried_status["record_ids"], [item["id"] for item in rows])
+
+    def test_dashboard_dedupe_is_terminal_and_keeps_message(self):
+        from cloudflare_dashboard_session import CloudflareDashboardDuplicateError
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "ledger.json"
+            row = cfw.prepare_urls(
+                ["https://example.com/login"],
+                {"brand_name": "X"}, checker=lambda *_: {"cloudflare": True}, path=path,
+            )[0]
+            message = "You have already submitted this URL recently: https://example.com/login"
+            submitter = Mock(side_effect=CloudflareDashboardDuplicateError(message))
+            worker = cfw.CloudflareSessionBatchWorker(ledger_path=path, submitter=submitter)
+            worker.start(
+                [row], {}, cookie_value="cookie", delay_seconds=0, confirmed=True,
+            )
+            worker._thread.join(timeout=2)
+            saved = cfw.today_records(path)[0]
+            self.assertEqual(saved["state"], "ALREADY_SUBMITTED")
+            self.assertEqual(saved["result"], "dedupe")
+            self.assertEqual(saved["last_error"], message)
+            self.assertEqual(submitter.call_count, 1)
+            self.assertIn("error", worker.start(
+                [saved], {}, cookie_value="cookie", delay_seconds=0, confirmed=True,
+            ))
+            self.assertEqual(submitter.call_count, 1)
+
+    def test_dashboard_auth_failure_waits_for_new_session_and_retries_same_item(self):
+        from cloudflare_dashboard_session import CloudflareDashboardSessionError
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "ledger.json"
+            row = cfw.prepare_urls(
+                ["https://example.com/login"],
+                {"brand_name": "X"}, checker=lambda *_: {"cloudflare": True}, path=path,
+            )[0]
+            submitter = Mock(side_effect=[
+                CloudflareDashboardSessionError("expired"),
+                {"ok": True, "result": "success", "report_id": "report-new", "http_status": 200},
+            ])
+            worker = cfw.CloudflareSessionBatchWorker(ledger_path=path, submitter=submitter)
+            worker.start(
+                [row], {}, cookie_value="old-cookie",
+                delay_seconds=0, confirmed=True,
+            )
+            deadline = time.time() + 2
+            while worker.snapshot()["state"] != "WAITING_FOR_SESSION" and time.time() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(cfw.today_records(path)[0]["state"], "WAITING_FOR_SESSION")
+            self.assertIn("error", worker.resume())
+            self.assertEqual(worker.resume(
+                cookie_value="new-cookie"
+            )["status"], "running")
+            worker._thread.join(timeout=2)
+            self.assertFalse(worker._thread.is_alive())
+            self.assertEqual(cfw.today_records(path)[0]["state"], "SUBMITTED")
+            self.assertEqual(submitter.call_args_list[0].args[-1], "old-cookie")
+            self.assertEqual(submitter.call_args_list[1].args[-1], "new-cookie")
+            raw = path.read_text(encoding="utf-8")
+            self.assertNotIn("old-cookie", raw)
+            self.assertNotIn("new-cookie", raw)
+
+    def test_dashboard_restart_marks_inflight_request_unknown(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "ledger.json"
+            row = cfw.prepare_urls(
+                ["https://example.com/login"],
+                {"brand_name": "X"}, checker=lambda *_: {"cloudflare": True}, path=path,
+            )[0]
+            cfw.update_record(
+                row["id"], path, state="SUBMITTING", channel="dashboard_session"
+            )
+            cfw.CloudflareSessionBatchWorker(ledger_path=path, submitter=Mock())
+            saved = cfw.today_records(path)[0]
+            self.assertEqual(saved["state"], "UNKNOWN")
+            self.assertIn("đối chiếu", saved["last_error"])
 
     def test_submit_mode_requires_confirmation(self):
         worker = object.__new__(cfw.CloudflareBrowserWorker)
