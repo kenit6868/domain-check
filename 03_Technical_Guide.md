@@ -49,6 +49,13 @@ profile sử dụng; chạy ứng dụng trên cùng máy với Chrome.
     lỗi ghi thật.
     Bảng kết quả giữ nguyên thứ tự URL từ input/precheck trong suốt job; URL hiện
     hành được nhận biết bằng trạng thái và callout, không thay đổi vị trí dòng.
+    Khi polling nhận thấy worker đã hết `busy`, fragment rerun toàn page một lần
+    để mở khóa ô URL và action cho batch kế tiếp; không cần bấm Dừng.
+    Input có thể chứa `URL (nhãn)` hoặc `URL -> URL`; parser chỉ giữ từng URL
+    chuẩn hóa, loại nhãn/mũi tên rồi mới precheck và dedupe.
+    Page Cookie không cần API token. Account ID lấy từ config nếu có, nếu không
+    parse từ `curr-account` của chính Cookie; thiếu/không rõ nhiều account thì
+    fail closed trước khi tạo job.
     nhập hiện tại và đưa URL đang gửi lên đầu với icon `▶`. Phiên chỉ giữ
     trong RAM, không ghi ledger/UI/log;
     auth lỗi dừng chờ phiên mới, mất response thành `unknown` không tự retry,

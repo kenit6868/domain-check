@@ -55,6 +55,25 @@ class CloudflareFormWorkerTests(unittest.TestCase):
             "https://example.com/login?next=%2Faccount",
         )
 
+    def test_target_parser_extracts_urls_and_drops_annotations_and_arrows(self):
+        valid, invalid, duplicates = cfw.parse_target_input(
+            "https://creativeair.co/vi-vn/ (top2)\n"
+            "https://fifa55g.com/vi-vn/ -> https://98winii.com/\n"
+            "https://98winii.com/ → https://nime.co.in/98win/ (top2)"
+        )
+        self.assertEqual(valid, [
+            "https://creativeair.co/vi-vn/",
+            "https://fifa55g.com/vi-vn/",
+            "https://98winii.com/",
+            "https://nime.co.in/98win/",
+        ])
+        self.assertEqual(invalid, [])
+        self.assertEqual(duplicates, ["https://98winii.com/"])
+
+    def test_normalize_target_rejects_url_with_free_text(self):
+        with self.assertRaises(ValueError):
+            cfw.normalize_target("https://creativeair.co/vi-vn/ (top2)")
+
     def test_prepare_filters_non_cloudflare_and_deduplicates_today(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "ledger.json"

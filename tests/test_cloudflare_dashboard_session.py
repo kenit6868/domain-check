@@ -45,6 +45,22 @@ class CloudflareDashboardSessionTests(unittest.TestCase):
         self.assertEqual(payload["owner_notification"], "send-anon")
         self.assertEqual(payload["agree"], 0)
 
+    def test_account_id_can_be_derived_from_curr_account_cookie(self):
+        account_id = "abcdef0123456789abcdef0123456789"
+        cookie = (
+            "cf_clearance=value; "
+            "curr-account=%7B%22user%22%3A%22" + account_id + "%22%7D; session=value"
+        )
+        config = dashboard.CloudflareDashboardConfig.from_mapping({}, cookie)
+        self.assertEqual(config.account_id, account_id)
+
+    def test_configured_account_id_takes_priority_and_api_token_is_not_required(self):
+        config = dashboard.CloudflareDashboardConfig.from_mapping({
+            "cloudflare_account_id": self.cfg["cloudflare_account_id"],
+            "cloudflare_api_token": "",
+        }, "curr-account=invalid")
+        self.assertEqual(config.account_id, self.cfg["cloudflare_account_id"])
+
     def test_submit_uses_verified_dashboard_headers_and_response_shape(self):
         session = FakeSession(FakeResponse(data={
             "request": {"act": "abuse_phishing"},

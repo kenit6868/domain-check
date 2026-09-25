@@ -265,6 +265,14 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
   crash Streamlit. Có test mô phỏng hai sharing violation rồi thành công.
   Bảng **Kết quả URL** cố định thứ tự theo input/precheck trong toàn bộ vòng đời
   job; `current_id` chỉ cập nhật trạng thái/callout, không được dùng để reorder.
+  Dashboard batch không dùng `api_token`; `account_id` ưu tiên config và fallback
+  từ cookie `curr-account`, được xác thực trước khi tạo job và không persist Cookie.
+  Fragment tiến trình tự rerun toàn page khi batch kết thúc để input và action
+  được mở khóa ngay, không yêu cầu người vận hành bấm **Dừng**; AppTest page đạt 7/7.
+  Parser input nhận dòng có annotation/redirect chain, chỉ trích từng URL thật,
+  bỏ nhãn như `(top2)` và mũi tên trước precheck/dedupe; 11/11 test tập trung đạt.
+  Đã đạt compileall; full suite 356 test còn đúng baseline
+  Windows đã biết gồm 1 failure + 6 error đa nền tảng, không thuộc thay đổi này.
 
 - 2026-09-24 — Cloudflare Worker bổ sung batch theo Cookie phiên Dashboard
   dựa trên đặc tả `cloudflare-abuse-batch-spec (1).md`: nhập nhiều URL, preview

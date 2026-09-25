@@ -62,6 +62,12 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   retry `PermissionError` có giới hạn và vẫn surface lỗi kéo dài lên UI.
   Thứ tự bảng kết quả Cloudflare phải cố định theo input/precheck; không sort
   `current_id` lên đầu. Focus URL đang chạy bằng state/callout tại chỗ.
+  Khi batch chuyển từ busy sang terminal, polling fragment phải rerun toàn page
+  để mở khóa input/action ngoài fragment; không dùng nút Dừng như thao tác refresh.
+  Input Cloudflare có annotation/redirect chain phải tách thành từng URL thật ở
+  hàm lõi; không để khoảng trắng, mũi tên hoặc label trở thành một phần URL/path.
+  Cookie Dashboard flow không phụ thuộc `api_token`; `account_id` có thể fallback
+  từ đúng một value hex 32 ký tự trong cookie `curr-account`, không persist Cookie.
 - Web Form Assistant extension phải giữ coordinator không chứa selector provider;
   mỗi adapter riêng tuân theo contract `matches`, `waitUntilReady`, `fill`,
   `validate`, `captchaPending`, `submit`, `detectSuccess`. Thêm provider không

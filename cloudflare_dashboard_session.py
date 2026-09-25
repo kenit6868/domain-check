@@ -6,8 +6,11 @@ that request, and never returned or persisted.
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import unquote
 
 import requests
 
@@ -43,13 +46,38 @@ class CloudflareDashboardConfig:
     account_id: str
 
     @classmethod
-    def from_mapping(cls, cfg: dict) -> "CloudflareDashboardConfig":
+    def from_mapping(cls, cfg: dict, cookie_value: str = "") -> "CloudflareDashboardConfig":
         account_id = str(cfg.get("cloudflare_account_id") or "").strip()
         if not account_id:
-            raise CloudflareDashboardError("Thiếu cloudflare.account_id trong config.ini.")
+            account_id = _account_id_from_cookie(cookie_value)
+        if not account_id:
+            raise CloudflareDashboardError(
+                "Không tìm thấy Cloudflare Account ID trong Cookie curr-account."
+            )
         if len(account_id) > 32 or not all(ch in "0123456789abcdefABCDEF" for ch in account_id):
             raise CloudflareDashboardError("Cloudflare Account ID không hợp lệ.")
         return cls(account_id=account_id)
+
+
+def _account_id_from_cookie(cookie_value: str) -> str:
+    value = str(cookie_value or "").strip()
+    if value.lower().startswith("cookie:"):
+        value = value.split(":", 1)[1].strip()
+    match = re.search(r"(?:^|;\s*)curr-account=([^;]*)", value, flags=re.I)
+    if not match:
+        return ""
+    try:
+        current = json.loads(unquote(match.group(1)))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ""
+    if not isinstance(current, dict):
+        return ""
+    candidates = {
+        str(candidate).strip()
+        for candidate in current.values()
+        if re.fullmatch(r"[0-9a-fA-F]{32}", str(candidate).strip())
+    }
+    return next(iter(candidates)) if len(candidates) == 1 else ""
 
 
 def _headers(cookie_value: str) -> dict[str, str]:
@@ -117,7 +145,7 @@ def submit_dashboard_report(
     A transport exception is deliberately classified as unknown because the
     server may have accepted the request before the response was lost.
     """
-    config = CloudflareDashboardConfig.from_mapping(cfg)
+    config = CloudflareDashboardConfig.from_mapping(cfg, cookie_value)
     headers = _headers(cookie_value)
     payload = build_dashboard_payload(target_url, draft, cfg)
     try:

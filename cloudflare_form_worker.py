@@ -102,6 +102,8 @@ def open_in_installed_chrome(url: str) -> bool:
 
 def normalize_target(value: str) -> str:
     value = str(value or "").strip()
+    if re.search(r"\s", value):
+        raise ValueError("URL/domain không được chứa khoảng trắng hoặc ghi chú")
     if "://" not in value:
         value = f"https://{value}"
     parsed = urlparse(value)
@@ -115,6 +117,46 @@ def normalize_target(value: str) -> str:
     path = parsed.path or "/"
     query = f"?{parsed.query}" if parsed.query else ""
     return f"{scheme}://{host}{port}{path}{query}"
+
+
+_HTTP_TARGET_RE = re.compile(r"https?://[^\s<>\[\]{}(),;]+", re.I)
+_BARE_TARGET_RE = re.compile(
+    r"(?<![@\w])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+    r"[a-z]{2,63}(?::\d{1,5})?(?:/[^\s<>\[\]{}(),;]*)?",
+    re.I,
+)
+
+
+def parse_target_input(raw: str) -> tuple[list[str], list[str], list[str]]:
+    """Extract normalized URL/domain tokens while ignoring labels and arrows."""
+    valid: list[str] = []
+    invalid: list[str] = []
+    duplicates: list[str] = []
+    seen: set[str] = set()
+    for source_line in str(raw or "").splitlines():
+        line = source_line.strip()
+        if not line:
+            continue
+        # Arrows describe observed navigation and are separators, never URL text.
+        searchable = re.sub(r"\s*(?:->|→)\s*", " ", line)
+        candidates = _HTTP_TARGET_RE.findall(searchable)
+        if not candidates:
+            candidates = _BARE_TARGET_RE.findall(searchable)
+        if not candidates:
+            invalid.append(line)
+            continue
+        for candidate in candidates:
+            try:
+                normalized = normalize_target(candidate.rstrip(".!?'\""))
+            except (TypeError, ValueError):
+                invalid.append(candidate)
+                continue
+            if normalized in seen:
+                duplicates.append(normalized)
+                continue
+            seen.add(normalized)
+            valid.append(normalized)
+    return valid, invalid, duplicates
 
 
 def record_id(target_url: str, day: str | None = None) -> str:
@@ -556,6 +598,16 @@ class CloudflareSessionBatchWorker:
         if delay < 0 or delay > MAX_BATCH_DELAY_SECONDS:
             return {"error": f"Giãn cách phải từ 0 đến {MAX_BATCH_DELAY_SECONDS} giây."}
 
+        dashboard_account_id = str(cfg.get("cloudflare_account_id") or "").strip()
+        if self._submitter is None:
+            from cloudflare_dashboard_session import CloudflareDashboardConfig, CloudflareDashboardError
+            try:
+                dashboard_account_id = CloudflareDashboardConfig.from_mapping(
+                    cfg, cookie_value
+                ).account_id
+            except CloudflareDashboardError as exc:
+                return {"error": str(exc)}
+
         latest = {item.get("id"): item for item in today_records(self.ledger_path)}
         prepared = []
         submitted_keys = {
@@ -588,6 +640,7 @@ class CloudflareSessionBatchWorker:
                     "contact_email", "contact_name", "brand_name",
                 )
             }
+            self._cfg["cloudflare_account_id"] = dashboard_account_id
             self._delay = delay
             self._cookie_value = cookie_value
             self._stop_requested = False

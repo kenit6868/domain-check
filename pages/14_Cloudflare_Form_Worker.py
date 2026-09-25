@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,22 +27,7 @@ st.caption(
 
 
 def _parse(raw: str) -> tuple[list[str], list[str], list[str]]:
-    valid, invalid, duplicates, seen = [], [], [], set()
-    for value in re.split(r"[\n,;]+", raw):
-        value = value.strip()
-        if not value:
-            continue
-        try:
-            normalized = cfw.normalize_target(value)
-        except (ValueError, TypeError):
-            invalid.append(value)
-            continue
-        if normalized in seen:
-            duplicates.append(value)
-            continue
-        seen.add(normalized)
-        valid.append(normalized)
-    return valid, invalid, duplicates
+    return cfw.parse_target_input(raw)
 
 
 def _state_label(value: str) -> str:
@@ -72,7 +56,6 @@ if st.session_state.pop("cfw_clear_cookie_on_rerun", False):
     st.session_state["cfw_cookie_value"] = ""
 
 cfg = pt.load_config()
-account_configured = bool(cfg.get("cloudflare_account_id"))
 
 with st.container(border=True):
     st.subheader("Kiểm tra URL")
@@ -138,6 +121,11 @@ def _result_row(item: dict) -> dict:
 @st.fragment(run_every=2 if initial_status.get("busy") else None)
 def _render_tables() -> None:
     snapshot = cfw.session_batch_worker().snapshot()
+    if initial_status.get("busy") and not snapshot.get("busy"):
+        # The polling fragment can observe completion without rerunning the
+        # surrounding page. Refresh the full app once so input/actions stop
+        # using the stale busy=True value from the job's previous render.
+        st.rerun(scope="app")
     scoped = _scoped_records()
     if not snapshot.get("record_ids"):
         persisted = cfw.load_job_status()
@@ -236,11 +224,9 @@ status = worker.snapshot()
 if precheck_complete:
     with st.container(border=True):
         st.subheader("Cấu hình gửi")
-        if not account_configured:
-            st.error("Thiếu `[cloudflare] account_id` trong config.ini; chưa thể gửi batch.")
         st.caption(
             f"Sẵn sàng gửi mới: **{len(ready_records)}** · Có thể thử lại: **{len(failed_records)}**. "
-            "Cookie chỉ giữ trong RAM và bị xóa sau khi worker nhận."
+            "Account ID lấy từ config hoặc Cookie curr-account; Cookie chỉ giữ trong RAM."
         )
         st.toggle("Hiện Cookie", key="cfw_cookie_visible")
         st.text_input(
@@ -263,7 +249,7 @@ if precheck_complete:
             if st.button(
                 "Bắt đầu gửi", type="primary", icon=":material/send:",
                 disabled=not (
-                    ready_records and account_configured and confirmed
+                    ready_records and confirmed
                     and st.session_state.get("cfw_cookie_value") and not status.get("busy")
                 ), key="cfw_start_dashboard_batch",
             ):
@@ -283,7 +269,7 @@ if precheck_complete:
             if st.button(
                 "Thử lại URL lỗi", icon=":material/replay:",
                 disabled=not (
-                    failed_records and account_configured and confirmed
+                    failed_records and confirmed
                     and st.session_state.get("cfw_cookie_value") and not status.get("busy")
                 ), key="cfw_retry_failed_batch",
             ):

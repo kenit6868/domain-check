@@ -70,17 +70,22 @@ vào trang quản lý extension của Chrome và bấm **Reload** để nhận i
 
 ### Cloudflare Worker theo phiên Dashboard
 
-Thêm cấu hình bí mật vào file `config.ini` cục bộ:
+`api_token` không được Page **Cloudflare Worker** sử dụng. `account_id` là tùy
+chọn: nếu để trống, worker lấy Account ID từ trường `curr-account` trong Cookie
+Dashboard đã nhập; nếu cấu hình thì giá trị cấu hình được ưu tiên.
 
 ```ini
 [cloudflare]
 account_id = YOUR_CLOUDFLARE_ACCOUNT_ID
 ```
 
-`account_id` cũng được dùng cho luồng phiên Dashboard. Trên menu **Cloudflare
+Trên menu **Cloudflare
 Worker**, người vận hành dán danh sách URL, kiểm tra Cloudflare rồi nhập header
 `Cookie` lấy từ phiên Dashboard để bấm **Bắt đầu gửi**. Ô nhập và ledger được
 lưu theo ngày; page tự phục hồi danh sách/job khi quay lại. **Danh sách thực hiện**
+được tự mở khóa ngay khi job hoàn tất, không cần bấm **Dừng** để nhập URL mới.
+Ô nhập cũng nhận dòng có ghi chú hoặc chuỗi chuyển hướng như
+`URL (top2)` / `URL -> URL`: worker chỉ tách các URL thật, bỏ nhãn và mũi tên.
 chỉ chứa URL Cloudflare chưa gửi/cần retry; **Bảng loại** chứa URL đã gửi, bị
 Cloudflare dedupe, không dùng Cloudflare hoặc chưa rõ kết quả. **Tiến trình gửi**
 chỉ xuất hiện khi job submit đang chạy và lấy đúng `record_ids` của job, không

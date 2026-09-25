@@ -13,6 +13,59 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class CloudflareFormWorkerUiTests(unittest.TestCase):
+    def test_input_parser_uses_only_real_urls_from_annotated_redirect_lines(self):
+        page_source = (ROOT / "pages" / "14_Cloudflare_Form_Worker.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("return cfw.parse_target_input(raw)", page_source)
+
+    def test_finished_job_refreshes_page_and_unlocks_new_input(self):
+        url = "https://sent.example.test/login"
+        row = {
+            "id": cfw.record_id(url), "day": cfw.current_day(), "target_url": url,
+            "domain": "sent.example.test", "cloudflare": True,
+            "draft": "Detailed evidence text", "report_version": "version-1",
+            "state": "SUBMITTED", "attempts": 1, "last_error": "",
+            "result": "success", "updated_at": "2026-09-25T10:00:00+07:00",
+        }
+        running = {
+            "busy": True, "state": "RUNNING", "status": "Đang gửi",
+            "current_id": row["id"], "processed": 0, "total": 1,
+            "delay_seconds": 0, "record_ids": [row["id"]],
+        }
+        completed = {
+            **running, "busy": False, "state": "COMPLETED",
+            "status": "Batch đã kết thúc.", "current_id": "", "processed": 1,
+        }
+        session_worker = Mock()
+        calls = {"count": 0}
+
+        def snapshot():
+            calls["count"] += 1
+            return running if calls["count"] == 1 else completed
+
+        session_worker.snapshot.side_effect = snapshot
+        with patch.object(cfw, "today_records", return_value=[row]), patch.object(
+            cfw, "session_batch_worker", return_value=session_worker
+        ), patch.object(cfw, "load_daily_input", return_value=url), patch.object(
+            pt, "load_config", return_value={
+                "brand_name": "Example", "contact_name": "Reporter",
+                "contact_email": "reporter@example.test",
+            },
+        ):
+            app = AppTest.from_file(
+                str(ROOT / "pages" / "14_Cloudflare_Form_Worker.py"), default_timeout=10
+            ).run()
+
+        self.assertFalse(app.exception)
+        self.assertGreaterEqual(calls["count"], 3)
+        self.assertFalse(app.text_area[0].disabled)
+        prepare = next(item for item in app.button if item.label == "Kiểm tra Cloudflare")
+        stop = next(item for item in app.button if item.label == "Dừng")
+        self.assertFalse(prepare.disabled)
+        self.assertTrue(stop.disabled)
+        self.assertTrue(any("Job đã hoàn thành" in item.value for item in app.success))
+
     def test_empty_page_renders_without_external_access(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(
             cfw, "LEDGER_PATH", Path(folder) / "ledger.json"
@@ -38,7 +91,6 @@ class CloudflareFormWorkerUiTests(unittest.TestCase):
             pt, "load_config", return_value={
                 "brand_name": "Example", "contact_name": "Reporter",
                 "contact_email": "reporter@example.test",
-                "cloudflare_account_id": "0123456789abcdef0123456789abcdef",
             },
         ):
             app = AppTest.from_file(

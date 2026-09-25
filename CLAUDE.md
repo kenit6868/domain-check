@@ -576,6 +576,13 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
   về centered layout mặc định.
   `visible_rows` luôn sort duy nhất theo `scope_order`; `current_id` chỉ dùng cho
   callout/trạng thái, tuyệt đối không tham gia sort vì sẽ làm bảng nhảy mỗi item.
+  Fragment theo dõi batch phải rerun toàn app đúng một lần khi `busy` chuyển từ
+  true sang false để input/nút ngoài fragment không giữ trạng thái khóa cũ.
+  Input Cloudflare phải dùng `parse_target_input()` ở lõi: tách từng URL HTTP(S)
+  trong dòng redirect, bỏ annotation/mũi tên và không đưa free text vào path.
+  Dashboard Cookie flow không đọc `cloudflare_api_token`. Account ID ưu tiên
+  `cloudflare_account_id`, fallback parse đúng một value hex 32 ký tự từ JSON
+  URL-encoded trong cookie `curr-account`; dữ liệu này chỉ giữ RAM.
   Atomic JSON replace retry tối đa 10 lần với backoff ngắn khi gặp
   `PermissionError` trên Windows; các `OSError` khi start/retry được page bắt và
   hiển thị, không để exception phá toàn bộ Streamlit run.
