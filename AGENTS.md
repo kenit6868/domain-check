@@ -247,6 +247,22 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-27 — Provider Replies đồng bộ thêm folder `3 - Cần bằng chứng`
+  bên cạnh Inbox, Junk/Spam và `6 - Tự động/Cloudflare`; folder này có thể
+  override bằng `imap_evidence_mailbox`, được hiển thị riêng và không gộp vào
+  Inbox/Cloudflare.
+
+- 2026-09-27 — Sửa lỗi IMAP `ascii codec can't encode` khi SELECT folder lồng
+  `6 - Tự động/Cloudflare`: tên mailbox Unicode được mã hóa Modified UTF-7 ở
+  ranh giới lệnh IMAP, còn tên hiển thị/cache vẫn giữ nguyên. Inbox/Junk và
+  folder Cloudflare tiếp tục được cô lập lỗi riêng.
+
+- 2026-09-27 — Provider Replies mặc định đọc phản hồi Cloudflare từ folder IMAP
+  lồng `6 - Tự động/Cloudflare` theo cấu trúc mailbox thực tế; vẫn hỗ trợ
+  override bằng `imap_cloudflare_mailbox` cho từng account. Inbox và Junk/Spam
+  tiếp tục được quét độc lập, lỗi folder Cloudflare không làm mất dữ liệu các
+  folder còn lại. Đã cập nhật test và tài liệu; không kết nối IMAP thật.
+
 - 2026-09-25 — Cloudflare Form Worker phục hồi membership của job cũ sau
   reload/chuyển trang: snapshot RAM hoặc status thiếu `record_ids` được recover
   theo timestamp + tổng item và checkpoint `job_id` lên ledger. Mọi URL đã vào

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import email
+import base64
 import imaplib
 import json
 import mimetypes
@@ -18,9 +19,43 @@ from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr, parsedate_to_datetime
 from html import unescape
 
-MODULE_VERSION = 7
+MODULE_VERSION = 12
 
-CLOUDFLARE_MAILBOX = "2-Cloudflare"
+# Camellrp/Roundcube stores provider replies under the nested automation folder.
+# Keep this configurable per account because IMAP folder names are server-specific.
+CLOUDFLARE_MAILBOX = "6 - Tự động.Cloudflare"
+EVIDENCE_MAILBOX = "3 - Cần bằng chứng"
+
+
+def _imap_mailbox_name(mailbox):
+    """Encode a human-readable mailbox name using IMAP modified UTF-7."""
+    value = str(mailbox or "")
+    if value.isascii():
+        encoded = value
+        return '"' + encoded.replace('\\', '\\\\').replace('"', '\\"') + '"' if encoded not in ("INBOX", "Junk", "Sent", "Trash", "Drafts") else encoded
+    chunks = []
+    plain = []
+    def flush_plain():
+        if plain:
+            chunks.append("".join(plain))
+            plain.clear()
+    for char in value:
+        if ord(char) < 0x20 or ord(char) > 0x7e:
+            flush_plain()
+            chunks.append(char)
+        else:
+            plain.append(char)
+    flush_plain()
+    encoded = []
+    for chunk in chunks:
+        if chunk and all(0x20 <= ord(char) <= 0x7e for char in chunk):
+            encoded.append(chunk)
+            continue
+        raw = chunk.encode("utf-16-be")
+        token = base64.b64encode(raw).decode("ascii").rstrip("=").replace("/", ",")
+        encoded.append("&" + token + "-")
+    encoded_name = "".join(encoded)
+    return '"' + encoded_name.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 # Proxy support — tái dùng từ phishing_toolkit để tránh duplicate code
 try:
@@ -371,8 +406,9 @@ def fetch_provider_mail(account, limit=None, unread_only=False, date_from=None, 
     if not host or not account.get("username") or not account.get("password"): raise ValueError("Tài khoản thiếu cấu hình IMAP")
     conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)), timeout=timeout)
     try:
-        conn.login(account["username"], account["password"]); status, _ = conn.select(account.get("imap_mailbox", "INBOX"), readonly=True)
-        if status != "OK": raise RuntimeError("Không mở được INBOX")
+        conn.login(account["username"], account["password"]); status, _ = conn.select(_imap_mailbox_name(account.get("imap_mailbox", "INBOX")), readonly=True)
+        if status != "OK":
+            raise RuntimeError(f"Không mở được mailbox {account.get('imap_mailbox', 'INBOX')}: {status}")
         criteria = []
         if unread_only: criteria.append("UNSEEN")
         # IMAP searches by the server's internal calendar date. Query one extra
@@ -448,17 +484,48 @@ def discover_junk_mailbox(account, timeout: int = 60):
         except Exception: pass
 
 
+def discover_cloudflare_mailbox(account, timeout: int = 60):
+    """Resolve the configured Cloudflare folder against the server's real names."""
+    configured = str(account.get("imap_cloudflare_mailbox") or CLOUDFLARE_MAILBOX).strip()
+    host = account.get("imap_host") or account.get("host")
+    if not host or not account.get("username") or not account.get("password"):
+        return configured
+    conn = imaplib.IMAP4_SSL(host, int(account.get("imap_port", 993)), timeout=timeout)
+    try:
+        conn.login(account["username"], account["password"])
+        status, lines = conn.list()
+        if status != "OK":
+            return configured
+        parsed = [_parse_imap_list_line(line) for line in (lines or [])]
+        names = [mailbox for _, _, mailbox in parsed if mailbox]
+        by_lower = {name.lower(): name for name in names}
+        if configured.lower() in by_lower:
+            return by_lower[configured.lower()]
+        # Some servers expose nested names with a different display prefix or
+        # separator; prefer the unique folder whose final component is Cloudflare.
+        matches = [name for name in names if re.split(r"[/.]", name)[-1].strip().lower() == "cloudflare"]
+        return matches[0] if len(matches) == 1 else configured
+    except Exception:
+        return configured
+    finally:
+        try: conn.logout()
+        except Exception: pass
+
+
 def fetch_provider_mail_all_folders(account, limit=None, unread_only=False, date_from=None, date_to=None, progress_callback=None, timeout: int = 60):
-    """Fetch provider mail from Inbox, Junk and the dedicated Cloudflare folder."""
+    """Fetch provider mail from Inbox, Junk, evidence and Cloudflare folders."""
     inbox = account.get("imap_mailbox", "INBOX")
     junk = discover_junk_mailbox(account, timeout=timeout)
     folders = [("Inbox", inbox)]
     if junk and junk.lower() != inbox.lower():
         folders.append(("Thư rác", junk))
-    cloudflare_mailbox = str(account.get("imap_cloudflare_mailbox") or CLOUDFLARE_MAILBOX).strip()
+    cloudflare_mailbox = discover_cloudflare_mailbox(account, timeout=timeout)
     known_mailboxes = {mailbox.lower() for _, mailbox in folders}
-    if cloudflare_mailbox and cloudflare_mailbox.lower() not in known_mailboxes:
-        folders.append(("Cloudflare", cloudflare_mailbox))
+    evidence_mailbox = str(account.get("imap_evidence_mailbox") or EVIDENCE_MAILBOX).strip()
+    for label, mailbox in (("Cần bằng chứng", evidence_mailbox), ("Cloudflare", cloudflare_mailbox)):
+        if mailbox and mailbox.lower() not in known_mailboxes:
+            folders.append((label, mailbox))
+            known_mailboxes.add(mailbox.lower())
     mails, statistics = [], []
     for label, mailbox in folders:
         folder_account = dict(account, imap_mailbox=mailbox)
@@ -634,7 +701,7 @@ def sync_sent_reply_status(account, mails, date_from=None, date_to=None):
             known = ("Sent", "Sent Items", "Sent Messages", "INBOX.Sent")
             parsed_names = [_parse_imap_list_line(line)[2] for line in (folders or [])]
             sent_folder = next((actual for actual in parsed_names for name in known if actual.lower() == name.lower()), "Sent")
-        status, _ = conn.select(sent_folder, readonly=True)
+        status, _ = conn.select(_imap_mailbox_name(sent_folder), readonly=True)
         if status != "OK":
             return {"success": False, "matched": 0, "error": f"Không mở được thư mục {sent_folder}"}
         criteria = []
@@ -704,7 +771,7 @@ def mark_mails_seen(account, mails_or_uids):
     try:
         conn.login(account["username"], account["password"])
         for mailbox, clean_uids in grouped.items():
-            status, _ = conn.select(mailbox, readonly=False)
+            status, _ = conn.select(_imap_mailbox_name(mailbox), readonly=False)
             if status != "OK":
                 return {"success": False, "marked": marked, "skipped": skipped,
                         "error": f"Không mở được {mailbox} để cập nhật"}

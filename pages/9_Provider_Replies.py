@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 import phishing_toolkit as pt
 import provider_replies
-if getattr(provider_replies, "MODULE_VERSION", 0) < 7:
+if getattr(provider_replies, "MODULE_VERSION", 0) < 12:
     provider_replies = importlib.reload(provider_replies)
 from provider_replies import (
     ACTION_REQUIRED_TYPES, CLOUDFLARE_MAILBOX, browser_evidence_attachment_paths, build_reply, build_reply_vi, capture_dom_link_evidence, clear_mail_cache,
@@ -20,6 +20,8 @@ from provider_replies import (
     reply_log_key, save_mail_cache, save_uploaded_evidence, sync_sent_reply_status,
     send_threaded_reply,
 )
+
+EVIDENCE_MAILBOX = "3 - Cần bằng chứng"
 
 st.set_page_config(page_title="Phản hồi NCC", page_icon="📨", layout="wide")
 st.title("📨 Phản hồi NCC")
@@ -98,7 +100,7 @@ with cache_col:
     st.caption(f"Cache hiện có: {cached_count} email. Cache được giữ khi F5 và không chứa mật khẩu.")
 
 with sync_col:
-    sync_clicked = st.button("Đồng bộ Inbox + Thư rác + Cloudflare", type="primary", disabled=date_from > date_to or bool(limit_error))
+    sync_clicked = st.button("Đồng bộ Inbox + Thư rác + Cần bằng chứng + Cloudflare", type="primary", disabled=date_from > date_to or bool(limit_error))
 if sync_clicked:
     try:
         progress_bar = st.progress(0, text="Đang chuẩn bị đọc inbox...")
@@ -137,11 +139,9 @@ if sync_clicked:
         st.success(f"Đã đồng bộ {len(synced_for_day)} email đúng ngày đã chọn{sent_note}.")
         if not sent_sync.get("success"):
             st.warning(f"Không đối soát được thư mục Đã gửi: {sent_sync.get('error')}")
-    except Exception as exc: st.error(f"Không đọc được Inbox/Thư rác/Cloudflare: {exc}")
+    except Exception as exc: st.error(f"Không đọc được các folder Inbox/Thư rác/Cần bằng chứng/Cloudflare: {exc}")
 
 all_mails = st.session_state.get("provider_mails", [])
-if not all_mails:
-    st.info("Chưa có email trong khoảng ngày đã chọn. Hãy đổi ngày hoặc bấm đồng bộ lại."); st.stop()
 
 all_day_mails = []
 for item in all_mails:
@@ -151,9 +151,6 @@ all_filtered = [
     item for item in all_day_mails
     if item.provider != "unknown" or item.request_type != "manual_review"
 ]
-if not all_filtered:
-    st.warning("Không có email trong khoảng ngày đã chọn."); st.stop()
-
 folder_statistics = st.session_state.get("provider_folder_statistics", [])
 if folder_statistics:
     st.subheader("Thống kê đồng bộ theo thư mục")
@@ -175,12 +172,17 @@ if folder_statistics:
         f"loại {excluded_mail} email không nhận diện là NCC hoặc không có yêu cầu liên quan."
     )
 
+if not all_filtered:
+    st.warning("Không có email trong khoảng ngày đã chọn."); st.stop()
+
 st.subheader("1. Tất cả email NCC theo ngày")
 def mailbox_label(mailbox):
     if mailbox.lower() == str(account.get("imap_mailbox", "INBOX")).lower():
         return "Inbox"
     if mailbox.lower() == str(account.get("imap_cloudflare_mailbox") or CLOUDFLARE_MAILBOX).lower():
         return "Cloudflare"
+    if mailbox.lower() == str(account.get("imap_evidence_mailbox") or EVIDENCE_MAILBOX).lower():
+        return "Cần bằng chứng"
     return "Thư rác"
 
 all_table = pd.DataFrame([{"Thư mục": mailbox_label(m.source_mailbox), "NCC": m.provider_label, "Domain": m.domain or "—", "Phân loại": m.request_label,

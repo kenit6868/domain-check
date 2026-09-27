@@ -222,11 +222,12 @@ Cloudflare Trust & Safety"""
         account = {"username": "reporter@example.com", "imap_mailbox": "INBOX"}
         with (
             patch.object(pr, "discover_junk_mailbox", return_value="Junk Email"),
-            patch.object(pr, "fetch_provider_mail", side_effect=[[inbox_mail], [junk_mail], [cloudflare_mail]]) as fetch,
+            patch.object(pr, "discover_cloudflare_mailbox", return_value="6 - Tự động/Cloudflare"),
+            patch.object(pr, "fetch_provider_mail", side_effect=[[inbox_mail], [junk_mail], [], [cloudflare_mail]]) as fetch,
         ):
             mails, statistics = pr.fetch_provider_mail_all_folders(account)
-        self.assertEqual(fetch.call_count, 3)
-        self.assertEqual([mail.source_mailbox for mail in mails], ["INBOX", "Junk Email", "2-Cloudflare"])
+        self.assertEqual(fetch.call_count, 4)
+        self.assertEqual([mail.source_mailbox for mail in mails], ["INBOX", "Junk Email", "6 - Tự động/Cloudflare"])
         self.assertEqual(
             [(row["folder"], row["mailbox"], row["matched"]) for row in statistics],
             [("Inbox", "INBOX", 1), ("Thư rác", "Junk Email", 1), ("Cloudflare", "2-Cloudflare", 1)],
@@ -238,7 +239,8 @@ Cloudflare Trust & Safety"""
         account = {"username": "reporter@example.com", "imap_mailbox": "INBOX"}
         with (
             patch.object(pr, "discover_junk_mailbox", return_value="Spam"),
-            patch.object(pr, "fetch_provider_mail", side_effect=[[inbox_mail], RuntimeError("denied"), []]),
+            patch.object(pr, "discover_cloudflare_mailbox", return_value="6 - Tự động/Cloudflare"),
+            patch.object(pr, "fetch_provider_mail", side_effect=[[inbox_mail], RuntimeError("denied"), [], []]),
         ):
             mails, statistics = pr.fetch_provider_mail_all_folders(account)
         self.assertEqual(mails, [inbox_mail])
@@ -250,11 +252,12 @@ Cloudflare Trust & Safety"""
         account = {"username": "reporter@example.com", "imap_mailbox": "INBOX"}
         with (
             patch.object(pr, "discover_junk_mailbox", return_value=""),
-            patch.object(pr, "fetch_provider_mail", side_effect=[[inbox_mail], RuntimeError("mailbox missing")]),
+            patch.object(pr, "discover_cloudflare_mailbox", return_value="6 - Tự động/Cloudflare"),
+            patch.object(pr, "fetch_provider_mail", side_effect=[[inbox_mail], [], RuntimeError("mailbox missing")]),
         ):
             mails, statistics = pr.fetch_provider_mail_all_folders(account)
         self.assertEqual(mails, [inbox_mail])
-        self.assertEqual(statistics[-1]["mailbox"], "2-Cloudflare")
+        self.assertEqual(statistics[-1]["mailbox"], "6 - Tự động/Cloudflare")
         self.assertIn("mailbox missing", statistics[-1]["status"])
 
     def test_mark_seen_groups_same_uid_by_source_mailbox(self):

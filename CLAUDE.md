@@ -734,7 +734,8 @@ gì đã đổi và vì sao nó quan trọng về mặt kiến trúc, không ph�
   frozen đi qua cờ launcher `--mail-statistics-job`.
 
 Trang Phản hồi NCC dùng `fetch_provider_mail_all_folders()` để quét Inbox,
-Junk/Spam và folder chuyên biệt `2-Cloudflare` (có thể override bằng
+Junk/Spam và folder chuyên biệt `6 - Tự động.Cloudflare` (IMAP dùng dấu `.` làm
+separator; có thể override bằng
 `imap_cloudflare_mailbox` trong object account). Junk ưu tiên
 `imap_junk_mailbox`, sau đó cờ IMAP `\\Junk`, cuối cùng fallback tên thư mục phổ
 biến. Mỗi mail lưu `source_mailbox` trong cache; lỗi Junk hoặc Cloudflare được
