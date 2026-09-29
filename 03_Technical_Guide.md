@@ -260,6 +260,9 @@ Khi gặp một đuôi ccTLD lạ, IT truy cập trực tiếp cơ sở dữ li�
     chính thức `https://registry.co/report-abuse/form?type=phishing`. Quick Report
     có thể mở form qua Web Form Assistant v2.7.0 và tự điền các trường
     report; evidence, cam kết thiện chí, reCAPTCHA và submit phải làm thủ công.
+*   **Tên miền `.org` và `.ong`**: Public Interest Registry (PIR), báo cáo qua
+    web form chính thức `https://pir.org/report-abuse/`. Quick Report mở form
+    thủ công và cung cấp nội dung registry để sao chép; không tự submit.
 
 ##### BƯỚC 4: LEO THANG LÊN CERT QUỐC GIA SỞ TẠI (NẾU REGISTRY KHÔNG PHẢN HỒI)
 Nếu Registry của nước đó phớt lờ, gửi email trực tiếp tới tổ chức ứng cứu sự cố CERT của quốc gia quản lý tên miền đó để can thiệp hành chính:

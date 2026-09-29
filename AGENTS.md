@@ -247,6 +247,12 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-09-29 — Bảng registry tĩnh bổ sung `.org` và `.ong` của Public Interest
+  Registry (PIR), định tuyến Quick Report tới `https://pir.org/report-abuse/`.
+  Luồng chỉ mở form thủ công và cung cấp draft copy-ready, không tự submit.
+  Đã đạt 3/3 test tập trung và compileall. Full suite chạy 357 test, còn 3
+  failure + 6 error ở baseline Windows/Provider Replies ngoài thay đổi này.
+
 - 2026-09-27 — Provider Replies đồng bộ thêm folder `3 - Cần bằng chứng`
   bên cạnh Inbox, Junk/Spam và `6 - Tự động/Cloudflare`; folder này có thể
   override bằng `imap_evidence_mailbox`, được hiển thị riêng và không gộp vào

@@ -651,3 +651,8 @@ vận hành phải tự kiểm tra, thêm attachment, xử lý CAPTCHA nếu có
 
 Quick Report hiển thị thông báo gọn sau khi mở form Google/Microsoft;
 không render đối tượng nội bộ `DeltaGenerator` ra giao diện.
+
+Với `.org` và `.ong`, Quick Report định tuyến kênh Registry tới web form abuse
+chính thức của Public Interest Registry (PIR): `https://pir.org/report-abuse/`.
+Ứng dụng chỉ mở form thủ công và cung cấp nội dung report copy-ready, không tự
+submit.

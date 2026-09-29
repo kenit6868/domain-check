@@ -252,6 +252,22 @@ class QuickReportRestoreTests(unittest.TestCase):
         ):
             self.assertEqual(expected, pt.CCTLD_REGISTRY_CONTACTS[suffix]["report_webform"])
 
+    def test_org_and_ong_use_pir_abuse_webform(self):
+        expected = "https://pir.org/report-abuse/"
+        for suffix in ("org", "ong"):
+            contact = pt.CCTLD_REGISTRY_CONTACTS[suffix]
+            self.assertEqual(contact["registry"], "Public Interest Registry (PIR)")
+            self.assertEqual(contact["report_webform"], expected)
+            self.assertIsNone(contact["abuse_email"])
+        self.assertEqual(
+            pt.lookup_registry_contact("phishing-example.org")["report_webform"],
+            expected,
+        )
+        self.assertEqual(
+            pt.lookup_registry_contact("phishing-example.ong")["report_webform"],
+            expected,
+        )
+
     def test_form_status_messages_are_statements_not_magic_rendered_expressions(self):
         page = Path(__file__).resolve().parents[1] / "pages" / "7_Quick_Report.py"
         tree = ast.parse(page.read_text(encoding="utf-8"))

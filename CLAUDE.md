@@ -867,6 +867,10 @@ XYZ.COM adapter v1.0.0 (extension v2.8.0) chỉ match hostname `gen.xyz`, path
 lý CAPTCHA và không submit. `.xyz` cùng các suffix XYZ đã biết dùng URL ticket
 Anti-Abuse này thay cho endpoint `/account/abuse.php` cũ.
 
+Registry routing tĩnh định tuyến `.org` và `.ong` tới Public Interest Registry
+(PIR), `https://pir.org/report-abuse/`, không khai báo abuse email và không có
+adapter extension; Quick Report dùng link form thủ công + draft registry.
+
 Status sau các nút mở Google/Microsoft trong Quick Report phải dùng khối
 `if/else` statement. Không dùng conditional expression trả về
 `st.success()`/`st.error()` vì Streamlit magic sẽ render `DeltaGenerator` và

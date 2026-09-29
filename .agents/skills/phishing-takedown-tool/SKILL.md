@@ -104,6 +104,8 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Adapter XYZ.COM chỉ match `gen.xyz/account/submitticket.php` với `deptid=6`,
   điền reporter/type Phishing/domain/draft và luôn `fill_only`; không sửa CSRF,
   chọn attachment, xử lý CAPTCHA hoặc submit thay operator.
+  `.org` và `.ong` route tới form PIR `https://pir.org/report-abuse/` bằng link
+  thủ công + draft registry; không suy diễn thành adapter tự điền hoặc tự submit.
 - `run_check()` là pipeline dùng chung giữa CLI và UI. Không tạo một pipeline
   kiểm tra domain khác trong page Streamlit.
 - Bản PyInstaller phải bundle Chromium cùng Playwright, không dựa vào browser

@@ -384,6 +384,18 @@ CCTLD_REGISTRY_CONTACTS = {
         "report_webform": "https://verisign.my.site.com/DNSAbuse",
         "note": None,
     },
+    "org": {
+        "registry": "Public Interest Registry (PIR)",
+        "abuse_email": None,
+        "report_webform": "https://pir.org/report-abuse/",
+        "note": "Báo cáo abuse qua web form chính thức của PIR.",
+    },
+    "ong": {
+        "registry": "Public Interest Registry (PIR)",
+        "abuse_email": None,
+        "report_webform": "https://pir.org/report-abuse/",
+        "note": "Báo cáo abuse qua web form chính thức của PIR.",
+    },
     "us": {
         "registry": "GoDaddy Registry",
         "abuse_email": None,
@@ -1070,10 +1082,9 @@ def iana_referral(tld: str):
 
 
 # whois.iana.org trả về referral cho MỌI TLD nó biết, kể cả gTLD — nếu không loại trừ,
-# lookup_registry_contact() sẽ "leo thang Registry" cho cả domain .org/.mobi bình thường.
-# .com/.net/.name/.cc đã được thêm vào CCTLD_REGISTRY_CONTACTS với Verisign web form (xem trên)
-# nên không cần trong skip list nữa.
-_SKIP_REGISTRY_ESCALATION_TLDS = {"org", "info", "biz", "name", "pro", "mobi"}
+# lookup_registry_contact() sẽ "leo thang Registry" cho cả gTLD bình thường.
+# Các TLD đã có route tĩnh trong CCTLD_REGISTRY_CONTACTS không cần nằm trong skip list.
+_SKIP_REGISTRY_ESCALATION_TLDS = {"info", "biz", "name", "pro", "mobi"}
 
 
 def lookup_registry_contact(domain: str) -> dict:
