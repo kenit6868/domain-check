@@ -247,6 +247,23 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-10-02 — Chuẩn hóa 5+5 mẫu webform Registrar/Registry theo góc nhìn người
+  đại diện thương hiệu/tổ chức, dùng `We`. Registry khi chưa có delivery Registrar
+  chỉ nói tập thể phát hiện URL nghi phishing và submit để review, không còn câu
+  meta máy móc phủ định lịch sử report.
+  Đã đạt 15/15 test formatter và compileall. Full suite chạy 362 test, còn đúng
+  baseline Windows: 3 failure + 6 error ở mock macOS/Domain Worker stop/Provider
+  Replies, không thuộc thay đổi nội dung này.
+
+- 2026-10-02 — Webform Registrar/Registry có hai pool riêng, mỗi pool 5 mẫu
+  tiếng Anh thận trọng và được chọn ổn định theo domain/ngày. Formatter nhận
+  observations đã xác minh theo kiểu opt-in, chỉ ghi số attachment và không lộ
+  path; Registry chỉ nhắc lần báo Registrar khi caller xác nhận trạng thái.
+  Quick Report giữ nguyên flow, không thêm probe/capture/network step.
+  Đã đạt 14/14 test formatter, 17/17 test Quick Report và compileall. Full suite
+  chạy 361 test, còn đúng baseline Windows đã biết: 3 failure + 6 error ở mock
+  macOS/Domain Worker stop/Provider Replies, không thuộc thay đổi này.
+
 - 2026-09-29 — Bảng registry tĩnh bổ sung `.org` và `.ong` của Public Interest
   Registry (PIR), định tuyến Quick Report tới `https://pir.org/report-abuse/`.
   Luồng chỉ mở form thủ công và cung cấp draft copy-ready, không tự submit.

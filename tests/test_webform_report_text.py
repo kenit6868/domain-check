@@ -81,6 +81,97 @@ class WebformReportTextTests(unittest.TestCase):
         )
         self.assertEqual(first, second)
 
+    def test_registrar_and_registry_use_separate_five_variant_pools(self):
+        pools = []
+
+        def capture_pool(_rng, options):
+            pools.append(options)
+            return options[0]
+
+        registry = {"registry": "Example Registry"}
+        with patch.object(pt, "_pick", side_effect=capture_pool):
+            pt.get_webform_draft_text(
+                "phish.example.test", "Example Registrar", "https://form.example.test",
+                self.cfg, target_url=self.url,
+            )
+            pt.get_registry_webform_draft_text(
+                "phish.example.test", registry, self.cfg, target_url=self.url,
+            )
+
+        registrar_pool, registry_pool = pools
+        self.assertGreaterEqual(len(registrar_pool), 5)
+        self.assertGreaterEqual(len(registry_pool), 5)
+        self.assertIsNot(registrar_pool, registry_pool)
+        self.assertTrue(all("sponsoring registrar" in item["request"] for item in registry_pool))
+        self.assertTrue(all("sponsoring registrar" not in item["request"] for item in registrar_pool))
+
+    def test_webform_variants_are_stable_for_same_domain_and_day(self):
+        registry = {"registry": "Example Registry"}
+        self.assertEqual(
+            pt.get_webform_draft_text(
+                "phish.example.test", "Example Registrar", "https://form.example.test",
+                self.cfg, target_url=self.url,
+            ),
+            pt.get_webform_draft_text(
+                "phish.example.test", "Example Registrar", "https://form.example.test",
+                self.cfg, target_url=self.url,
+            ),
+        )
+        self.assertEqual(
+            pt.get_registry_webform_draft_text(
+                "phish.example.test", registry, self.cfg, target_url=self.url,
+            ),
+            pt.get_registry_webform_draft_text(
+                "phish.example.test", registry, self.cfg, target_url=self.url,
+            ),
+        )
+
+    def test_optional_observations_are_included_without_leaking_file_paths(self):
+        observations = {
+            "checked_at": "2026-10-02T08:30:00+00:00",
+            "page_title": "Example Brand Sign In",
+            "auth_controls": ["Sign in", "Register"],
+            "resolved_destination": "https://destination.example.test/login",
+            "redirect_chain": [self.url, "https://destination.example.test/login"],
+            "evidence_files": ["C:/private/evidence/a.png", "C:/private/evidence/b.png"],
+        }
+        text = pt.get_webform_draft_text(
+            "phish.example.test", "Example Registrar", "https://form.example.test",
+            self.cfg, target_url=self.url, observations=observations,
+        )
+        self.assertIn("Supporting observations:", text)
+        self.assertIn("Example Brand Sign In", text)
+        self.assertIn("Sign in, Register", text)
+        self.assertIn("Supporting evidence supplied: 2 attachment(s)", text)
+        self.assertNotIn("C:/private", text)
+
+    def test_registry_webform_mentions_prior_report_only_when_confirmed(self):
+        registry = {"registry": "Example Registry"}
+        initial = pt.get_registry_webform_draft_text(
+            "phish.example.test", registry, self.cfg, target_url=self.url,
+        )
+        escalated = pt.get_registry_webform_draft_text(
+            "phish.example.test", registry, self.cfg, target_url=self.url,
+            registrar_reported=True, registrar_report_date="2026-10-01",
+        )
+        self.assertNotIn("previously reported", initial)
+        self.assertNotIn("No prior registrar report", initial)
+        self.assertIn("We identified this URL", initial)
+        self.assertIn("we are submitting it for your review", initial)
+        self.assertIn("previously reported", escalated)
+        self.assertIn("2026-10-01", escalated)
+
+    def test_all_webform_variants_read_as_an_organization_representative(self):
+        for pool in (pt._REGISTRAR_WEBFORM_VARIANTS, pt._REGISTRY_WEBFORM_VARIANTS):
+            self.assertEqual(5, len(pool))
+            for variant in pool:
+                self.assertTrue(
+                    variant["opening"].startswith("We ")
+                    or variant["opening"].startswith("This ")
+                    or variant["opening"].startswith("The ")
+                )
+                self.assertNotIn("I ", variant["opening"])
+
     def test_registrar_generated_webform_uses_shared_factual_text(self):
         who = {"registrar": "NameSilo, LLC", "emails": []}
         vt = {"link": "https://www.virustotal.com/example", "malicious": 0}

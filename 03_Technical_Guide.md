@@ -585,6 +585,16 @@ phối hợp sponsoring registrar; draft chỉ được nói đã báo registrar
 delivery state xác nhận (`registrar_reported=True`, kèm ngày nếu có). Không chèn
 raw WHOIS hoặc câu ICANN/ClientHold chung cho mọi ccTLD vào nội dung gửi.
 
+Formatter webform có 5 mẫu Registrar và 5 mẫu Registry tách biệt, chọn ổn định
+theo domain/ngày. Luồng Quick Report không đổi: check một lần, hiển thị draft và
+mở/tự điền form theo adapter sẵn có; không có lượt probe hoặc capture bổ sung.
+Workflow khác chỉ truyền `observations` khi đã có dữ kiện được xác minh; draft
+không tự dựng chi tiết còn thiếu và chỉ ghi số attachment, không ghi path nội bộ.
+Nội dung dùng `We` theo góc nhìn đại diện thương hiệu/tổ chức. Khi chưa có xác
+nhận đã báo Registrar, Registry draft chỉ trình bày việc phát hiện URL nghi
+phishing và gửi để xem xét, thay vì giải thích máy móc rằng chưa có báo cáo
+Registrar trước đó.
+
 #### Vận chuyển SMTP cho evidence
 
 Mỗi SMTP account giữ port và chế độ bảo mật riêng. Port 465 dùng implicit TLS;

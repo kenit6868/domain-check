@@ -408,6 +408,18 @@ khẳng định registrar đã bỏ qua báo cáo và không yêu cầu ClientHo
 luận có sẵn. Chỉ truyền trạng thái `registrar_reported` khi có lịch sử delivery
 xác nhận; mọi draft registry đều giữ cả registered domain và full Reported URL.
 
+Mỗi kênh Registrar và Registry hiện có 5 biến thể nội dung riêng, được chọn ổn
+định theo domain và ngày để nội dung không đổi khi Streamlit rerun. Quick Report
+vẫn giữ nguyên một bước kiểm tra hiện tại, không mở thêm website hoặc tự thu thập
+chứng cứ. Nếu một workflow đã có quan sát được xác minh (title, control đăng
+nhập, redirect/đích cuối và số attachment), formatter có thể chèn đúng các dữ
+kiện được truyền vào; dữ kiện thiếu không được suy diễn và đường dẫn file cục bộ
+không xuất hiện trong draft.
+Các biến thể viết theo góc nhìn người đại diện thương hiệu/tổ chức
+(`We are submitting...`). Khi chưa có lịch sử báo Registrar, draft Registry chỉ
+nói tập thể đã phát hiện URL nghi phishing và đang gửi để xem xét; không chèn câu
+phủ định máy móc về một báo cáo Registrar chưa tồn tại.
+
 ## Lưu ý cho Windows
 
 Nếu chạy trong PowerShell/CMD và gặp `UnicodeEncodeError` khi in ra tiếng Việt có dấu, set biến môi

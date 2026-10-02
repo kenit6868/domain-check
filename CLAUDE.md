@@ -18,6 +18,14 @@ fraud hoặc financial loss. Không khẳng định control hay hành vi thu th�
 xác minh, không tự thêm OTP/payment và chỉ yêu cầu hành động nếu provider xác
 nhận. Registrar được yêu cầu xem toàn bộ flow và bảo toàn record; Registry được
 yêu cầu phối hợp registrar và áp dụng biện pháp tương xứng theo chính sách.
+Hai formatter dùng pool độc lập gồm 5 biến thể, chọn bằng `_draft_rng()` theo
+domain/kênh/ngày nên ổn định qua rerun. Tham số `observations` là opt-in và chỉ
+format field đã được caller xác minh; attachment chỉ lộ số lượng, không lộ path.
+Registry chỉ ghi nhận lần báo Registrar trước khi `registrar_reported=True`.
+Quick Report không truyền observations và không thêm network/evidence step.
+Opening của cả hai pool dùng `We` theo vai trò đại diện thương hiệu/tổ chức.
+Nhánh Registry chưa có delivery Registrar mô tả tự nhiên việc tập thể phát hiện
+và submit URL, không phát ra câu meta `No prior registrar report is asserted...`.
 
 Quick Report: các nút mở/tự điền form dùng Chrome đã cài trên Windows, macOS
 (`/Applications` hoặc `~/Applications`) và Linux (`google-chrome` hoặc

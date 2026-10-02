@@ -333,6 +333,7 @@ CCTLD_REGISTRY_CONTACTS = {
         "note": "Áp dụng cho cả .co.uk và .org.uk.",
     },
     "eu": {"registry": "EURid", "abuse_email": "info@eurid.eu", "note": None},
+    "cl": {"registry": "NIC Chile", "abuse_email": "abuse@nic.cl", "note": None},
     "tw": {
         "registry": "TWNIC",
         "abuse_email": None,
@@ -619,6 +620,98 @@ def is_blocked_report_recipient(value: str) -> bool:
     return bool(addresses & _CLOUDFLARE_UNMONITORED_RECIPIENTS)
 
 
+_REGISTRAR_WEBFORM_VARIANTS = [
+    {
+        "opening": "We are submitting this report after identifying suspected phishing and apparent unauthorized impersonation of {brand} at the URL below.",
+        "request": "Please investigate the complete user flow, preserve relevant registration and access records, and take appropriate registrar-level action under your phishing and abuse policies if the violation is confirmed.",
+    },
+    {
+        "opening": "This report concerns suspected phishing content that appears to impersonate {brand} without authorization under the domain identified below.",
+        "request": "Please review the reported URL and any linked registration or sign-in flow, retain relevant account and access records, and apply the action available under your registrar abuse policy if the violation is confirmed.",
+    },
+    {
+        "opening": "We identified suspected phishing and apparent unauthorized use of the {brand} identity under the domain below and are submitting it for abuse review.",
+        "request": "Please independently verify the reported content and connected user flow, preserve records relevant to the registrant and abuse investigation, and take proportionate registrar-level action if the violation is confirmed.",
+    },
+    {
+        "opening": "The URL below is being reported for suspected phishing involving apparent impersonation of {brand} and requires registrar review.",
+        "request": "Please investigate the URL, associated destinations, and registration data, preserve relevant records, and mitigate the domain in accordance with your applicable abuse procedures if the violation is confirmed.",
+    },
+    {
+        "opening": "We are reporting a suspected phishing and brand-impersonation concern involving {brand} at the full URL below.",
+        "request": "Please assess the complete flow rather than only the landing page, preserve registration and access records, and take the registrar-level measures provided by your policies if the violation is confirmed.",
+    },
+]
+
+
+_REGISTRY_WEBFORM_VARIANTS = [
+    {
+        "opening": "We are submitting this report for registry review after identifying suspected phishing and apparent unauthorized impersonation of {brand} under the domain below.",
+        "request": "Please investigate the reported domain and complete user flow, coordinate prompt mitigation with the sponsoring registrar, and apply proportionate registry-level measures under your abuse policy if the violation is confirmed.",
+    },
+    {
+        "opening": "This registry report concerns suspected phishing content that appears to use the {brand} identity without authorization.",
+        "request": "Please independently review the full URL, coordinate the investigation with the sponsoring registrar, and apply proportionate registry-level measures under your policy if the violation is confirmed.",
+    },
+    {
+        "opening": "We are submitting a suspected phishing and brand-impersonation concern involving {brand} for review at the registry level.",
+        "request": "Please assess the reported domain and connected user flow, preserve relevant registry records, coordinate with the sponsoring registrar, and apply proportionate registry-level measures if the violation is confirmed.",
+    },
+    {
+        "opening": "The domain below is being reported for registry review because its full URL presents suspected phishing and apparent impersonation of {brand}.",
+        "request": "Please review the available facts, engage the sponsoring registrar for prompt mitigation, and apply proportionate registry-level measures under your abuse framework if the violation is confirmed.",
+    },
+    {
+        "opening": "We identified suspected phishing activity under the registered domain below that appears to impersonate {brand} without authorization and are submitting it for review.",
+        "request": "Please investigate the complete reported flow, coordinate necessary action with the sponsoring registrar, and apply proportionate registry-level measures if the violation is confirmed.",
+    },
+]
+
+
+def _webform_observation_block(observations: dict | None) -> str:
+    """Format only supplied, sanitized observations; never infer missing evidence."""
+    if not isinstance(observations, dict):
+        return ""
+
+    def clean(value, limit=500):
+        return " ".join(str(value or "").split())[:limit]
+
+    lines = []
+    for key, label in (
+        ("checked_at", "Observation timestamp"),
+        ("page_title", "Observed page title"),
+        ("brand_text", "Observed brand text"),
+        ("resolved_destination", "DOM-declared destination"),
+        ("final_url", "Verified final URL"),
+    ):
+        value = clean(observations.get(key))
+        if value:
+            lines.append(f"- {label}: {value}")
+
+    controls = observations.get("auth_controls") or []
+    if isinstance(controls, str):
+        controls = [controls]
+    controls = [clean(value, 100) for value in controls[:10] if clean(value, 100)]
+    if controls:
+        lines.append(f"- Observed authentication controls: {', '.join(controls)}")
+
+    redirects = observations.get("redirect_chain") or []
+    if isinstance(redirects, str):
+        redirects = [redirects]
+    redirects = [clean(value) for value in redirects[:10] if clean(value)]
+    if redirects:
+        lines.append(f"- Observed HTTP redirect chain: {' -> '.join(redirects)}")
+
+    evidence_files = observations.get("evidence_files") or []
+    if isinstance(evidence_files, str):
+        evidence_files = [evidence_files]
+    evidence_count = len([value for value in evidence_files if str(value or "").strip()])
+    if evidence_count:
+        lines.append(f"- Supporting evidence supplied: {evidence_count} attachment(s)")
+
+    return "Supporting observations:\n" + "\n".join(lines) if lines else ""
+
+
 def get_webform_draft_text(
     domain: str,
     registrar: str,
@@ -626,8 +719,10 @@ def get_webform_draft_text(
     cfg: dict,
     target_url: str = "",
     vt_link: str = "",
+    *,
+    observations: dict | None = None,
 ) -> str:
-    """Generate factual registrar web-form text without third-party scan links."""
+    """Generate one stable factual registrar web-form variant."""
     from datetime import datetime, timezone as _tz
 
     brand = cfg.get("brand_name") or "[BRAND]"
@@ -637,9 +732,12 @@ def get_webform_draft_text(
     detected_date = datetime.now(_tz.utc).strftime("%Y-%m-%d")
 
     t_url = target_url or f"https://{domain}"
+    variant = _pick(
+        _draft_rng(domain + "_registrar_webform"), _REGISTRAR_WEBFORM_VARIANTS,
+    )
+    observation_block = _webform_observation_block(observations)
     evidence_lines = (
-        f"We are reporting the URL below for suspected phishing and "
-        f"unauthorized impersonation of {brand}.\n\n"
+        f"{variant['opening'].format(brand=brand)}\n\n"
         f"The reported page appears to use {brand} branding to present itself "
         f"as an authorized service. The suspected flow may present registration "
         f"or sign-in controls that direct visitors to deceptive content and "
@@ -648,15 +746,14 @@ def get_webform_draft_text(
         f"users to account compromise, fraud, or financial loss.\n\n"
         f"Reported URL: {t_url}\n"
         f"Registered domain: {domain}\n"
+        f"Registrar: {registrar}\n"
     )
 
     evidence_lines += (
-        f"First detected: {detected_date}\n\n"
-        f"Please investigate the complete user flow, including any registration "
-        f"or sign-in destination, preserve relevant registration and access "
-        f"records, and take appropriate registrar-level action under your "
-        f"phishing and abuse policies if the violation is confirmed.\n\n"
-        f"Reported by: {contact_name} <{contact_email}>"
+        f"First detected: {detected_date}\n"
+        + (f"\n{observation_block}\n" if observation_block else "")
+        + f"\n{variant['request']}\n\n"
+        + f"Reported by: {contact_name} <{contact_email}>"
     )
 
     return evidence_lines
@@ -2308,18 +2405,34 @@ enumeration — please verify independently before taking action.
 
 
 def get_registry_webform_draft_text(
-    domain: str, registry_info: dict, cfg: dict, target_url: str = "",
+    domain: str, registry_info: dict, cfg: dict, target_url: str = "", *,
+    observations: dict | None = None, registrar_reported: bool = False,
+    registrar_report_date: str | None = None,
 ) -> str:
-    """Generate copy-ready registry form text using the exact reported URL."""
+    """Generate one stable factual registry web-form variant."""
     brand = cfg.get("brand_name") or "[BRAND]"
     contact_name = cfg.get("contact_name") or "[NAME]"
     contact_email = cfg.get("contact_email") or "[EMAIL]"
     reported_url = target_url or f"https://{domain}"
     detected_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    registry_name = registry_info.get("registry") or "Registry"
+    variant = _pick(
+        _draft_rng(domain + "_registry_webform"), _REGISTRY_WEBFORM_VARIANTS,
+    )
+    observation_block = _webform_observation_block(observations)
+    if registrar_reported:
+        date_suffix = f" on {registrar_report_date}" if registrar_report_date else ""
+        escalation = (
+            f"This matter was previously reported to the sponsoring registrar{date_suffix}. "
+            "The reported URL remains available, so registry-level review is requested."
+        )
+    else:
+        escalation = (
+            "We identified this URL while reviewing suspected phishing activity involving apparent "
+            f"impersonation of {brand}, and we are submitting it for your review."
+        )
     return (
-        f"We request a registry-level review of suspected phishing and "
-        f"unauthorized impersonation of {brand} under the registered domain "
-        f"below.\n\n"
+        f"{variant['opening'].format(brand=brand)}\n\n"
         f"The reported page appears to use {brand} branding to present itself "
         f"as an authorized service. The suspected flow may present registration "
         f"or sign-in controls leading visitors to deceptive content and may "
@@ -2328,12 +2441,12 @@ def get_registry_webform_draft_text(
         f"users to account compromise, fraud, or financial loss.\n\n"
         f"Reported URL: {reported_url}\n"
         f"Registered domain: {domain}\n"
-        f"First detected: {detected_date}\n\n"
-        "Please investigate the reported domain and complete user flow, "
-        "coordinate prompt mitigation with the sponsoring registrar, and apply "
-        "proportionate registry-level measures under your abuse policy if the "
-        "violation is confirmed.\n\n"
-        f"Reported by: {contact_name} <{contact_email}>"
+        f"Registry: {registry_name}\n"
+        f"First detected: {detected_date}\n"
+        + (f"\n{observation_block}\n" if observation_block else "")
+        + f"\n{escalation}\n\n"
+        + f"{variant['request']}\n\n"
+        + f"Reported by: {contact_name} <{contact_email}>"
     )
 
 
@@ -2375,6 +2488,8 @@ def generate_registry_draft(
     if webform_url_r and not registry_info.get("abuse_email"):
         form_text = get_registry_webform_draft_text(
             domain, registry_info, cfg, target_url=reported_url,
+            registrar_reported=registrar_reported,
+            registrar_report_date=registrar_report_date,
         )
         path = os.path.join(REPORTS_DIR, f"{domain}_registry_report.txt")
         with open(path, "w", encoding="utf-8") as f:

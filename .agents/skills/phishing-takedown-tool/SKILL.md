@@ -245,8 +245,15 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
 - Formatter registrar/registry phải dùng dữ kiện quan sát, không đưa VirusTotal
   không có detection ra ngoài và không tự yêu cầu `serverHold`/`clientHold` như
   kết luận mặc định. Registry chỉ được nói đã báo registrar khi có delivery state
-  xác nhận; luôn giữ cả registered domain và full Reported URL, không chèn raw
-  WHOIS hoặc câu ICANN chung cho mọi ccTLD.
+  xác nhận. Pool webform Registrar/Registry phải tách biệt, có ít nhất 5 biến thể
+  ổn định theo domain/ngày. `observations` chỉ là input opt-in đã xác minh; không
+  suy diễn field thiếu và không đưa đường dẫn evidence cục bộ vào draft. Quick
+  Report không được thêm probe/capture chỉ để làm giàu nội dung webform.
+  Luôn giữ cả registered domain và full Reported URL, không chèn raw WHOIS hoặc
+  câu ICANN chung cho mọi ccTLD.
+  Draft do người đại diện thương hiệu/tổ chức submit phải dùng góc nhìn `We`;
+  khi chưa có delivery Registrar thì không chèn câu meta phủ định lịch sử, chỉ
+  mô tả tự nhiên việc phát hiện URL nghi phishing và gửi để provider review.
 - Khác biệt giữa URL gốc và một path probe như `/vi-vn/` chỉ là khám phá đường
   dẫn, không được cộng điểm cloaking. Phân loại nội dung nhạy cảm phải tách khỏi
   verdict cloaking.
