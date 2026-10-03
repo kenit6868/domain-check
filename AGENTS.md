@@ -17,6 +17,8 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
   domain thường; job lưu tại `data/worker_jobs/`.
 - `provider_replies.py`: đọc IMAP, phân loại phản hồi NCC, tạo reply theo
   thread và xử lý evidence.
+- `godaddy_cases.py`: lưu metadata Case ID GoDaddy do operator đã gửi qua web
+  form, đối chiếu phản hồi theo account + Case ID và theo dõi trạng thái thủ công.
 - `mail_statistics.py`, `pages/11_Mail_Statistics.py`: đếm mailbox theo
   `INTERNALDATE`; page Thống kê email chỉ hiển thị tổng Inbox/Thư rác trong ngày.
 - `report_statistics.py`: phân tích hiệu quả report theo đúng account và khoảng
@@ -246,6 +248,20 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-10-01 — Quick Report lưu Case ID GoDaddy sau khi operator thực sự gửi
+  form, kèm email báo cáo và full URL trong `data/godaddy_cases.json`. Provider
+  Replies nối email theo account + Case ID + sender GoDaddy; cả hai page cho
+  ghi trạng thái portal thủ công và mở trang Check Status chính thức. Provider
+  Replies hiển thị draft follow-up.
+  Không tự submit/poll portal/gửi follow-up, không lưu body email/credential.
+  Có 6/6 test tập trung gồm AppTest Quick Report/Provider Replies; compileall và
+  diff check đạt. Full suite 363 test còn 3 failure + 6 error baseline Windows/
+  Provider Replies đã biết, không thuộc thay đổi này. Không truy cập IMAP hoặc
+  gửi report thật.
+  Sửa nút lưu Case ID bị khóa dù checkbox đã tích: `st.form` chỉ cập nhật giá
+  trị khi submit nên kiểm tra xác nhận sau khi bấm nút. AppTest xác minh nút
+  bấm được, chưa xác nhận thì không lưu và xác nhận rồi thì lưu thành công.
 
 - 2026-09-29 — Bảng registry tĩnh bổ sung `.org` và `.ong` của Public Interest
   Registry (PIR), định tuyến Quick Report tới `https://pir.org/report-abuse/`.

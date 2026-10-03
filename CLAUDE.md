@@ -96,6 +96,17 @@ Adapter `godaddy_phishing` chỉ có host permission cho
 `legalportal.godaddy.com`, dùng task `fill_only` từ Quick Report và điền bốn
 field email/brand/full URL/description. Không click checkbox attestation và không
 submit vì hai thao tác này là xác nhận pháp lý của operator.
+`godaddy_cases.py` lưu metadata case do operator nhập sau khi submit form ở
+`data/godaddy_cases.json` (account, Case ID, full URL, thời gian/trạng thái và
+metadata email cuối); không lưu body hay credential. Quick Report cho mở trang
+status chính thức và ghi trạng thái thủ công. Nút lưu Case ID trong `st.form`
+không dùng `disabled` từ checkbox cùng form: Streamlit chỉ gửi giá trị checkbox
+khi submit, nên điều kiện xác nhận được kiểm tra sau submit.
+Provider Replies cũng cho cập
+nhật trạng thái portal của case đã chọn. Provider Replies chỉ nối mail khi
+account + Case ID khớp và sender thuộc `godaddy.com`; trạng thái portal mới hơn
+không bị email cũ ghi đè. Không suy việc mở form thành report đã gửi; không tự
+poll portal, submit hoặc gửi follow-up.
 
 ```bash
 # Setup

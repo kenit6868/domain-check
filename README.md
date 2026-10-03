@@ -127,6 +127,19 @@ tại. Extension điền email, brand, full URL/path và draft registrar. Ngư�
 vận hành phải tự kiểm tra, tích cam kết good-faith và bấm **Send
 Report**; extension không tự cam kết, giải CAPTCHA hoặc submit.
 
+Sau khi gửi, lấy **Case ID** trong email xác nhận GoDaddy và nhập vào khối
+theo dõi ngay dưới nút form, cùng email đã dùng khi báo cáo. Chỉ lúc này tool
+mới ghi nhận case; việc mở form không tính là đã gửi. Nút lưu luôn bấm được;
+nếu chưa tích ô xác nhận đã gửi, app báo lỗi và không ghi case. Nút **Kiểm tra trạng thái
+trên GoDaddy** mở trang chính thức, nơi bạn nhập Case ID rồi ghi lại trạng
+thái thấy trên portal. Bạn cũng có thể ghi trạng thái đó tại page **Phản hồi
+NCC** sau khi Quick Report đã xóa cache hoặc app đã khởi động lại. Page này
+nối email GoDaddy theo đúng hộp
+thư và Case ID, hiển thị trạng thái cùng draft follow-up để tự xem và gửi thủ
+công. Có nhắc kiểm tra sau số ngày không có cập nhật do bạn chọn, mặc định 7
+ngày. Case metadata nằm tại `data/godaddy_cases.json`; không lưu nội dung email
+hoặc tự gửi report/follow-up. GoDaddy có thể không gửi cập nhật kết quả qua email.
+
 ## Sử dụng
 
 ```bash

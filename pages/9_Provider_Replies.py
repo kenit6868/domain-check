@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 import phishing_toolkit as pt
 import provider_replies
+import godaddy_cases
 if getattr(provider_replies, "MODULE_VERSION", 0) < 12:
     provider_replies = importlib.reload(provider_replies)
 from provider_replies import (
@@ -128,6 +129,12 @@ if sync_clicked:
                 for row in folder_statistics
             ]
             save_mail_cache(account_name, st.session_state.provider_mails)
+            godaddy_synced = 0
+            godaddy_sync_error = ""
+            try:
+                godaddy_synced = godaddy_cases.sync_mail(account_name, st.session_state.provider_mails)
+            except (ValueError, OSError) as exc:
+                godaddy_sync_error = str(exc)
             sent_sync = sync_sent_reply_status(
                 account, st.session_state.provider_mails,
                 date_from=date_from, date_to=date_to,
@@ -137,6 +144,10 @@ if sync_clicked:
         synced_for_day = [mail for mail in st.session_state.provider_mails if mail_is_in_selected_dates(mail)]
         sent_note = f"; nhận diện thêm {sent_sync['matched']} thư đã phản hồi từ Sent" if sent_sync.get("success") else ""
         st.success(f"Đã đồng bộ {len(synced_for_day)} email đúng ngày đã chọn{sent_note}.")
+        if godaddy_synced:
+            st.info(f"Đã nối {godaddy_synced} phản hồi GoDaddy với Case ID đã lưu.")
+        if godaddy_sync_error:
+            st.warning(f"Chưa cập nhật được case GoDaddy: {godaddy_sync_error}")
         if not sent_sync.get("success"):
             st.warning(f"Không đối soát được thư mục Đã gửi: {sent_sync.get('error')}")
     except Exception as exc: st.error(f"Không đọc được các folder Inbox/Thư rác/Cần bằng chứng/Cloudflare: {exc}")
@@ -152,6 +163,45 @@ all_filtered = [
     if item.provider != "unknown" or item.request_type != "manual_review"
 ]
 folder_statistics = st.session_state.get("provider_folder_statistics", [])
+try:
+    godaddy_rows = godaddy_cases.list_cases(account=account_name)
+except (ValueError, OSError) as exc:
+    st.error(f"Không đọc được case GoDaddy: {exc}")
+    godaddy_rows = []
+if godaddy_rows:
+    st.subheader("Case GoDaddy đã báo qua web form")
+    st.caption("Email chỉ được nối khi khớp tài khoản, Case ID và người gửi GoDaddy. Trạng thái portal cần nhập thủ công.")
+    remind_days = st.number_input("Nhắc kiểm tra sau số ngày không có cập nhật", min_value=1, max_value=90, value=7)
+    st.dataframe(pd.DataFrame([{
+        "Case ID": row["case_id"], "Full URL": row["target_url"],
+        "Trạng thái": godaddy_cases.STATUS_LABELS.get(row.get("status"), "Chưa rõ"),
+        "Theo dõi": "Cần kiểm tra" if godaddy_cases.followup_due(row, int(remind_days)) else "—",
+        "Nguồn": row.get("status_source", ""), "Ngày gửi UTC": row.get("submitted_at", ""),
+        "Email gần nhất UTC": row.get("last_mail_at", ""),
+    } for row in godaddy_rows]), width="stretch", hide_index=True)
+    st.link_button("Kiểm tra trạng thái GoDaddy bằng Case ID", godaddy_cases.STATUS_URL)
+    case_choice = st.selectbox(
+        "Xem draft follow-up GoDaddy",
+        range(len(godaddy_rows)),
+        format_func=lambda i: f"{godaddy_rows[i]['case_id']} · {godaddy_rows[i]['target_url']}",
+    )
+    selected_case = godaddy_rows[case_choice]
+    with st.form("godaddy_portal_status_form"):
+        portal_status = st.selectbox(
+            "Trạng thái vừa thấy trên portal GoDaddy",
+            list(godaddy_cases.STATUS_LABELS),
+            format_func=lambda item: godaddy_cases.STATUS_LABELS[item],
+            index=list(godaddy_cases.STATUS_LABELS).index(selected_case["status"]),
+        )
+        if st.form_submit_button("Lưu trạng thái portal cho case đã chọn"):
+            try:
+                godaddy_cases.record_portal_status(account_name, selected_case["case_id"], portal_status)
+                st.success("Đã cập nhật trạng thái portal.")
+                st.rerun()
+            except (ValueError, OSError) as exc:
+                st.error(str(exc))
+    with st.expander("Draft follow-up để tự kiểm tra và gửi thủ công"):
+        st.code(godaddy_cases.followup_draft(selected_case), language=None)
 if folder_statistics:
     st.subheader("Thống kê đồng bộ theo thư mục")
     st.dataframe(pd.DataFrame([{

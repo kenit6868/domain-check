@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import json
+from datetime import datetime, timezone
 from html import escape
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlencode
@@ -21,6 +22,7 @@ import streamlit.components.v1 as components
 
 import phishing_toolkit as pt
 import cloudflare_form_worker as cfw
+import godaddy_cases
 from cloaking_ui import render_cloaking_details
 from community_report_ui import render_community_report_buttons
 
@@ -407,6 +409,58 @@ def _render_domain_block(idx: int, total: int, result: dict, cfg: dict, dark_mod
                                     "Đã mở form GoDaddy. Extension sẽ tự điền; "
                                     "bạn tự xác nhận cam kết và submit."
                                 )
+                        st.caption("Sau khi tự bấm Send Report, nhập Case ID từ email xác nhận để theo dõi. Mở form không được tính là đã gửi.")
+                        with st.form(f"quick_godaddy_case_{idx}"):
+                            reporter_email = st.text_input(
+                                "Email đã dùng trên form", value=cfg.get("contact_email", ""),
+                                key=f"quick_godaddy_email_{idx}",
+                            )
+                            case_id = st.text_input("Case ID GoDaddy", key=f"quick_godaddy_case_id_{idx}")
+                            submitted_date = st.date_input("Ngày đã gửi", key=f"quick_godaddy_date_{idx}")
+                            submitted_time = st.time_input("Giờ đã gửi (máy này)", key=f"quick_godaddy_time_{idx}")
+                            confirmed_sent = st.checkbox("Tôi đã bấm Send Report và nhận Case ID", key=f"quick_godaddy_confirm_{idx}")
+                            save_case = st.form_submit_button("Lưu Case ID sau khi đã gửi")
+                        if save_case:
+                            if not confirmed_sent:
+                                st.error("Hãy xác nhận đã bấm Send Report và nhận Case ID trước khi lưu.")
+                            else:
+                                try:
+                                    submitted_at = datetime.combine(
+                                        submitted_date, submitted_time,
+                                        tzinfo=datetime.now().astimezone().tzinfo,
+                                    ).astimezone(timezone.utc).isoformat()
+                                    godaddy_cases.record_case(
+                                        reporter_email, case_id, original_url, submitted_at=submitted_at,
+                                    )
+                                    st.success("Đã lưu case GoDaddy để đối chiếu phản hồi.")
+                                except (ValueError, OSError) as exc:
+                                    st.error(str(exc))
+                        try:
+                            cases = godaddy_cases.list_cases(
+                                account=reporter_email, target_url=original_url,
+                            )
+                        except (ValueError, OSError) as exc:
+                            st.error(f"Không đọc được case GoDaddy: {exc}")
+                            cases = []
+                        for case in cases:
+                            st.caption(
+                                f"Case {case['case_id']} · {godaddy_cases.STATUS_LABELS.get(case['status'], 'Chưa rõ')} "
+                                f"· {case['account']} · {case['submitted_at'][:10]}"
+                            )
+                            st.link_button("Kiểm tra trạng thái trên GoDaddy", godaddy_cases.STATUS_URL)
+                            with st.form(f"quick_godaddy_status_{idx}_{case['case_id']}_{case['account']}"):
+                                status = st.selectbox(
+                                    "Trạng thái thấy trên portal",
+                                    list(godaddy_cases.STATUS_LABELS),
+                                    format_func=lambda item: godaddy_cases.STATUS_LABELS[item],
+                                    index=list(godaddy_cases.STATUS_LABELS).index(case['status']),
+                                )
+                                if st.form_submit_button("Lưu trạng thái đã kiểm tra"):
+                                    try:
+                                        godaddy_cases.record_portal_status(case['account'], case['case_id'], status)
+                                        st.success("Đã cập nhật trạng thái theo lần kiểm tra thủ công.")
+                                    except (ValueError, OSError) as exc:
+                                        st.error(str(exc))
                     else:
                         st.link_button(
                             f"↗ Form {registrar[:18]}", webform_url_r, type="primary"

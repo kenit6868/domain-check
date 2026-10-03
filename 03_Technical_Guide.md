@@ -92,6 +92,13 @@ profile sử dụng; chạy ứng dụng trên cùng máy với Chrome.
     `https://legalportal.godaddy.com/abuse/phishing`: tự điền email, brand,
     full URL và Description of Issue từ draft registrar trong Quick Report. Checkbox
     cam kết good-faith và nút Send Report luôn do operator thao tác thủ công.
+    Sau khi gửi, operator nhập email đã dùng và Case ID từ email GoDaddy vào
+    Quick Report. Tool lưu metadata case tại `data/godaddy_cases.json`, liên kết
+    email nhận ở Provider Replies khi account + Case ID + sender GoDaddy khớp.
+    Trang trạng thái chính thức `https://legalportal.godaddy.com/abuse/status`
+    được mở thủ công bằng Case ID; trạng thái đọc được phải do operator ghi lại.
+    GoDaddy không cam kết gửi cập nhật kết quả qua email. Draft follow-up chỉ để
+    xem/copy, không tự gửi hoặc tự kiểm tra portal.
 *   **Bản Windows đóng gói**: `build_app.bat` cài Chromium vào thư mục hermetic
     của Playwright, còn spec copy nó vào đường dẫn browser của runtime frozen
     trước khi PyInstaller thu thập dữ liệu. Spec lọc datas/binaries cả trước và
