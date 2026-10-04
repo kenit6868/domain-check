@@ -717,6 +717,12 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
   `personalize_email_body(body, cfg, account)`: email chữ ký mặc định đổi sang `account.username`; từng account
   có thể override bằng `contact_name`/`contact_email`. Cả bulk send, gửi một account trong UI và Domain Worker
   đều phải đi qua bước này để địa chỉ From và chữ ký không lệch nhau.
+  Personalization cũng nối `signature_role`, `company_name` và
+  `business_registration_no` đúng một lần. `_send_via_account()` gọi
+  `set_report_email_content()` để tạo plain-text fallback + HTML alternative và
+  nhúng `signature_logo` bằng CID ngay trước Regards; ảnh inline không được trộn
+  với evidence attachment. Provider Replies dùng cùng helper và preview đủ các
+  dòng chữ ký trước khi gửi. PyInstaller phải bundle thư mục `assets/`.
 - `append_urlscan_evidence_to_drafts()` phải dọn placeholder ảnh thủ công trước khi kiểm tra evidence đã tồn tại;
   draft legacy có thể đã chứa cả placeholder và URLScan block. `parse_draft_email()` cũng dọn lần cuối khi body có
   URL `urlscan.io/screenshots/*.png`, đảm bảo draft cũ gửi lại không lộ chỉ dẫn `[ĐÍNH KÈM ...]`.

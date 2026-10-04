@@ -428,7 +428,9 @@ with right:
     details = {"reported_url": reported_url, "button_label": button_label, "redirect_url": redirect_url, "official_url": official_url, "evidence": evidence,
                "screenshot_attached": has_valid_screenshot,
                "browser_evidence": browser_capture,
-               "contact_name": cfg.get("contact_name", ""), "contact_email": cfg.get("contact_email", "")}
+               "contact_name": cfg.get("contact_name", ""), "contact_email": cfg.get("contact_email", ""),
+               "signature_role": cfg.get("signature_role", ""), "company_name": cfg.get("company_name", ""),
+               "business_registration_no": cfg.get("business_registration_no", "")}
     default_subject, default_body, warnings = build_reply(mail, details)
     subject_key, body_key = f"{key}_subject", f"{key}_body"
     if subject_key not in st.session_state: st.session_state[subject_key] = default_subject

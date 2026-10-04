@@ -47,6 +47,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formatdate, getaddresses, make_msgid
+from html import escape
 from urllib.parse import urlparse
 
 import cloaking_detector
@@ -125,6 +126,7 @@ LOG_PATH = _runtime_path("case_log.csv")
 REPORTS_DIR = _runtime_path("reports")
 SENT_LOG_PATH = _runtime_path("sent_log.csv")
 CLOAKING_EVIDENCE_DIR = _runtime_path(os.path.join("evidence", "cloaking"))
+DEFAULT_SIGNATURE_LOGO = os.path.join("assets", "email", "logo-win.jpg")
 
 CA_ABUSE_NOTES = {
     "google trust services": {
@@ -993,6 +995,22 @@ def load_config():
         and str(item.get("proxy") or "").strip()
     ]
 
+    company_name = cfg.get("company", "company_name", fallback="OKWIN Media Co., Ltd").strip()
+    signature_role = cfg.get("company", "signature_role", fallback="Brand Protection").strip()
+    business_registration_no = cfg.get(
+        "company", "business_registration_no", fallback="0318893644",
+    ).strip()
+    signature_logo = cfg.get(
+        "company", "signature_logo", fallback=DEFAULT_SIGNATURE_LOGO,
+    ).strip()
+    for account in smtp_accounts:
+        if not isinstance(account, dict):
+            continue
+        account.setdefault("company_name", company_name)
+        account.setdefault("signature_role", signature_role)
+        account.setdefault("business_registration_no", business_registration_no)
+        account.setdefault("signature_logo", signature_logo)
+
     return {
         "vt_api_key": cfg.get("api", "vt_api_key", fallback="") or os.environ.get("VT_API_KEY", ""),
         "gsb_api_key": cfg.get("api", "gsb_api_key", fallback="") or os.environ.get("GSB_API_KEY", ""),
@@ -1001,6 +1019,10 @@ def load_config():
         "brand_name": cfg.get("company", "brand_name", fallback="[TÊN THƯƠNG HIỆU]"),
         "contact_name": cfg.get("company", "contact_name", fallback="[TÊN NGƯỜI BÁO CÁO]"),
         "contact_email": cfg.get("company", "contact_email", fallback="[EMAIL LIÊN HỆ]"),
+        "company_name": company_name,
+        "signature_role": signature_role,
+        "business_registration_no": business_registration_no,
+        "signature_logo": signature_logo,
         # Multi-account + proxy (mới)
         "smtp_accounts": smtp_accounts,
         "smtp_proxies": smtp_proxies,
@@ -2943,7 +2965,7 @@ def _send_via_account(
         )
         msg["Message-ID"] = message_id
         sent_at = datetime.now(timezone.utc).isoformat()
-        msg.set_content(body, charset="utf-8")
+        set_report_email_content(msg, body, account)
 
         for attachment_path in attachments or []:
             safe_path = os.path.abspath(str(attachment_path))
@@ -3047,7 +3069,80 @@ def personalize_email_body(body: str, cfg: dict, account: dict) -> str:
         rendered = rendered.replace(company_email, sender_email)
     if company_name and sender_name and sender_name != company_name:
         rendered = rendered.replace(company_name, sender_name)
+    organization = str(
+        account.get("company_name") or cfg.get("company_name") or ""
+    ).strip()
+    role = str(account.get("signature_role") or cfg.get("signature_role") or "").strip()
+    registration = str(
+        account.get("business_registration_no")
+        or cfg.get("business_registration_no")
+        or ""
+    ).strip()
+    signature_lines = []
+    role_line = " — ".join(value for value in (role, organization) if value)
+    if role_line and role_line not in rendered:
+        signature_lines.append(role_line)
+    registration_line = f"Business Registration No. {registration}" if registration else ""
+    if registration_line and registration_line not in rendered:
+        signature_lines.append(registration_line)
+    if signature_lines:
+        rendered = rendered.rstrip() + "\n" + "\n".join(signature_lines) + "\n"
     return rendered
+
+
+def _signature_logo_path(account: dict) -> str:
+    """Resolve a configured signature logo without exposing its path in the body."""
+    configured = str(account.get("signature_logo") or "").strip()
+    if not configured:
+        return ""
+    if os.path.isabs(configured):
+        return configured if os.path.isfile(configured) else ""
+    candidates = [
+        os.path.join(BASE_DIR, configured),
+        os.path.join(str(getattr(sys, "_MEIPASS", BASE_DIR)), configured),
+    ]
+    return next((path for path in candidates if os.path.isfile(path)), "")
+
+
+def set_report_email_content(msg: EmailMessage, body: str, account: dict) -> None:
+    """Set plain + HTML bodies and embed the optional brand logo by Content-ID."""
+    msg.set_content(body, charset="utf-8")
+    logo_path = _signature_logo_path(account)
+    if not logo_path:
+        return
+
+    logo_cid = make_msgid(domain="signature.local")
+    html_lines = []
+    logo_added = False
+    for line in str(body or "").splitlines():
+        if not logo_added and line.strip().lower() in {"regards,", "kind regards,"}:
+            html_lines.append(
+                f'<img src="cid:{logo_cid[1:-1]}" alt="Brand logo" '
+                'width="64" height="64" style="display:block;width:64px;height:64px;'
+                'object-fit:contain;margin:0 0 8px 0;border:0;" />'
+            )
+            logo_added = True
+        html_lines.append(escape(line) if line else "&nbsp;")
+    if not logo_added:
+        html_lines.extend([
+            "&nbsp;",
+            f'<img src="cid:{logo_cid[1:-1]}" alt="Brand logo" '
+            'width="64" height="64" style="display:block;width:64px;height:64px;'
+            'object-fit:contain;margin:0 0 8px 0;border:0;" />',
+        ])
+    html_body = (
+        '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.45;'
+        'color:#111;">' + "<br>\n".join(html_lines) + "</div>"
+    )
+    msg.add_alternative(html_body, subtype="html", charset="utf-8")
+    html_part = msg.get_payload()[-1]
+    mime_type, _encoding = mimetypes.guess_type(logo_path)
+    maintype, subtype = (mime_type or "image/jpeg").split("/", 1)
+    with open(logo_path, "rb") as logo_file:
+        html_part.add_related(
+            logo_file.read(), maintype=maintype, subtype=subtype,
+            cid=logo_cid, disposition="inline",
+        )
 
 
 def send_report_email_bulk(

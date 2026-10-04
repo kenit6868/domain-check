@@ -247,6 +247,15 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-10-04 — Email SMTP bổ sung chữ ký tổ chức gồm vai trò Brand Protection,
+  pháp nhân và mã đăng ký; logo OKWIN chuyển vào `assets/email/` và được nhúng
+  inline 64 px bằng CID ngay trước Regards. Mail giữ plain-text fallback, HTML
+  alternative và evidence attachment độc lập. Provider Replies preview cùng chữ
+  ký và dùng chung MIME helper; PyInstaller bundle `assets/`.
+  Đã đạt 11/11 test tập trung, AppTest Provider Replies và compileall. Full suite
+  chạy 365 test, còn đúng baseline Windows: 3 failure + 6 error ở mock macOS,
+  Domain Worker stop và Provider Replies cũ, không thuộc thay đổi chữ ký.
+
 - 2026-10-02 — Chuẩn hóa 5+5 mẫu webform Registrar/Registry theo góc nhìn người
   đại diện thương hiệu/tổ chức, dùng `We`. Registry khi chưa có delivery Registrar
   chỉ nói tập thể phát hiện URL nghi phishing và submit để review, không còn câu

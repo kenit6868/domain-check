@@ -420,6 +420,14 @@ Các biến thể viết theo góc nhìn người đại diện thương hiệu/
 nói tập thể đã phát hiện URL nghi phishing và đang gửi để xem xét; không chèn câu
 phủ định máy móc về một báo cáo Registrar chưa tồn tại.
 
+Email gửi qua SMTP có chữ ký tổ chức dùng chung: tên người gửi/email theo từng
+account, tiếp theo là `Brand Protection — OKWIN Media Co., Ltd` và
+`Business Registration No. 0318893644`. Logo tại `assets/email/logo-win.jpg`
+được nhúng inline 64 px ngay trước `Regards` bằng Content-ID; mail vẫn có bản
+plain text đầy đủ và evidence tiếp tục là attachment riêng. Có thể đổi các giá
+trị bằng `signature_role`, `company_name`, `business_registration_no` và
+`signature_logo` trong `[company]`.
+
 ## Lưu ý cho Windows
 
 Nếu chạy trong PowerShell/CMD và gặp `UnicodeEncodeError` khi in ra tiếng Việt có dấu, set biến môi

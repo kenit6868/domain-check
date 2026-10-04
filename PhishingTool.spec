@@ -133,6 +133,7 @@ app_datas = [
     ("cloudflare_abuse_api.py", "."),
     ("cloudflare_profile_bridge.py", "."),
     ("chrome_extension", "chrome_extension"),
+    ("assets",              "assets"),
     ("pages",               "pages"),
     ("config.example.ini",  "."),
 ]

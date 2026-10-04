@@ -8,6 +8,58 @@ import phishing_toolkit as pt
 
 
 class EmailAttachmentTests(unittest.TestCase):
+    def test_inline_logo_is_embedded_before_organization_signature(self):
+        smtp = Mock()
+        account = {
+            "username": "sender@example.org", "password": "secret",
+            "host": "smtp.example.org", "port": 587,
+            "signature_logo": os.path.join(
+                os.path.dirname(pt.__file__), "assets", "email", "logo-win.jpg",
+            ),
+        }
+        body = (
+            "Please review the reported URL.\n\nRegards,\nNeik\n"
+            "neik@camellrp.com\nBrand Protection — OKWIN Media Co., Ltd\n"
+            "Business Registration No. 0318893644\n"
+        )
+        with (
+            patch.object(pt.smtplib, "SMTP", return_value=smtp),
+            patch.object(pt, "_imap_save_sent", return_value=None),
+        ):
+            result = pt.send_report_email_single(
+                "abuse@example.net", "Report", body, account,
+            )
+
+        self.assertTrue(result["success"])
+        message = smtp.send_message.call_args.args[0]
+        self.assertTrue(message.is_multipart())
+        plain = message.get_body(preferencelist=("plain",)).get_content()
+        html = message.get_body(preferencelist=("html",)).get_content()
+        self.assertIn("Brand Protection — OKWIN Media Co., Ltd", plain)
+        self.assertIn("Business Registration No. 0318893644", plain)
+        self.assertIn('width="64"', html)
+        self.assertLess(html.index("cid:"), html.index("Regards,"))
+        inline_images = [
+            part for part in message.walk()
+            if part.get_content_maintype() == "image"
+            and part.get_content_disposition() == "inline"
+        ]
+        self.assertEqual(1, len(inline_images))
+        self.assertTrue(inline_images[0]["Content-ID"])
+
+    def test_personalized_signature_adds_organization_lines_once(self):
+        cfg = {
+            "contact_name": "Neik", "contact_email": "neik@camellrp.com",
+            "signature_role": "Brand Protection",
+            "company_name": "OKWIN Media Co., Ltd",
+            "business_registration_no": "0318893644",
+        }
+        body = "Regards,\nNeik\nneik@camellrp.com\n"
+        rendered = pt.personalize_email_body(body, cfg, {"username": "sender@example.org"})
+        rendered_again = pt.personalize_email_body(rendered, cfg, {"username": "sender@example.org"})
+        self.assertEqual(1, rendered_again.count("Brand Protection — OKWIN Media Co., Ltd"))
+        self.assertEqual(1, rendered_again.count("Business Registration No. 0318893644"))
+
     def test_single_sender_attaches_cloaking_manifest(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             evidence_path = os.path.join(temp_dir, "cloaking-evidence.json")

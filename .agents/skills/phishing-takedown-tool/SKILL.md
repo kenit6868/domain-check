@@ -254,6 +254,10 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Draft do người đại diện thương hiệu/tổ chức submit phải dùng góc nhìn `We`;
   khi chưa có delivery Registrar thì không chèn câu meta phủ định lịch sử, chỉ
   mô tả tự nhiên việc phát hiện URL nghi phishing và gửi để provider review.
+- Chữ ký tổ chức phải được personalize theo SMTP account ở lõi dùng chung. Logo
+  thương hiệu nếu cấu hình phải nhúng inline bằng CID trong HTML alternative,
+  giữ plain-text fallback và không xuất hiện trong danh sách evidence attachment.
+  Provider Replies phải preview đủ dòng chữ ký và dùng cùng MIME helper khi gửi.
 - Khác biệt giữa URL gốc và một path probe như `/vi-vn/` chỉ là khám phá đường
   dẫn, không được cộng điểm cloaking. Phân loại nội dung nhạy cảm phải tách khỏi
   verdict cloaking.

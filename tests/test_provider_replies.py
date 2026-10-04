@@ -7,6 +7,20 @@ import provider_replies as pr
 from provider_replies import ACTION_REQUIRED_TYPES, build_reply, build_reply_vi, extract_reply_context, load_reply_log, needs_reply, parse_message, provider_message_vi, received_datetime, record_reply_sent, reply_log_key, save_uploaded_evidence
 
 class ProviderReplyTests(unittest.TestCase):
+    def test_reply_signature_includes_organization_identity(self):
+        mail = self.make_mail("abuse@example.test", "Case update", "Please provide the URL.")
+        _subject, body, _warnings = build_reply(mail, {
+            "reported_url": "https://phish.example.test/login",
+            "contact_name": "Neik",
+            "contact_email": "neik@camellrp.com",
+            "signature_role": "Brand Protection",
+            "company_name": "OKWIN Media Co., Ltd",
+            "business_registration_no": "0318893644",
+        })
+        self.assertIn("Kind regards,\nNeik\nneik@camellrp.com", body)
+        self.assertIn("Brand Protection — OKWIN Media Co., Ltd", body)
+        self.assertIn("Business Registration No. 0318893644", body)
+
     def make_mail(self, sender, subject, body):
         msg = EmailMessage(); msg["From"] = sender; msg["To"] = "reporter@example.com"; msg["Subject"] = subject; msg["Message-ID"] = "<case-1@example.com>"; msg.set_content(body)
         return parse_message("12", "reporter@example.com", msg.as_bytes())

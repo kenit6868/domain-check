@@ -605,6 +605,13 @@ thời được mở kết nối mới và retry tối đa một lần với cù
 thực `535`, sender hoặc recipient không retry. Không kiểm tra thay đổi này bằng
 SMTP thật trong test tự động; dùng mock để tránh gửi báo cáo ngoài ý muốn.
 
+Chữ ký SMTP lấy tên/email theo account rồi thêm vai trò, pháp nhân và mã đăng ký
+từ `[company]`. Email được gửi dạng multipart/alternative: plain text là fallback,
+HTML nhúng logo 64 px bằng Content-ID ngay trước `Regards`/`Kind regards`; logo
+không phải evidence attachment. Nếu logo thiếu hoặc đường dẫn sai, hệ thống vẫn
+gửi bản plain text thay vì làm hỏng delivery. Provider Replies preview đầy đủ
+phần chữ ký chữ và dùng cùng cơ chế MIME khi gửi đúng thread.
+
 ## Thống kê email hằng ngày
 
 Menu **Thống kê email** chỉ phục vụ một việc: xem tổng mail nhận của đúng một

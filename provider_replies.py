@@ -12,6 +12,7 @@ import re
 import smtplib
 import requests
 import browser_evidence
+import phishing_toolkit as pt
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header
@@ -869,6 +870,12 @@ def build_reply(mail, details):
     if target and mail.request_type != "full_url" and not (mail.provider == "cloudflare" and mail.request_type in ("technical_evidence", "clarification")): core += f"\n\nReported URL:\n{target}"
     body = intro + core + f"\n\nKind regards,\n{(details.get('contact_name') or 'Reporter').strip()}"
     if details.get("contact_email"): body += f"\n{details['contact_email'].strip()}"
+    role = str(details.get("signature_role") or "").strip()
+    company = str(details.get("company_name") or "").strip()
+    role_line = " — ".join(value for value in (role, company) if value)
+    if role_line: body += f"\n{role_line}"
+    registration = str(details.get("business_registration_no") or "").strip()
+    if registration: body += f"\nBusiness Registration No. {registration}"
     return subject, body, warnings
 
 
@@ -1201,7 +1208,7 @@ def send_threaded_reply(account, mail, subject, body, attachments=None, proxy_st
     msg["Message-ID"] = message_id
     sent_at = datetime.now(timezone.utc).isoformat()
     if mail.message_id: msg["In-Reply-To"] = mail.message_id; msg["References"] = mail.message_id
-    msg.set_content(body)
+    pt.set_report_email_content(msg, body, account)
     for path in attachments or []:
         if not path or not os.path.isfile(path): continue
         mime, _ = mimetypes.guess_type(path); major, minor = (mime or "application/octet-stream").split("/", 1)
