@@ -494,6 +494,8 @@ CCTLD_REGISTRY_CONTACTS = {
     "black": {"registry": "Identity Digital", "abuse_email": "abuse@identity.digital", "note": None},
     "me": {"registry": "doMEn", "abuse_email": None, "report_webform": "https://identity.digital/policies/report-abuse", "note": "Không có kênh registry riêng — báo nhà đăng ký."},
     "tv": {"registry": "Verisign", "abuse_email": None, "report_webform": None, "note": "Không có kênh registry riêng — báo nhà đăng ký."},
+    "best": {"registry": "domains.best", "abuse_email": None, "report_webform": "https://domains.best/contact?type=abuse", "note": "Không có kênh registry riêng — báo nhà đăng ký."},
+    "bond": {"registry": "shortdot.bond", "abuse_email": None, "report_webform": "https://shortdot.bond/report-abuse", "note": "Không có kênh registry riêng — báo nhà đăng ký."},
 }
 
 # Bảng tĩnh abuse email của các registrar phổ biến — dùng làm fallback khi WHOIS không trả về email.
