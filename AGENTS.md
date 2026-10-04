@@ -255,6 +255,14 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
   Đã đạt 11/11 test tập trung, AppTest Provider Replies và compileall. Full suite
   chạy 365 test, còn đúng baseline Windows: 3 failure + 6 error ở mock macOS,
   Domain Worker stop và Provider Replies cũ, không thuộc thay đổi chữ ký.
+  Sửa tiếp thứ tự nội dung: `Reported URL`, Browser Evidence và cloaking evidence
+  đều dùng helper chung để chèn trước Regards, không còn lọt giữa email liên hệ
+  và hai dòng tổ chức trong chữ ký.
+  Test thứ tự chữ ký và Browser Evidence đạt; full suite chạy 366 test, vẫn còn
+  đúng baseline 3 failure + 6 error không liên quan nêu trên.
+  Draft legacy đã chứa Reported URL sai vị trí được chuẩn hóa idempotent: xóa
+  đúng marker trùng rồi chèn lại trước chữ ký, không yêu cầu xóa file thủ công.
+  Full suite sau migration chạy 367 test, vẫn đúng baseline 3 failure + 6 error.
 
 - 2026-10-02 — Chuẩn hóa 5+5 mẫu webform Registrar/Registry theo góc nhìn người
   đại diện thương hiệu/tổ chức, dùng `We`. Registry khi chưa có delivery Registrar

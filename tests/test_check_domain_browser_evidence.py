@@ -18,6 +18,40 @@ PNG_1X1 = base64.b64decode(
 
 
 class CheckDomainBrowserEvidenceTests(unittest.TestCase):
+    def test_reported_url_is_inserted_before_signature_and_organization_lines(self):
+        target = "https://zeed789win.org/vi-vn/"
+        with tempfile.TemporaryDirectory() as folder:
+            draft = os.path.join(folder, "report.txt")
+            Path(draft).write_text(
+                "To: abuse@example.test\nSubject: Report\n\nPlease investigate.\n\n"
+                "Regards,\nNEIK\nneik@camellrp.com\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([draft], pt.append_reported_url_to_drafts([draft], target))
+            parsed = pt.parse_draft_email(draft)
+            personalized = pt.personalize_email_body(parsed["body"], {
+                "contact_name": "NEIK", "contact_email": "neik@camellrp.com",
+                "signature_role": "Brand Protection",
+                "company_name": "OKWIN Media Co., Ltd",
+                "business_registration_no": "0318893644",
+            }, {"username": "neik@camellrp.com"})
+        self.assertLess(personalized.index(f"Reported URL: {target}"), personalized.index("Regards,"))
+        self.assertLess(personalized.index("Regards,"), personalized.index("Brand Protection"))
+
+    def test_existing_reported_url_after_signature_is_migrated_before_it(self):
+        target = "https://zeed789win.org/vi-vn/"
+        with tempfile.TemporaryDirectory() as folder:
+            draft = os.path.join(folder, "legacy-report.txt")
+            Path(draft).write_text(
+                "To: abuse@example.test\nSubject: Report\n\nPlease investigate.\n\n"
+                f"Regards,\nNEIK\nneik@camellrp.com\n\nReported URL: {target}\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([draft], pt.append_reported_url_to_drafts([draft], target))
+            content = Path(draft).read_text(encoding="utf-8")
+        self.assertEqual(1, content.count(f"Reported URL: {target}"))
+        self.assertLess(content.index(f"Reported URL: {target}"), content.index("Regards,"))
+
     def test_quality_gate_blocks_missing_subject_url_placeholder_and_not_flagged(self):
         errors = pt.validate_report_delivery({
             "to": "abuse@example.test", "subject": "",

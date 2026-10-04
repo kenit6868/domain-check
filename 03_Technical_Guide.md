@@ -611,6 +611,9 @@ HTML nhúng logo 64 px bằng Content-ID ngay trước `Regards`/`Kind regards`;
 không phải evidence attachment. Nếu logo thiếu hoặc đường dẫn sai, hệ thống vẫn
 gửi bản plain text thay vì làm hỏng delivery. Provider Replies preview đầy đủ
 phần chữ ký chữ và dùng cùng cơ chế MIME khi gửi đúng thread.
+Các bước bổ sung full URL, Browser Evidence hoặc cloaking evidence phải đặt block
+trước dòng `Regards`/`Kind regards`. Không nối vào cuối draft, để chữ ký luôn là
+một khối liền nhau và nằm cuối email.
 
 ## Thống kê email hằng ngày
 

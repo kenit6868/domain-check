@@ -723,6 +723,9 @@ không có con người xác nhận domain thực sự đang giả mạo thươn
   nhúng `signature_logo` bằng CID ngay trước Regards; ảnh inline không được trộn
   với evidence attachment. Provider Replies dùng cùng helper và preview đủ các
   dòng chữ ký trước khi gửi. PyInstaller phải bundle thư mục `assets/`.
+  Mọi helper bổ sung `Reported URL` hoặc evidence phải gọi
+  `_insert_before_email_signature()`; không được nối block vào cuối draft vì sẽ
+  tách tên/email khỏi các dòng tổ chức được thêm trong personalization.
 - `append_urlscan_evidence_to_drafts()` phải dọn placeholder ảnh thủ công trước khi kiểm tra evidence đã tồn tại;
   draft legacy có thể đã chứa cả placeholder và URLScan block. `parse_draft_email()` cũng dọn lần cuối khi body có
   URL `urlscan.io/screenshots/*.png`, đảm bảo draft cũ gửi lại không lộ chỉ dẫn `[ĐÍNH KÈM ...]`.

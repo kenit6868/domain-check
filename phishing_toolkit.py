@@ -3439,6 +3439,16 @@ def log_sent(row: dict):
             os.fsync(f.fileno())
 
 
+def _insert_before_email_signature(content: str, block: str) -> str:
+    """Insert report content before Regards/Kind regards, keeping the signature last."""
+    signature = re.search(r"(?im)^\s*(?:Kind regards|Regards),?\s*$", content)
+    if not signature:
+        return content.rstrip() + "\n\n" + block.strip() + "\n"
+    prefix = content[:signature.start()].rstrip()
+    suffix = content[signature.start():].lstrip()
+    return prefix + "\n\n" + block.strip() + "\n\n" + suffix.rstrip() + "\n"
+
+
 def append_reported_url_to_drafts(drafts: list, target_url: str) -> list:
     """Ensure every generated report contains the exact offending URL/path."""
     marker = f"Reported URL: {target_url}"
@@ -3447,9 +3457,13 @@ def append_reported_url_to_drafts(drafts: list, target_url: str) -> list:
         try:
             with open(path, encoding="utf-8") as f:
                 content = f.read()
-            if marker not in content:
+            without_marker = re.sub(
+                rf"(?m)^\s*{re.escape(marker)}\s*$\n?", "", content,
+            ).rstrip()
+            normalized = _insert_before_email_signature(without_marker, marker)
+            if normalized != content:
                 with open(path, "w", encoding="utf-8") as f:
-                    f.write(content.rstrip() + f"\n\n{marker}\n")
+                    f.write(normalized)
             updated.append(path)
         except OSError:
             updated.append(path)
@@ -3557,7 +3571,7 @@ def append_cloaking_evidence_to_drafts(
                 "\n", content, flags=re.DOTALL,
             ).rstrip()
             with open(path, "w", encoding="utf-8") as file:
-                file.write(content + "\n\n" + evidence_block + "\n")
+                file.write(_insert_before_email_signature(content, evidence_block))
             updated.append(path)
         except OSError:
             continue
@@ -3595,13 +3609,7 @@ def append_browser_evidence_to_drafts(drafts: list, evidence_result: dict) -> li
                 r"--- End of Verified Browser Evidence ---\n*",
                 "\n", content, flags=re.DOTALL,
             ).rstrip()
-            signature = re.search(r"(?im)^\s*(?:Kind regards|Regards),?\s*$", content)
-            if signature:
-                prefix = content[:signature.start()].rstrip()
-                suffix = content[signature.start():].lstrip()
-                staged_content[path] = prefix + "\n\n" + block + "\n\n" + suffix + "\n"
-            else:
-                staged_content[path] = content + "\n\n" + block + "\n"
+            staged_content[path] = _insert_before_email_signature(content, block)
         except OSError:
             return []
     temp_paths = {}

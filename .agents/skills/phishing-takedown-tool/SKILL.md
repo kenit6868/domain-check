@@ -258,6 +258,8 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   thương hiệu nếu cấu hình phải nhúng inline bằng CID trong HTML alternative,
   giữ plain-text fallback và không xuất hiện trong danh sách evidence attachment.
   Provider Replies phải preview đủ dòng chữ ký và dùng cùng MIME helper khi gửi.
+  Helper thêm Reported URL/evidence phải chèn trước `Regards`/`Kind regards`,
+  không append cuối draft làm URL hoặc evidence lọt vào giữa chữ ký tổ chức.
 - Khác biệt giữa URL gốc và một path probe như `/vi-vn/` chỉ là khám phá đường
   dẫn, không được cộng điểm cloaking. Phân loại nội dung nhạy cảm phải tách khỏi
   verdict cloaking.

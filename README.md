@@ -427,6 +427,8 @@ account, tiếp theo là `Brand Protection — OKWIN Media Co., Ltd` và
 plain text đầy đủ và evidence tiếp tục là attachment riêng. Có thể đổi các giá
 trị bằng `signature_role`, `company_name`, `business_registration_no` và
 `signature_logo` trong `[company]`.
+`Reported URL` và mọi khối evidence luôn được chèn trước `Regards`; toàn bộ tên,
+email, pháp nhân và mã đăng ký được giữ liền nhau ở cuối thư.
 
 ## Lưu ý cho Windows
 
