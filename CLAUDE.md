@@ -1,5 +1,155 @@
 # CLAUDE.md
 
+`pages/15_Lead_Triage.py` lưu `lead_triage_visible_targets` theo snapshot review.
+Check theo dòng chuyển vùng kết quả sang đúng target; batch chuyển sang các
+target vừa chọn. `lead_triage_results` vẫn giữ kết quả các target đã check để
+quay lại xem, còn thay đổi target đơn xóa observation English dùng chung để
+không gắn nhầm nội dung. Nạp cache cũ không có visible target tiếp tục hiển thị
+các kết quả đã lưu.
+
+Lead Triage module version 23 định dạng report theo các mục giả mạo thương hiệu,
+chuỗi chuyển hướng, đầu mối backend và yêu cầu xử lý. Nó giữ nội dung phishing
+và evidence của Domain Worker, đưa registrar từ `reg=` vào đầu report khi có,
+và liệt kê mọi backend đã nhập kèm cảnh báo quan hệ chưa xác minh. Không khẳng
+định lấy cắp thông tin, tiền hoặc OTP nếu evidence không chứng minh.
+
+Lead Triage module version 22 giữ các backend do operator cung cấp trong thư,
+kể cả khi chưa có DNS/URL overlap; từng dòng nêu trạng thái overlap và luôn yêu
+cầu NCC xác minh mối liên hệ trước khi gắn vào vụ việc. RDAP của IP cung cấp
+được ghi rõ nếu không xuất hiện trong DNS A hiện tại. Module 21 rút gọn report có DOM evidence: bỏ timestamp
+check và DNS/operator target trừ khi IP target trùng backend được giữ; không
+thêm heading dữ kiện rỗng. Giữ formatter Browser Evidence chung nhưng bỏ câu
+yêu cầu điều tra chung bị lặp trong block riêng của Lead Triage; `Provider review
+focus` chỉ còn điểm đánh giá tại trang đích và câu hỏi backend nếu có liên hệ.
+Bản Việt dùng tóm tắt nguồn–đích thay cho năm bước lặp lại. Không sửa evidence
+manifest hoặc formatter chung của Domain Worker.
+
+Lead Triage module version 20 từng chỉ thêm backend vào body gửi khi DNS A của target
+trùng DNS A backend hoặc hostname backend xuất hiện trong manifest Browser
+Evidence đã validate; module 22 vẫn ghi rõ mức liên hệ chưa xác minh. Snapshot backend
+chung dùng `our brand identity`; sanitizer Lead Triage sửa cả draft cũ có
+`the my brand identity`. Khi có evidence, builder bỏ yêu cầu điều tra chung lặp
+lại, giữ nguyên block nguồn–đích và URL redirect gốc, và viết review focus theo
+quan sát thay vì giả định có URL thương hiệu chính thức. Org RDAP được bỏ dấu
+chấm cuối trước khi ghép câu. Test Lead Triage cô lập sent log trong thư mục tạm.
+
+Lead Triage lọc dòng nhắc AU88/AU888 trong subject/body snapshot và observation
+trước khi tạo hai bản preview; subject bị loại dùng fallback theo domain.
+Không sửa snapshot gốc hoặc URL chứng cứ. Module version 11 nạp lại helper cũ.
+
+`lead_triage.py` parse ghi chú hạ tầng theo dòng bắt đầu bằng URL/domain,
+bỏ metadata như registrar/contact email và chỉ nhận IP sau marker `A:`.
+`worker_report_recipient()` đối chiếu `result.recipients` từ precheck Domain
+Worker với channel của draft đã chọn, tách danh sách email, lọc định dạng và
+recipient bị chặn; chỉ fallback `To` trong draft Worker. IP RDAP/claim trong ghi
+chú không định tuyến email nhận. Widget email keyed theo hash địa chỉ mặc định
+để cập nhật khi precheck đổi; module version 17 reload helper mới.
+`refresh_worker_recipients()` gọi lại đúng `_precheck_report_recipients()` theo
+domain đang duyệt; lỗi xóa recipient precheck cũ và gắn `recipients_error` để
+UI khóa gửi. Thành công cập nhật recipient, thời điểm UTC và ô email; module
+version 18 reload helper mới.
+Với DOM evidence hợp lệ, builder giữ nguyên block tiếng Anh từ
+`browser_evidence.format_email_evidence_block()` và thêm `Provider review focus`
+từ manifest: URL nguồn, control, URL đích cuối, câu hỏi xác minh thương hiệu và
+hạ tầng backend. Bản Việt liệt kê các bước tương ứng; không gọi DOM href là
+click/redirect đã xác minh. Module version 15 nạp lại draft mới.
+`backend_lead` chỉ theo marker mục backend, không suy từ bản ghi `A:`. Page
+`15_Lead_Triage.py` chỉ chọn các domain trước marker làm report target, giữ
+kết quả trong
+`st.session_state` theo hash input. `lead_triage.py` lưu snapshot review v1
+atomically tại `data/lead_triage_cache.json`, chỉ gồm raw, parsed target,
+precheck/draft, đường dẫn evidence và giá trị widget review; không lưu config,
+credential hay SMTP secret. Page khôi phục widget qua lần chuyển menu/F5, không
+tự chạy network; cache backend sau reload buộc kiểm tra lại khi bấm Check.
+Xóa cache bỏ snapshot và state UI, không xóa sent log/evidence audit. Bảng dùng
+`ButtonColumn` để check từng dòng;
+Preview dùng `personalize_email_body()` và `_signature_logo_path()` chung với
+email gửi, đặt logo trước Regards trong native container. Trước khi chọn SMTP
+account, preview dùng profile tổ chức từ config; sau khi chọn sẽ dùng account.
+Textarea trong expander giữ plain text exact để đối chiếu với body gửi.
+Page gộp các trường chữ ký thiếu từ config vào bản sao account cho cả preview
+và SMTP; không ghi đè `username`/`contact_email` của account đã chọn.
+Page lưu snapshot `lead_triage_parsed` chỉ khi bấm **Phân tích ghi chú**; thay đổi
+ô nhập sẽ ẩn toàn bộ bảng và action đến khi bấm lại. Phân tích chỉ gọi parser
+cục bộ, không gọi precheck/network hay tải cấu hình gửi.
+callback giữ target và hash ghi chú, chỉ cập nhật kết quả/evidence của target đó.
+`lead_triage_delivery_status` trong session đánh dấu target đã gửi khi SMTP
+thành công hoặc trả `already_sent`; page rerun để cập nhật ngay cột Trạng thái
+gửi. Gửi lỗi không đổi status, còn `sent_key` theo fingerprint khóa gửi trùng.
+`sent_lead_targets()` đọc metadata `sent_log.csv`, chỉ nhận `send_mode=lead_triage`
+và `status=sent` theo `target_url` để khôi phục khóa Check sau phiên mới; session
+vẫn giữ kết quả gửi thành công khi ghi log lỗi. Module version 16 reload helper.
+Domain đã gửi có giá trị Check rỗng trong `ButtonColumn`, không còn trong
+multiselect và bị chặn lại tại callback/batch selection để tránh check lại.
+`check_leads()` chạy tối đa sáu target song song, trả kết quả theo thứ tự input
+và báo tiến độ trên main thread. Bảng ghim Check/Domain bên trái; backend snapshot
+trong session được tái dùng 300 giây theo monotonic time và hash ghi chú.
+Target không dùng cache này. Module version 11 reload helper cũ. `check_lead()` dùng trực tiếp
+`domain_worker._precheck_report_recipients()` và `_precheck_cloaking()`, đối
+chiếu DNS A bằng timeout và fallback system resolver tối đa 4 giây, gọi chung
+`pt.check_http()` và `pt.get_ip_whois()`; các RDAP IP trong một target cũng chạy
+song song với các precheck khác, kể cả khi DNS timeout. `check_lead()` không chạy
+`pt.run_check()`; nút tạo report của từng target mới gọi `prepare_worker_report()`.
+`check_backend_context()` chỉ tra DNS A và RDAP cho các đầu mối sau marker,
+chạy song song với precheck target; không chạy HTTP/cloaking hoặc tạo report
+riêng. Kết quả backend được giữ theo hash ghi chú; batch check làm mới dữ liệu.
+`build_investigation_draft()` chèn tên domain backend, IP ghi chú, DNS A mới,
+org RDAP khớp và thời điểm check UTC của target với nhãn nguồn riêng;
+recipient vẫn lấy theo report của domain phía trên. Backend DNS lỗi được ghi
+`unavailable`, không suy ra quan hệ với URL báo cáo. Addendum yêu cầu NCC xác
+minh mối liên hệ và xử lý dịch vụ chịu trách nhiệm nếu xác nhận vi phạm. Hàm
+lọc AU88/AU888 sửa cả cụm ngữ pháp `the our brand`/`our brand branding`.
+`_report_review_vi()` dịch các biến thể registrar cố định của Worker (mở đầu,
+mô tả, yêu cầu, câu kết, phát hiện và VirusTotal) nhưng giữ nguyên URL, tên
+tổ chức, ngày và số đếm; chỉ bản tiếng Anh được gửi.
+`parse_host_claims()` giữ
+OrgName/OrgAbuseEmail từ ghi chú như claim riêng, không nhập thành kết quả RDAP.
+`prepare_worker_report()` gọi `pt.run_check()` như Domain Worker và snapshot parsed
+subject/body trong RAM theo full URL để lần check URL khác cùng domain không làm
+thay đổi draft đã giữ. Ưu tiên hosting; khi đầu mối có IP nhưng pipeline chưa tạo
+hosting report, dùng đúng `pt.generate_hosting_draft()` chung của Worker.
+`build_investigation_draft()` giữ subject/narrative đó, bỏ note provenance subdomain
+và đổi nhãn Origin IP sang Hosting IP, rồi chèn khối backend
+cùng `browser_evidence.format_email_evidence_block()` trước chữ ký. Page
+chỉ mở gửi khi `validated_dom_attachments()` xác nhận hai ảnh nguồn–đích,
+manifest loại `dom_destination_opened`, chiến lược `dom_destination` và đúng URL;
+`send_investigation_draft()` kiểm tra lại trước SMTP, cả bên trong lock.
+Lead Triage không dùng uploader thủ công hay passive fallback để gửi. Module
+version 12 nạp lại điều kiện gửi mới.
+`_without_excluded_brand()` chỉ bỏ dòng liên hệ chưa xác minh và subject chỉ
+gồm tên thương hiệu bị loại; các câu tố phishing của Worker được giữ và thay
+tên bằng “our brand”. Backend dùng nhãn reported IP, DNS A hiện tại và RDAP,
+không nêu nguồn ghi chú trong body. Module version 13 nạp lại draft mới.
+`_report_review_vi()` dịch đủ bốn biến thể mở đầu registry, hai lý do liên hệ,
+bốn yêu cầu xử lý, lời chào và nhãn Domain/First detected; giữ URL, tên tổ chức,
+chữ ký và dữ liệu gốc. Module version 14 nạp lại bản đối chiếu mới.
+cho nhập thêm observation tiếng Anh, chỉnh email nhận và tải draft trong RAM;
+khóa widget email theo full URL để hai path cùng domain có draft riêng;
+không tạo job/queue. `build_investigation_draft()` trả thêm bản dịch tiếng Việt
+để đối chiếu; SMTP chỉ nhận body tiếng Anh đã personalize và preview. Page chọn
+một tài khoản cấu hình, ràng buộc checkbox xác nhận với fingerprint của recipient,
+account và body hiện tại. `send_investigation_draft()` dùng `sent_log.csv` và lock
+theo fingerprint để chống gửi trùng cùng delivery, ghi metadata không chứa body
+hay secret; page khóa nút trong phiên ngay sau SMTP thành công kể cả khi log lỗi.
+Nút **Chụp URL nguồn + URL đích từ DOM** gọi trực tiếp
+`provider_replies.capture_dom_link_evidence()` như Phản hồi NCC,
+hoặc `browser_evidence.create_manual_browser_evidence()` cho 1–3 ảnh thủ công.
+`evidence_attachment_paths()` xác thực manifest/hash, URL phải khớp trước preview;
+SMTP yêu cầu Browser Evidence hợp lệ và fingerprint gồm byte hash của mọi attachment.
+Khối backend gửi NCC tách IP trong ghi chú khỏi DNS A mới và chỉ lấy org RDAP
+khớp IP phân giải; mối liên hệ vẫn cần NCC xác minh. AU888 được loại khỏi thư.
+Yêu cầu xử lý trực tiếp yêu cầu đình chỉ
+dịch vụ vi phạm, bảo toàn hồ sơ và xác nhận biện pháp. Cả hai panel personalize
+chữ ký theo tài khoản; panel Anh preview logo, SMTP vẫn nhúng logo bằng MIME helper chung.
+Case cloaking/coverage gap ở cả precheck và pipeline bị khóa gửi bằng cùng predicate
+`domain_worker._cloaking_requires_review()`. Delivery log dùng `delivery_kind=report`
+và channel theo filename gốc. Bản tiếng Việt dịch các biến thể hosting cho đối chiếu.
+Với domain trần URL kiểm tra là
+`https://domain/`, không suy ra chứng cứ cho path khác.
+Page kiểm tra `lead_triage.MODULE_VERSION` và reload module bằng `importlib`
+khi Streamlit còn cache bản cũ thiếu `build_investigation_draft`; không yêu
+cầu restart app hoặc xóa kết quả đang giữ trong session state.
+
 Quick Report: `_render_results` chỉ có timer khi còn pending; khi thu hoạch hết futures, pop pending rồi full rerun một lần để bỏ timer. `_render_domain_block` là nested fragment để widget/form action không rerender toàn bộ batch đã hoàn tất.
 
 Quick Report đặt `runtime_version` trong resource cache dùng chung, không trong session state: session mới sau F5 không được invalidate results/pending futures. Khôi phục `qr_domain_input` từ targets trước khi tạo widget nếu thiếu key; clear dùng callback để reset widget hợp lệ. Cache kết quả chỉ ở RAM, không ghi cfg/credential xuống disk.

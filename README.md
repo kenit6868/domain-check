@@ -12,6 +12,105 @@ profile sử dụng; chạy ứng dụng trên cùng máy với Chrome.
 Bộ công cụ hỗ trợ 2 người rà soát, xác minh và báo cáo (takedown) các domain
 giả mạo thương hiệu công ty để lừa đảo.
 
+Draft Xử lý đầu mối giữ narrative và evidence của Domain Worker, rồi nhóm nội
+dung thành các mục giả mạo thương hiệu, chuỗi chuyển hướng, backend liên quan
+và yêu cầu xử lý. Registrar được đưa vào report khi ghi chú có `reg=`. Mọi
+backend đã nhập đều được nêu cùng DNS A/RDAP và nhãn quan hệ chưa xác minh;
+không khẳng định lấy cắp thông tin, tiền hoặc OTP nếu evidence không chứng minh.
+
+Draft NCC loại các dòng nhắc AU88/AU888 khỏi nội dung cũ và mô tả bổ sung;
+URL chứng cứ vẫn được giữ nguyên. Bấm **Rerun** để cập nhật preview đang mở.
+Trong **Xử lý đầu mối**, thư gửi liệt kê các backend được cung cấp cùng DNS A
+hiện tại và RDAP nếu có. Mỗi đầu mối ghi rõ có hay chưa thấy giao điểm DNS/URL;
+NCC được yêu cầu xác minh mối liên hệ trước khi gắn vào vụ việc. Sau khi tạo lại
+draft, duyệt nội dung trước khi bấm gửi; thư đã gửi trước đó không tự thay đổi.
+Khi có ảnh DOM nguồn–đích, thư giữ bước tái hiện và redirect của Domain Worker
+nhưng bỏ thời điểm/DNS không liên quan và lời yêu cầu điều tra lặp. Bản tiếng
+Việt được rút thành tóm tắt đường dẫn và điểm cần xác minh.
+Trong bảng nhiều domain, nút Check theo dòng chỉ đưa kết quả của domain đó vào
+vùng precheck/report bên dưới; cache các domain khác vẫn được giữ. Check nhiều
+domain hiển thị đúng nhóm vừa chọn.
+
+Menu **Xử lý đầu mối** nhận nguyên ghi chú hạ tầng (dòng domain, `A:` và IP).
+Sau khi dán hoặc sửa ghi chú, bấm **Phân tích ghi chú** để hiện danh sách; bước
+này chỉ xử lý văn bản tại chỗ, chưa truy vấn mạng. Danh sách và kết quả cũ được
+ẩn khi nội dung ô nhập thay đổi cho đến lần phân tích tiếp theo.
+Các domain trước `=== backend ===` là đối tượng báo cáo, được chọn sẵn;
+những domain trong mục backend chỉ là thông tin hạ tầng bổ sung, không có nút
+gửi report riêng. Nút **Check** ở từng dòng kiểm tra đúng URL/domain đó; nút **Check đầu
+mối đã chọn** kiểm tra song song tối đa sáu mục, giữ thứ tự kết quả theo ghi chú.
+Cột **Check** và **Domain/URL** được ghim bên trái bảng. Backend DNS/RDAP được
+tái dùng trong phiên tối đa 5 phút khi ghi chú không đổi; target vẫn check mới.
+Bước check so A record hiện tại với IP được cung cấp, tra contact RDAP cho các IP
+trong ghi chú, kiểm tra HTTP và chạy cùng precheck recipient/cloaking của Domain
+Worker cho domain cần báo cáo. Các đầu mối backend chỉ được tra DNS A/RDAP một
+lần để bổ sung ngữ cảnh cho draft của từng domain phía trên; thư phân biệt IP
+trong ghi chú với DNS mới và đề nghị NCC xác minh mối liên hệ. Bấm **Tạo nội dung report Domain Worker** tại mục cần duyệt mới chạy
+pipeline `run_check()` để tạo draft. Kể cả khi DNS timeout, page vẫn
+giữ IP/contact trong ghi chú và gắn nhãn chưa xác minh. Bên dưới có draft tiếng Anh
+theo từng domain để duyệt, ô mô tả bổ sung đã xác minh, email nhận có thể chỉnh
+và nút tải `.txt`; ghi chú AU888/backend giữ trong phần precheck nội bộ.
+Ghi chú, kết quả precheck, draft và đường dẫn ảnh DOM được lưu cục bộ trong
+`data/lead_triage_cache.json`; mở lại menu hoặc F5 sẽ khôi phục để duyệt tiếp,
+không tự chạy Check hay gửi mail. Bấm **Xóa cache** để bỏ bản nháp hiện tại và
+nhập thông tin khác; lịch sử gửi và file evidence đã tạo vẫn được giữ để đối
+chiếu. Menu không tạo worker job. Draft hiển thị
+hai khung có viền đặt cạnh nhau: tiếng Anh (bản gửi) và tiếng Việt (bản đối chiếu).
+Bản xem trước đặt logo ngay trước chữ ký như email HTML. Thông tin tổ chức lấy
+từ cấu hình chung; chọn tài khoản gửi để xem đúng người ký. Phần văn bản gốc
+trong mỗi khung có thể mở để sao chép hoặc đối chiếu nội dung.
+Nếu tài khoản SMTP thiếu logo hoặc thông tin tổ chức, bản xem trước và email
+gửi cùng lấy giá trị chung trong cấu hình.
+Bản đối chiếu dịch các đoạn mở đầu, mô tả, yêu cầu xử lý và câu kết của mẫu
+registry/registrar Domain Worker, cùng nhãn chứng cứ và câu VirusTotal; tên tổ
+chức, URL, ngày và số liệu chứng cứ giữ nguyên.
+Nút gửi nằm ngay dưới draft của từng domain. Chọn tài khoản SMTP,
+xác minh email nhận và tích xác nhận riêng cho từng draft để bật nút **Gửi report**.
+Email mặc định được lấy từ recipient precheck của Domain Worker theo đúng kênh
+draft (registrar/registry/hosting); nếu kênh đó không có, dùng email hợp lệ trong
+draft Worker. Email IP/backend trong ghi chú không được tự gán làm người nhận.
+Địa chỉ bị chặn hoặc sai định dạng bị loại; ô email vẫn cho chỉnh sau khi xác minh.
+Nút **Kiểm tra lại email nhận (Domain Worker)** tại từng draft chạy lại lookup
+recipient cho đúng domain, hiển thị kênh/địa chỉ và cập nhật ô người nhận ngay.
+Nếu lookup lỗi, kết quả cũ bị loại và nút gửi khóa cho đến khi kiểm tra lại đạt.
+Đầu bảng domain có cột **Trạng thái gửi**: chỉ hiện **Đã gửi** sau SMTP thành công
+hoặc lượt gửi trước đã xác nhận, còn gửi lỗi vẫn là **Chưa gửi**. Trạng thái giữ
+theo đúng URL/domain trong phiên Streamlit khi thay đổi nội dung ghi chú. Khi mở
+lại trang, các lượt Lead Triage đã gửi thành công được khôi phục từ `sent_log.csv`.
+Domain **Đã gửi** không còn nút Check trong bảng và bị loại khỏi lựa chọn Check
+hàng loạt, kể cả sau khi mở lại trang; muốn xử lý thêm một URL khác, nhập đúng
+URL đó thành dòng riêng.
+Thư gửi chỉ chứa bản tiếng Anh đã preview; delivery thành công được ghi metadata
+vào `sent_log.csv` và cùng nội dung/tài khoản/người nhận sẽ không gửi lại.
+Subject/body dùng report Domain Worker; bỏ câu provenance subdomain khỏi thư NCC
+và hiển thị IP hosting. Khi đầu mối có IP mà pipeline chưa
+tạo report hosting, menu gọi cùng formatter `generate_hosting_draft()`. Nội dung
+tố phishing của Worker được giữ khi thay tên thương hiệu bị loại bằng “our brand”;
+khối backend được chèn trước chữ ký và phân biệt IP được cung cấp với DNS/RDAP mới.
+Phần bổ sung ghi thời điểm check UTC, tách IP đầu mối do người vận hành cung cấp
+khỏi DNS A quan sát được, và yêu cầu nhà cung cấp xác minh quan hệ với URL báo
+cáo trước khi gắn hạ tầng đó vào vụ việc. Yêu cầu xử lý nêu rõ điều kiện sau
+khi xác nhận vi phạm; phần report gốc của Domain Worker vẫn được giữ.
+Thư dùng nhãn “IPs supplied for investigation”/“IP được cung cấp để điều tra”, không đưa cụm
+“trong ghi chú” vào nội dung gửi.
+Trước khi gửi, bấm **Chụp URL nguồn + URL đích từ DOM** cho từng URL. Nút gửi
+chỉ mở khi helper Phản hồi NCC chụp thành công đủ hai ảnh nguồn–đích từ DOM,
+manifest/hash hợp lệ và đúng URL. Nếu chỉ có ảnh nguồn thụ động hoặc capture
+thất bại, cần chụp lại; draft vẫn có thể tải để duyệt.
+Thư đính kèm ảnh/manifest, chữ ký tổ chức và logo theo cùng helper Domain Worker.
+Khi DOM capture thành công, draft dùng nguyên block Browser Evidence của Domain
+Worker với các bước tái hiện URL nguồn, nút/link và URL đích; mục **Provider review
+focus** hướng NCC đối chiếu thương hiệu/luồng đăng nhập ở trang đích và kiểm tra
+hạ tầng backend có phục vụ URL nguồn hoặc đích hay không. Bản tiếng Việt có cùng
+các bước để đối chiếu, không khẳng định vi phạm chỉ dựa trên liên kết.
+Phần backend ghi rõ IP từ ghi chú và kết quả DNS/IP/RDAP đã kiểm tra; không đưa ghi chú nội bộ hoặc
+mối liên hệ AU888 chưa xác minh vào email. Case cloaking cần duyệt riêng không
+gửi từ menu này.
+Domain trần được kiểm tra tại trang chủ HTTPS; để kết luận và gửi takedown cần
+full URL cùng chứng cứ hành vi riêng cho từng URL.
+Nếu ứng dụng đang mở khi cập nhật menu, tải lại trang để nhận logic draft mới;
+page tự nạp lại helper cũ còn trong bộ nhớ Streamlit.
+
 ## Cài đặt
 
 ```bash

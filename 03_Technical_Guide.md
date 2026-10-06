@@ -1,5 +1,96 @@
 # CẨM NANG VẬN HÀNH KỸ THUẬT SOC (TECHNICAL OPERATIONS GUIDE)
 
+Report Lead Triage theo bố cục: brand impersonation, redirect chain, backend
+findings và evidence/request. Nội dung hành vi cùng URL/redirect/ảnh vẫn lấy từ
+Domain Worker; registrar chỉ được nêu khi ghi chú cung cấp `reg=`. Tất cả backend
+được liệt kê làm đầu mối điều tra, kèm DNS/RDAP và caveat nếu chưa có giao điểm.
+Không kết luận đánh cắp thông tin, tiền hay OTP nếu chứng cứ không thể hiện.
+Report cũng bỏ dòng nhắc AU88/AU888 khỏi draft cũ và mô tả bổ sung.
+Sau cập nhật, bấm **Rerun** rồi duyệt lại nội dung trước khi gửi.
+Với report mới, thư nêu các đầu mối backend được cung cấp, IP ghi chú, DNS A
+hiện tại và RDAP; nếu IP RDAP không thuộc DNS A hiện tại, thư ghi rõ điều đó.
+Mỗi dòng ghi rõ có hay chưa thấy giao điểm
+DNS/URL; NCC cần xác minh trước khi liên kết đầu mối với vụ việc. Thư có DOM evidence dùng chính
+URL nguồn, link trong DOM, URL cuối và redirect quan sát được; không suy đoán
+backend chung hay URL thương hiệu chính thức. Thư đã gửi không tự sửa lại.
+Thư có DOM evidence giữ bốn bước tái hiện và chuỗi redirect từ formatter chung;
+phần Lead Triage chỉ thêm một điểm cần đánh giá tại trang đích. Thời điểm check,
+DNS/operator target không chèn vào thư nếu không giúp xác minh backend; câu yêu
+cầu điều tra lặp được bỏ. Bản tiếng Việt tóm tắt URL nguồn–đích để duyệt nhanh.
+
+Với ghi chú hạ tầng do người khác chuyển đến, mở **Xử lý đầu mối**, dán nguyên
+văn rồi bấm **Phân tích ghi chú** để xem danh sách. Việc dán/sửa ghi chú không
+tự phân tích hoặc check; bản phân tích trước được ẩn cho đến khi bấm lại.
+Menu lưu bản nháp cục bộ trong `data/lead_triage_cache.json`: chuyển menu hoặc
+F5 rồi quay lại sẽ thấy ghi chú, kết quả, draft và ảnh DOM đã chụp. Đường dẫn
+ảnh được kiểm tra lại trước khi gửi; dữ liệu khôi phục không tự mở URL hay gửi
+email. Bấm **Xóa cache** khi muốn bắt đầu ghi chú khác; nút này không xóa log
+đã gửi hoặc file evidence phục vụ audit.
+Sau đó bấm **Check** ở dòng cần xử lý, hoặc chọn nhiều URL/domain và bấm
+**Check đầu mối đã chọn**. Chỉ các domain ở trước mục `=== backend ===` là đối
+tượng cần báo cáo và được chọn sẵn. Hai domain trong mục backend là đầu mối
+hạ tầng bổ sung, không tạo report riêng; DNS A/RDAP của chúng được đối chiếu
+khi check domain phía trên. Nhiều domain báo cáo được precheck
+song song tối đa sáu mục. Nút Check nằm ở cột ghim bên trái. Cùng ghi chú trong
+5 phút sẽ tái dùng DNS/RDAP backend; các domain target vẫn được check lại.
+Check theo dòng chỉ hiển thị report của target vừa chọn; batch chỉ hiển thị các
+target vừa check. Kết quả trước vẫn nằm trong cache để chọn lại, và observation
+English dùng chung được xóa khi chuyển target đơn.
+Sau precheck, bấm **Tạo nội dung report Domain Worker**
+ở từng mục cần duyệt để chạy pipeline đầy đủ và lấy draft. Đối chiếu
+IP trong ghi chú với DNS A mới và xem RDAP contact, HTTP observation, email
+nhận báo cáo cùng cloaking precheck của Domain Worker. DNS timeout không xóa
+thông tin đầu mối được cung cấp; nguồn claim và nguồn kiểm tra mới được tách rõ. Dưới
+kết quả là report tiếng Anh dùng nguyên nội dung Domain Worker cho từng domain; bổ sung observation
+đã xác minh, kiểm tra email nhận và tải `.txt` để duyệt. IP thuộc dải nhà cung
+cấp chỉ là đầu mối liên hệ, không chứng minh origin/backend chung. Trước khi
+báo Zenlayer, AWS hay registrar, cần full URL, thời điểm và evidence hành vi
+tương ứng. Khi có liên hệ quan sát được, thư nêu rõ domain backend, IP trong ghi
+chú, DNS A hiện tại và đơn vị quản lý mạng từ RDAP khi IP khớp, cùng thời điểm
+check UTC của domain báo cáo.
+IP backend được ghi là đầu mối cần điều tra; DNS A mới là kết quả quan sát.
+Nếu DNS backend lỗi, thư nêu chưa xác định thay vì coi IP cung cấp là IP hiện
+tại. Yêu cầu NCC đối chiếu hạ tầng với URL trước khi gắn vào vụ việc và xử lý
+dịch vụ chịu trách nhiệm khi xác nhận vi phạm; không coi bản ghi A là chứng cứ
+origin chung.
+AU888 chưa xác minh vẫn được loại khỏi thư. Nội dung tố phishing từ Domain Worker
+được giữ khi tên thương hiệu bị loại; phần backend thêm IP được cung cấp, DNS mới
+và RDAP để NCC xác minh hạ tầng. Thư dùng chữ ký tổ chức/logo theo tài khoản và
+yêu cầu NCC đình chỉ dịch vụ vi phạm, bảo toàn hồ sơ, xác nhận
+biện pháp xử lý. Bản xem trước đặt logo trước chữ ký như email HTML; chọn
+tài khoản gửi để kiểm tra đúng tên, email và chữ ký. Mở phần văn bản gốc
+trong mỗi khung khi cần đối chiếu chính xác body.
+Logo/thông tin tổ chức thiếu ở tài khoản SMTP sẽ dùng cấu hình chung cho cả
+bản xem trước và email thực gửi.
+Các mẫu registrar trong bản đối chiếu tiếng Việt được dịch cả phần mô tả,
+yêu cầu xử lý, câu kết và nhãn chứng cứ; URL, ngày, số liệu gốc được giữ nguyên.
+Để gửi report đã duyệt,
+đối chiếu bản Anh–Việt, chọn đúng tài khoản SMTP và email abuse, tích xác nhận
+từng draft rồi bấm **Gửi report**. Chỉ bản tiếng Anh đã preview được gửi;
+Email gợi ý lấy từ recipient precheck Domain Worker cùng kênh với draft đang gửi;
+nếu precheck thiếu, dùng địa chỉ hợp lệ trong draft Worker. Xác minh email trước
+khi gửi, nhất là khi sửa tay; không dùng email IP/backend trong ghi chú làm mặc định.
+Trước khi gửi có thể bấm **Kiểm tra lại email nhận (Domain Worker)** tại đúng
+draft để lấy kết quả recipient mới. Nếu lookup lỗi, nút gửi khóa; kiểm tra lại
+thành công rồi đối chiếu kênh và địa chỉ hiện trên page.
+Bản tiếng Việt của report registry đã dịch lý do báo cáo và yêu cầu xử lý; URL,
+tên đơn vị và các dữ liệu chứng cứ giữ nguyên để đối chiếu.
+delivery thành công không gửi lại nếu cùng nội dung, tài khoản và người nhận.
+Sau gửi thành công, bảng domain đánh dấu **Đã gửi** ở đúng URL/domain; lỗi SMTP
+vẫn hiển thị **Chưa gửi**. Lượt gửi Lead Triage thành công được khôi phục từ
+`sent_log.csv` khi mở lại trang; nếu ghi log lỗi, phiên hiện tại vẫn giữ trạng thái.
+Domain đã gửi không còn thao tác Check từng dòng hoặc trong Check hàng loạt.
+Trước khi xác nhận gửi, bấm **Chụp URL nguồn + URL đích từ DOM** (helper dùng chung
+với Phản hồi NCC) và xem đủ hai ảnh nguồn–đích. Chỉ gửi khi chụp DOM thành công,
+manifest và hash hợp lệ, đúng URL, kèm ảnh/manifest đã duyệt. Ảnh thụ động một
+trang hoặc capture lỗi thì chụp lại; case cloaking phải chuyển
+luồng review riêng. Đối chiếu kỹ claim trong report Worker với bằng chứng trước
+khi xác nhận gửi; A record/IP riêng không chứng minh origin hoặc hành vi phishing.
+Trong draft, đối chiếu phần **Provider review focus** với manifest: URL nguồn,
+nút/link hiển thị, đích trong DOM và URL cuối. NCC được hướng dẫn kiểm tra dấu
+hiệu giả mạo/đòi thông tin đăng nhập tại đích và hạ tầng backend có phục vụ
+nguồn hoặc đích hay không; chỉ kết luận sau xác minh độc lập.
+
 Quick Report chỉ polling kết quả trong lúc check nền; sau hoàn tất danh sách đứng yên, thao tác form cập nhật riêng khối domain. Các nút vẫn chỉ tạo task tự điền qua extension.
 
 Mỗi kết quả Quick Report hiển thị email tố cáo Registrar/Registry ngay trên khối

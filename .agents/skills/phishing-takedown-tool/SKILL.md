@@ -149,6 +149,28 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
 - Gửi email, submit report, đọc IMAP và mở URL nghi ngờ đều là hành động ngoài
   hệ thống: chỉ thực hiện khi người dùng cho phép rõ ràng; mặc định là draft/
   preview.
+- Lead Triage giữ bản nháp cục bộ qua chuyển menu/F5 trong cache review riêng,
+  chỉ khôi phục dữ liệu đã có, không tự check/capture/gửi khi nạp cache. Nút xóa
+  cache chỉ bỏ trạng thái review; sent log và file evidence audit vẫn được giữ.
+  Không lưu cấu hình SMTP, credential hoặc secret vào snapshot.
+- Lead Triage includes every backend lead explicitly supplied for the report,
+  with supplied IPs, current DNS A and RDAP organization for supplied IPs.
+  Explicitly label RDAP IPs absent from current DNS A. Label DNS/URL overlap or
+  its absence and ask the provider to verify any
+  relationship before associating it with the reported case. Never state that
+  an unlinked lead serves the target. Preserve evidence URLs when sanitizing
+  brand names.
+- Lead Triage reports follow concise sections for brand impersonation, observed
+  redirect/evidence, related backend findings, and requested action. Preserve
+  Domain Worker evidence and only include registrar metadata when supplied.
+  Do not allege credential, financial, or OTP theft unless captured evidence
+  supports that specific behavior; distinguish observed behavior from concerns.
+- Khi report Lead Triage đã có DOM evidence, giữ bước tái hiện/redirect và
+  attachment từ formatter chung nhưng không lặp URL, hướng dẫn, yêu cầu điều tra
+  hoặc DNS target không liên quan trong addendum. Bản Việt tóm tắt cùng dữ kiện.
+- Lead Triage tách kết quả đã cache khỏi nhóm target đang hiển thị: Check dòng
+  hiện đúng một target, Check batch hiện nhóm vừa chọn; giữ cache các target
+  khác và xóa observation dùng chung khi đổi target đơn.
 - Web Form Assistant không chèn panel/overlay vào trang web; checklist, refill và
   recheck chỉ nằm trong popup, không có action submit/CAPTCHA. Badge Chrome dùng
   ký hiệu trạng thái theo tab và phải xóa trạng thái cũ khi navigation.

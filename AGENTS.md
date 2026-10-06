@@ -15,6 +15,11 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
   Streamlit.
 - `domain_worker.py`: precheck email/cloaking và worker batch nền có resume cho
   domain thường; job lưu tại `data/worker_jobs/`.
+- `lead_triage.py`, `pages/15_Lead_Triage.py`: tách ghi chú hạ tầng được dán,
+  đối chiếu DNS/IP, dùng precheck/pipeline/report Domain Worker, thêm backend
+  context, capture DOM chung Phản hồi NCC và gửi report đã duyệt qua SMTP;
+  bản dịch tiếng Việt chỉ phục vụ đối chiếu; snapshot review cục bộ ở
+  `data/lead_triage_cache.json`.
 - `provider_replies.py`: đọc IMAP, phân loại phản hồi NCC, tạo reply theo
   thread và xử lý evidence.
 - `mail_statistics.py`, `pages/11_Mail_Statistics.py`: đếm mailbox theo
@@ -246,6 +251,236 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-10-06 — Lead Triage module version 23 định dạng report theo các mục
+  Brand Impersonation, Observed Redirect Chain, Related Backend Findings và
+  Evidence and Request; giữ nội dung chứng cứ từ Domain Worker, thêm registrar
+  khi ghi chú có `reg=`, và liệt kê toàn bộ backend đã cung cấp kèm trạng thái
+  liên hệ chưa xác minh. Không tự khẳng định đánh cắp thông tin, tiền hoặc OTP
+  nếu evidence không cho thấy. 45/45 test Lead Triage và compileall đạt. Không
+  gửi SMTP hoặc mở URL thật.
+
+- 2026-10-06 — Lead Triage module version 22 giữ mọi đầu mối backend người dùng
+  cung cấp trong report; mỗi dòng nêu IP cung cấp, DNS A hiện tại, RDAP và ghi
+  rõ khi IP RDAP không xuất hiện trong DNS A hiện tại; đồng thời nêu
+  có/không có giao điểm DNS/URL. NCC được yêu cầu xác minh trước khi liên kết;
+  không khẳng định backend chưa liên kết đang phục vụ target. 45/45 test Lead
+  Triage và compileall đạt. Full suite 412 test còn 3 failure + 6 error nền
+  Windows ngoài thay đổi này. Không gửi SMTP hoặc mở URL thật.
+
+- 2026-10-06 — Lead Triage module version 21 rút report có DOM evidence:
+  không lặp thời điểm/DNS target không liên quan, lời yêu cầu điều tra, URL và
+  hướng dẫn ở phần review focus. Giữ các bước tái hiện/redirect trong evidence
+  chung, chỉ nêu điểm cần đánh giá và backend có liên hệ; bản Việt tóm tắt.
+  44/44 test Lead Triage và compileall đạt. Full suite 411 test còn baseline
+  Windows 3 failure + 6 error ngoài thay đổi; không gửi SMTP hay mở URL thật.
+
+- 2026-10-06 — Lead Triage chỉ hiển thị report của domain vừa bấm Check; Check
+  batch hiển thị nhóm vừa chọn. Vẫn giữ cache các domain khác để quay lại xem,
+  xóa observation English dùng chung khi chuyển domain đơn để tránh lẫn nội dung.
+  44/44 AppTest/unit test Lead Triage và compileall đạt.
+
+- 2026-10-06 — Sửa nội dung gửi Lead Triage theo case 8cewd.buzz: formatter
+  registry dùng “our brand identity”; draft cũ được sửa ngữ pháp; chỉ ghép
+  backend có liên hệ qua DNS A hoặc hostname trong Browser Evidence hợp lệ.
+  Giữ URL/redirect chứng cứ, bỏ yêu cầu điều tra lặp khi đã có DOM evidence và
+  câu so sánh với dịch vụ chính thức chưa được cung cấp. Module version 20;
+  test Lead Triage cô lập sent log để không đọc trạng thái gửi runtime.
+  44/44 test Lead Triage và compileall đạt; full suite 411 test còn đúng baseline
+  Windows 3 failure + 6 error ngoài thay đổi. Không gửi SMTP hay mở URL thật.
+
+- 2026-10-06 — Lead Triage lưu snapshot review v1 tại
+  `data/lead_triage_cache.json` bằng ghi atomic: ghi chú, parsed targets,
+  precheck/draft, đường dẫn DOM evidence và widget review được khôi phục qua
+  chuyển menu/F5, không tự check hay gửi. Nút **Xóa cache** xóa snapshot và
+  state UI, giữ sent log/evidence audit. Cache backend khôi phục buộc kiểm tra
+  lại khi operator bấm Check. 42/42 test Lead Triage/AppTest (cache dùng thư
+  mục tạm), compileall và diff check đạt. Full suite 409 test còn baseline
+  Windows 3 failure + 6 error ngoài thay đổi này.
+
+- 2026-10-06 — Lead Triage gộp logo và thông tin tổ chức từ config chung vào
+  bản sao tài khoản SMTP nếu account thiếu trường chữ ký; dùng cùng bản sao
+  cho preview và SMTP để logo không chỉ xuất hiện ở UI. Giữ email gửi theo
+  account đã chọn. 37/37 test Lead Triage, compileall và diff check đạt; full
+  suite 404 test còn baseline Windows 3 failure + 6 error. Không gửi SMTP thật.
+
+- 2026-10-06 — Rà lại nội dung report Lead Triage: addendum ghi thời điểm check
+  UTC, phân biệt DNS A quan sát với IP backend do người vận hành cung cấp, chỉ
+  gắn tổ chức RDAP khi IP khớp DNS, yêu cầu NCC xác minh mối liên hệ và xử lý
+  khi xác nhận vi phạm. Sửa ngữ pháp sau khi loại AU88/AU888, subject Việt nêu
+  nghi phishing; giữ nguyên phần report gốc Domain Worker. Bản Việt dịch thêm
+  các mẫu registrar cố định gồm mô tả, yêu cầu, câu kết, ngày phát hiện và
+  VirusTotal. 38/38 test Lead Triage, compileall và diff check đạt; full suite
+  405 test còn baseline Windows 3 failure + 6 error. Không gửi SMTP thật.
+
+- 2026-10-06 — Preview Lead Triage hiển thị logo ngay trước Regards bằng native
+  Streamlit, dùng lại formatter chữ ký và resolver logo của email gửi. Trước
+  khi chọn account hiện profile tổ chức chung; sau khi chọn hiện đúng account,
+  vẫn có plain text exact trong expander. 36/36 test Lead Triage, compileall và
+  diff check đạt; full suite 403 test còn baseline Windows 3 failure + 6 error.
+  Không gửi SMTP thật.
+
+- 2026-10-06 — Lead Triage thêm nút kiểm tra lại email nhận theo đúng resolver
+  Domain Worker tại từng draft. Kết quả cập nhật địa chỉ mặc định và kênh;
+  lỗi xóa precheck recipient cũ và khóa gửi cho đến khi tra lại thành công.
+  Module version 18.
+  35/35 test/AppTest liên quan, compileall và diff check đạt. Full suite
+  402 test còn baseline Windows 3 failure + 6 error ngoài thay đổi này.
+
+- 2026-10-06 — Lead Triage thêm bước **Phân tích ghi chú** explicit trước khi
+  hiện danh sách; dán/sửa văn bản chỉ cập nhật ô nhập, ẩn danh sách cũ và không
+  chạy precheck/network. Thu gọn ô nhập, hiển thị số lượng target/backend và
+  hướng dẫn thao tác ngay trên page. AppTest kiểm tra không tự check khi dán/sửa,
+  kể cả khi nhập lại ghi chú cũ. 33/33 test Lead Triage và compileall đạt; full
+  suite 400 test còn baseline Windows 3 failure + 6 error ngoài thay đổi này.
+
+- 2026-10-06 — Lead Triage chọn email nhận từ recipient precheck Domain Worker
+  theo channel của draft, tách nhiều email và lọc địa chỉ bị chặn/sai định dạng;
+  fallback email của draft Worker, không lấy contact IP/backend hoặc ghi chú.
+  Widget email cập nhật theo địa chỉ mặc định mới. Module version 17.
+  32/32 test/AppTest liên quan, compileall và diff check đạt. Full suite
+  399 test còn baseline Windows 3 failure + 6 error ngoài thay đổi này.
+
+- 2026-10-06 — Lead Triage khôi phục target Đã gửi từ metadata `sent_log.csv`
+  (`send_mode=lead_triage`, `status=sent`, đúng `target_url`) để ẩn và khóa Check
+  sau khi mở lại trang. Session vẫn giữ trạng thái nếu SMTP thành công nhưng ghi
+  log lỗi. Module version 16; có AppTest phiên mới và log gửi lỗi/kênh khác.
+  30/30 test/AppTest tập trung, compileall/diff check đạt; full suite 397 test
+  còn baseline Windows 3 failure + 6 error ngoài thay đổi này.
+
+- 2026-10-06 — Lead Triage giữ nguyên Browser Evidence formatter chung rồi
+  thêm hướng dẫn NCC xác minh nguồn–đích và dấu hiệu giả mạo/luồng đăng nhập
+  từ manifest; phần Việt có bước tái hiện và câu hỏi hạ tầng backend. Không suy
+  diễn một DOM href thành click hoặc chứng cứ origin. Module version 15.
+  30/30 test/AppTest liên quan, compileall và diff check đạt. Full suite còn
+  baseline Windows 3 failure + 6 error ngoài thay đổi này; không mở URL thật
+  hoặc gửi SMTP trong kiểm thử.
+
+- 2026-10-06 — Lead Triage khóa Check cho target đã gửi: cột ButtonColumn
+  không có nút ở dòng Đã gửi, multiselect bỏ target này, callback và batch
+  lọc lại để chặn sự kiện cũ. Trạng thái gửi vẫn hiển thị trong bảng.
+  28/28 test/AppTest tập trung, compileall và diff check đạt. Full suite
+  395 test còn baseline Windows 3 failure + 6 error ngoài thay đổi này.
+
+- 2026-10-06 — Lead Triage thêm cột Trạng thái gửi theo đúng target. SMTP
+  thành công hoặc `already_sent` ghi trạng thái trong session và rerun bảng;
+  gửi lỗi vẫn Chưa gửi. Giữ trạng thái khi nội dung ghi chú thay đổi trong phiên.
+  27/27 test/AppTest tập trung, compileall và diff check đạt. Full suite
+  394 test còn baseline Windows 3 failure + 6 error ngoài thay đổi này.
+
+- 2026-10-06 — Lead Triage hoàn thiện bản đối chiếu tiếng Việt cho các biến thể
+  report registry Domain Worker: lời chào, lý do liên hệ, yêu cầu xử lý và nhãn
+  chứng cứ. Bản tiếng Anh gửi NCC giữ nguyên. Module version 14.
+  26/26 test/AppTest liên quan, compileall và diff check đạt; full suite
+  393 test còn baseline Windows 3 failure + 6 error ngoài thay đổi này.
+
+- 2026-10-06 — Lead Triage giữ nguyên câu tố phishing từ report Domain Worker
+  khi loại tên AU88/AU888, thay tên bằng “our brand” thay vì xóa cả câu.
+  Backend bỏ cụm “trong ghi chú”, thêm nhãn IP được cung cấp, DNS mới và RDAP;
+  tiếp tục yêu cầu NCC xác minh mối liên hệ. Module version 13.
+  24/24 test/AppTest tập trung, compileall và diff check đạt. Full suite
+  391 test còn baseline Windows 3 failure + 6 error ngoài thay đổi này.
+
+- 2026-10-06 — Lead Triage chỉ mở Gửi report khi chụp DOM nguồn–đích thành
+  công, đủ hai ảnh, manifest/hash hợp lệ và đúng URL; kiểm tra lại tại ranh giới
+  SMTP và trong delivery lock. Bỏ uploader thủ công ở menu này; ảnh thụ động
+  fallback chỉ dùng xem trước, không mở gửi. Module version 12.
+  23/23 test/AppTest liên quan, compileall và diff check đạt. Full suite
+  390 test còn baseline Windows 3 failure + 6 error ngoài thay đổi này;
+  không chụp URL thật hoặc gửi SMTP trong kiểm thử.
+
+- 2026-10-06 — Lead Triage đổi nhãn nhập và nguồn recipient sang “Thông tin
+  đầu mối”/“ghi chú đầu mối”; module version 11 nạp lại nhãn helper cũ.
+  21/21 test/AppTest liên quan và compileall/diff check đạt; chỉ đổi câu chữ.
+
+- 2026-10-06 — Lead Triage ghim cột Check/Domain bên trái, đặt thứ tự cột
+  explicit và reset key bảng để bỏ layout cũ. Batch tối đa sáu target song song;
+  backend DNS/RDAP trong cùng ghi chú tái dùng tối đa 300 giây, target check mới.
+  Module version 10. Test/AppTest tập trung 21/21 đạt, gồm barrier sáu target
+  và cache backend hết hạn. Không gửi SMTP hoặc mở URL thật trong kiểm thử.
+  Compileall/diff check đạt; full suite 388 test còn đúng baseline Windows
+  3 failure + 6 error ngoài thay đổi này.
+
+- 2026-10-06 — Sửa phạm vi Lead Triage theo cấu trúc ghi chú: domain trước mục
+  backend là report target (ví dụ sáu domain), domain/IP sau marker chỉ làm đầu
+  mối hạ tầng bổ sung (ví dụ hai domain), không tạo report/gửi riêng. Check
+  backend bằng DNS/RDAP một lần, song song với precheck target; draft từng
+  target thêm IP ghi chú, DNS mới và org RDAP với nhãn mối liên hệ cần xác minh,
+  giữ recipient của report target. Module version 9. Test/AppTest tập trung
+  20/20, compileall và diff check đạt; full suite 387 test còn đúng baseline
+  Windows 3 failure + 6 error ngoài phạm vi thay đổi. Không gửi email hay mở
+  domain thật trong kiểm thử.
+
+- 2026-10-06 — Lead Triage loại dòng nhắc AU88/AU888 khỏi subject/body cũ
+  và observation bổ sung trước preview Anh–Việt; giữ URL chứng cứ và snapshot
+  gốc, subject fallback theo domain. Có regression test draft cũ + observation.
+  Regression test này đạt; compileall và diff check đạt. Full suite tại thời
+  điểm kiểm tra: 384 test, 4 failure + 9 error, gồm 1 failure + 3 error ở
+  AppTest Lead Triage đang thay đổi và baseline Windows/Provider Replies.
+
+- 2026-10-06 — Xử lý đầu mối thêm nút Check trên từng dòng bảng, giữ các kết quả
+  đã check trong cùng ghi chú. Batch check tối đa bốn đầu mối song song và RDAP
+  các IP của một đầu mối chạy cùng precheck; report `run_check()` được tạo theo
+  yêu cầu ở từng mục sau precheck để giảm thời gian chờ ban đầu. Test/AppTest
+  tập trung 16/16 và compileall đạt. Full suite 383 test còn đúng baseline
+  Windows: 3 failure + 6 error không thuộc thay đổi này; không gọi URL hoặc
+  gửi SMTP thật trong test.
+
+- 2026-10-06 — Làm sạch thư NCC của Xử lý đầu mối: bỏ note provenance subdomain
+  và lời giải thích ghi chú nội bộ; backend external chỉ chứa DNS/IP/RDAP khớp.
+  Yêu cầu đình chỉ dịch vụ vi phạm, bảo toàn hồ sơ và xác nhận biện pháp xử lý.
+  Hai panel dùng cùng chữ ký tổ chức theo tài khoản; logo preview/SMTP dùng helper
+  Domain Worker, giữ ảnh DOM + manifest đã duyệt. 14/14 test tập trung,
+  compileall và diff check đạt. Full suite 381 test còn đúng baseline Windows
+  3 failure + 6 error; không gửi SMTP hay capture URL thật trong kiểm thử.
+
+- 2026-10-06 — Xử lý đầu mối dùng nguyên subject/body report của Domain Worker
+  qua `run_check()`; đầu mối IP chưa có hosting draft dùng cùng formatter hosting.
+  Snapshot parsed draft theo full URL, chèn backend context và Browser Evidence
+  trước chữ ký. Nút DOM gọi đúng `provider_replies.capture_dom_link_evidence()`;
+  giữ preview Anh–Việt và SMTP exact kèm attachment/hash. Dùng predicate cloaking
+  chung cho precheck/pipeline và log delivery theo report/channel gốc.
+  13/13 test tập trung (parity formatter hosting thật, AppTest DOM/SMTP mock),
+  compileall và diff check đạt. Full suite 380 test còn đúng baseline Windows
+  3 failure + 6 error; không capture URL hay gửi SMTP thật khi kiểm thử.
+
+- 2026-10-06 — Menu Xử lý đầu mối hiển thị draft trong hai khung Anh–Việt có viền,
+  đặt cạnh nhau, cùng nút Gửi nổi bật ngay dưới draft của từng domain. Nút này
+  chỉ mở sau khi chọn tài khoản SMTP, xác minh
+  người nhận và tích xác nhận gắn với nội dung hiện tại. Chỉ body tiếng Anh đã
+  preview được gửi; fingerprint + lock và `sent_log.csv` chống gửi trùng, log
+  chỉ chứa metadata; session cũng khóa lại nút sau SMTP thành công. Không gửi thư
+  thật trong kiểm thử. 13/13 test tập trung (gồm AppTest/SMTP mock), compileall và
+  diff check đạt; full suite 380 test còn đúng baseline Windows 3 failure + 6 error.
+
+- 2026-10-06 — Sửa draft Xử lý đầu mối theo quan sát thực tế; dùng nút capture
+  Browser Evidence chung helper Domain Worker, có fallback upload 1–3 ảnh.
+  Preview ảnh, xác thực manifest/hash/URL và gắn fingerprint của attachment
+  vào bản đã duyệt; chỉ gửi tiếng Anh kèm ảnh + manifest khi evidence hợp lệ.
+  Case cloaking cần duyệt riêng bị khóa gửi ở menu này. 13/13 test tập trung
+  gồm AppTest capture và SMTP mock, compileall/diff check đạt. Full suite chạy
+  380 test, còn đúng baseline Windows 3 failure + 6 error.
+
+- 2026-10-06 — Thêm menu Xử lý đầu mối: dán ghi chú domain/IP, mặc định chọn
+  nhóm backend, so DNS A với IP được cung cấp, tra RDAP contact cho IP đã nêu,
+  dùng chung HTTP và recipient/cloaking precheck của Domain Worker. Kết quả
+  chỉ giữ trong phiên UI, không tạo job hoặc gửi report; domain trần được
+  check ở trang chủ HTTPS và vẫn cần full URL/evidence trước takedown.
+  Bổ sung draft yêu cầu điều tra tiếng Anh theo từng domain từ HTTP/precheck
+  và mô tả AU888/backend của sếp có caveat; IP/RDAP của sếp vẫn hiện khi DNS
+  timeout nhưng được gắn nhãn chưa xác minh. Có ô observation bổ sung, email
+  nhận chỉnh được và tải draft `.txt`; không dùng hosting formatter legacy
+  vì nó khẳng định origin/credential theft quá mức chứng cứ hiện có.
+  DNS dùng system resolver fallback có timeout khi dnspython timeout.
+  Đã đạt 7/7 test menu gồm AppTest hai URL cùng domain, 10/10 test tập trung
+  gồm navigation và compileall. Full suite chạy 374 test, còn đúng baseline
+  Windows đã biết:
+  3 failure + 6 error ở mock macOS, Domain Worker stop và Provider Replies cũ.
+  Sửa lỗi `AttributeError: module lead_triage has no attribute
+  build_investigation_draft` khi app đang chạy giữ module cũ: page tự reload
+  helper theo `MODULE_VERSION` và giữ kết quả phiên hiện tại. AppTest tái hiện
+  stale module đạt trong `.venv`; full suite 375 test còn cùng baseline 3
+  failure + 6 error, compileall đạt.
 
 - 2026-10-04 — Email SMTP bổ sung chữ ký tổ chức gồm vai trò Brand Protection,
   pháp nhân và mã đăng ký; logo OKWIN chuyển vào `assets/email/` và được nhúng

@@ -2543,7 +2543,7 @@ Phishing / Brand Impersonation
         f"We are requesting a registry-level review of suspected phishing and unauthorized impersonation of {brand_name} at {domain}.",
         f"We are reporting suspected phishing content hosted under {domain} that appears to impersonate {brand_name} without authorization.",
         f"This report concerns suspected phishing and brand impersonation observed at the reported URL under {domain}.",
-        f"We request your assistance in reviewing a suspected abuse case involving {domain} and unauthorized use of the {brand_name} identity.",
+        f"We request your assistance in reviewing a suspected abuse case involving {domain} and unauthorized use of our brand identity.",
     ])
     if registrar_reported:
         date_suffix = f" on {registrar_report_date}" if registrar_report_date else ""
