@@ -2263,60 +2263,17 @@ Certificate details:
 
 
 def export_nictop_excel(domains: list, brand_name: str = "", output_path: str = None) -> str:
-    """Sinh file Excel theo template nic.top cho báo cáo phishing hàng loạt.
-
-    nic.top nhận file Excel tối đa 200 domain/lần kèm ảnh chụp. Format chuẩn:
-    - Cột A: Domain
-    - Cột B: URL bị phishing
-    - Cột C: Mô tả ngắn
-    - Cột D: Brand bị giả mạo
-    - Cột E: Ngày phát hiện
-
-    Trả về đường dẫn file đã ghi.
-    """
-    try:
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment
-    except ImportError:
-        raise RuntimeError(
-            "Cần cài openpyxl: pip install openpyxl"
-        )
-
+    """Write the shared five-column nic.top workbook for legacy callers."""
+    from quick_report_actions import build_nictop_workbook
+    content = build_nictop_workbook(
+        [(domain, f"https://{domain}") for domain in domains[:200]],
+        brand_name=brand_name, detected_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+    )
     os.makedirs(REPORTS_DIR, exist_ok=True)
     if output_path is None:
         output_path = os.path.join(REPORTS_DIR, f"nictop_report_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx")
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Phishing Domains"
-
-    # Header
-    headers = ["Domain", "Phishing URL", "Description", "Brand Impersonated", "Date Detected"]
-    header_fill = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
-    header_font = Font(color="FFFFFF", bold=True)
-    for col, h in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=h)
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="center")
-
-    # Data
-    detected_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    for row, domain in enumerate(domains[:200], 2):  # max 200
-        ws.cell(row=row, column=1, value=domain)
-        ws.cell(row=row, column=2, value=f"https://{domain}")
-        ws.cell(row=row, column=3, value=f"Phishing site impersonating {brand_name or 'brand'} — harvesting user credentials")
-        ws.cell(row=row, column=4, value=brand_name or "[BRAND NAME]")
-        ws.cell(row=row, column=5, value=detected_date)
-
-    # Column widths
-    ws.column_dimensions["A"].width = 35
-    ws.column_dimensions["B"].width = 45
-    ws.column_dimensions["C"].width = 60
-    ws.column_dimensions["D"].width = 20
-    ws.column_dimensions["E"].width = 15
-
-    wb.save(output_path)
+    with open(output_path, "wb") as handle:
+        handle.write(content)
     return output_path
 
 
@@ -3874,43 +3831,13 @@ def open_gsb_form_playwright(target: str, description: str,
 
 
 def report_netcraft_api(target_url: str, reason: str, email: str) -> dict:
-    """Gửi report URL lên Netcraft qua API v3 (không cần API key, không cần Playwright).
-
-    https://report.netcraft.com/api/v3#tag/Report/operation/report_urls
-    Trả về dict gồm payload gửi đi, status_code, response body để kiểm tra.
-    """
-    if requests is None:
-        return {"error": "requests not installed"}
-    payload = {
-        "email": email,
-        "urls": [{
-            "url": target_url,
-            "country": "VN",
-            "reason": reason,
-        }],
-    }
-    try:
-        r = requests.post(
-            "https://report.netcraft.com/api/nightly/report/urls",
-            json=payload,
-            timeout=15,
-        )
-        try:
-            resp_body = r.json()
-        except Exception:
-            resp_body = r.text
-        result = {
-            "payload": payload,
-            "status_code": r.status_code,
-            "response": resp_body,
-        }
-        if r.status_code in (200, 201, 204):
-            result["success"] = True
-        else:
-            result["error"] = f"HTTP {r.status_code}"
-        return result
-    except Exception as exc:
-        return {"payload": payload, "error": str(exc)}
+    """Legacy facade for the shared fixed-endpoint, non-retrying provider transport."""
+    from quick_report_actions import submit_netcraft
+    payload = {"email": email, "urls": [{"url": target_url, "country": "VN", "reason": reason}]}
+    result = submit_netcraft(payload)
+    return {"payload": payload, "status_code": result.get("http_status"),
+            "response": {"state": result["state"], "code": result["code"]},
+            **({"success": True} if result["state"] == "SUBMITTED" else {"error": result["code"]})}
 
 
 def open_microsoft_form_playwright(target: str, dark_mode: bool = True) -> dict:

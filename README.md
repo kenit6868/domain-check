@@ -1,13 +1,190 @@
-# Domain Check Tool — Phát hiện & báo cáo domain phishing
+﻿# Domain Check Tool — Phát hiện & báo cáo domain phishing
+
+Đặc tả chuyển sang React/Vite/Tailwind và Python API nhiều người dùng nằm trong
+[PROMPT_TACH_FE_BE_REACT.md](PROMPT_TACH_FE_BE_REACT.md). Đây là phương án triển khai
+đề xuất; đã chốt PostgreSQL + Redis, kèm mô hình lưu URL/check/job/delivery và
+24 bảng nền tảng, hợp đồng cách ly dữ liệu theo user và bước lập plan chi tiết
+trước implementation. Streamlit vẫn là ứng dụng legacy đang dùng; nền tảng web
+mới đã bắt đầu tại `backend/` và `frontend/`; Quick Report check đã mở cho user có
+permission, còn mọi workflow gửi/submit vẫn đóng.
+
+## Nền tảng web mới — trạng thái hiện tại
+
+Kế hoạch và bằng chứng tiến độ nằm ở
+[`docs/implementation-plan.md`](docs/implementation-plan.md). Backend hiện có
+FastAPI health endpoint, schema SQLAlchemy/Alembic 24 bảng, owner constraints,
+permission catalog, OIDC/PKCE primitives và mã hóa secret. Telegram login dev đã
+được kiểm chứng với user mới ở trạng thái `pending`. Frontend là React 19,
+TypeScript strict, Vite 8 và Tailwind 4; source chia theo `app`, `components`,
+`features` và `lib`. Mọi HTTP đi qua Axios client cùng origin có cookie/CSRF/error
+normalization; TanStack Query keys luôn mang scope feature/user/resource. UI có
+login/pending shell, Quick Report, trang quản lý user/role và **Tài khoản gửi mail**
+gọi API thật. Secret SMTP/IMAP/proxy được mã hóa theo owner và API chỉ trả cờ đã
+có secret. Quick Report chỉ kiểm tra và hiển thị DTO; chưa dùng web mới để gửi hoặc
+submit report.
+
+Thiết lập môi trường phát triển (không dùng credential thật):
+
+```powershell
+Copy-Item backend/.env.example backend/.env
+# sửa placeholder local trong backend/.env
+docker compose up -d db redis
+python -m pip install -e ".\backend[test]"
+python -m alembic -c backend/alembic.ini upgrade head
+domaincheck-admin sync-rbac
+# Sau khi Telegram identity đã login một lần, bootstrap bằng stable OIDC subject:
+domaincheck-admin bootstrap-admin --telegram-subject "<stable-oidc-subject>"
+python -m uvicorn domaincheck.main:app --app-dir backend/src --reload
+
+Set-Location frontend
+npm install
+npm run dev
+```
+
+Không đặt Telegram secret, master key, SMTP/IMAP password hoặc Cookie Cloudflare
+vào biến `VITE_*`. Migration dữ liệu legacy/runtime thật chưa được chạy.
+Lưu cấu hình mail không tự test kết nối hoặc gửi thư. Người có quyền
+`mail_accounts.test_own` có thể bấm kiểm tra riêng SMTP hoặc IMAP: SMTP chỉ thực
+hiện TLS + đăng nhập, IMAP chỉ TLS + đăng nhập/đăng xuất, không gửi thư hay đọc
+mailbox. Bản phát triển chỉ kiểm chứng bằng mock; không dùng endpoint mail thật
+trước khi hoàn tất policy egress và được phép vận hành.
+
+Redis của web mới chỉ lưu dữ liệu có thể tái tạo. Key được tách theo user, feature,
+ngày nghiệp vụ và version; input nhạy cảm được băm trước khi tạo key. TTL hết đúng
+nửa đêm theo timezone user. Redis restart/flush không làm mất check history,
+delivery, approval hoặc evidence trong PostgreSQL/private artifact storage.
+
+Artifact ảnh của web mới được lưu ở private filesystem root, không phục vụ qua static
+frontend. Tên đường dẫn do server sinh theo owner/evidence/artifact UUID; PNG/JPEG
+được kiểm MIME thực, signature, kích thước và SHA-256 cho cả batch trước khi commit.
+`GET /api/v1/artifacts/{id}` chỉ trả file thuộc user đăng nhập và khi user có quyền xem
+đúng feature; response không lộ local path hoặc tên file nguồn. Upload workflow sẽ
+được mở theo từng page ở milestone evidence, không có generic upload công khai.
+
+Boundary dữ liệu web đã kiểm chứng A/B: repository cố định owner lấy từ session, không
+nhận `owner_user_id` lại từ payload; quan hệ owned dùng composite FK. Cùng URL hoặc cùng
+SMTP identity của hai user vẫn là hai record độc lập. ID resource của user khác trả 404,
+kể cả khi PostgreSQL tái sử dụng cùng connection. Worker claim job bằng transaction
+ngắn/`SKIP LOCKED`; heartbeat cần đúng lease token và optimistic version.
+
+Primitive job bền vững hiện đã giữ thứ tự item, account scope, stop/resume và retry
+đúng failed subset trong PostgreSQL. Item chỉ tăng attempt khi bắt đầu chạy và được
+checkpoint riêng. Nếu worker mất lease khi item đang chạy, trạng thái được giữ là
+`UNKNOWN` để đối soát, không tự coi là failed rồi gửi/chạy lại. Các endpoint nghiệp vụ
+vẫn đóng cho tới khi adapter/parity của từng menu hoàn tất.
+
+Exact preview backend cũng đã sẵn sàng: mỗi lần sửa tạo revision mới và lưu toàn bộ
+subject/body/delivery plan trong private immutable artifact, không đưa body vào audit
+hoặc job metadata. Approve/send validation sẽ khóa nếu preview hết hạn, có revision mới,
+sender/profile/evidence thay đổi hoặc file không còn đúng SHA-256. Hiện đây là primitive
+nội bộ; route nghiệp vụ chỉ được mở khi formatter và permission của page tương ứng hoàn tất.
+
+Delivery ledger backend cũng đã hoàn tất ở mức primitive nội bộ. Mỗi delivery lấy
+business identity từ adapter workflow phía server (không lấy preview ID/hash để né
+dedupe), có Message-ID ổn định và ghi attempt `intent` trong PostgreSQL trước khi gọi
+SMTP. Hai request/tab không thể claim cùng delivery; chỉ lỗi xác định `FAILED` mới
+được retry. Nếu process hoặc kết nối mất sau intent mà chưa checkpoint, recovery giữ
+trạng thái `UNKNOWN` để đối soát thủ công, không tự gửi lại. Chưa có route workflow
+gửi thật và không có SMTP thật nào được gọi trong giai đoạn này.
+
+Backend Quick Report hiện có API operation thật: `POST /api/v1/quick-reports/checks`
+
+**Quick Report cần worker riêng**, ngoài API và Vite. Mở terminal thứ ba tại
+thư mục gốc dự án và chạy:
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m domaincheck.workers.cli
+# Hoặc trên Windows:
+.\run_quick_report_worker.bat
+```
+
+Giữ worker chạy khi sử dụng Quick Report. `--once` chỉ xử lý tối đa một lượt
+rồi thoát. Worker kiểm tra dependency trước khi nhận job và gia hạn lease mỗi
+10 giây khi URL chạy lâu. Cài lại backend dependency sau khi cập nhật bản này.
+Backend package khai báo rõ các module compatibility dùng chung với bản cũ,
+nên API/worker đã cài package không phụ thuộc thư mục đang đứng khi chạy. Khi
+cập nhật bản này, chạy `python -m pip install -e ./backend` từ root bằng Python
+của backend venv, rồi restart API/worker. Wheel không chứa `config.ini`, `.env`
+hoặc dữ liệu runtime.
+Frontend polling GET mỗi 2 giây chỉ hỏi trạng thái, không thực hiện check mới.
+`queued`/`pending` là chưa được worker xử lý, khác `running` đang check URL.
+
+Luồng Quick Report hiện dùng `run_cdn_check`: WHOIS/registrar, CDN, registry tĩnh,
+recipient lookup và HTTP cloaking đa profile. Đây không phải pipeline Check
+Domain đầy đủ: chưa chạy browser evidence/Playwright verify hay SMTP trong
+bước check này. Netcraft và provider form là action riêng sau khi có kết quả.
+
+ghi `targets`, `checks`, job và item theo owner rồi trả `202`; worker riêng gọi đúng
+`run_cdn_check()` và checkpoint từng URL. `GET /api/v1/quick-reports/checks/{id}`
+khôi phục tiến độ/kết quả sau F5. Full URL/path/query và input order được giữ; Redis
+cache kết quả theo owner + ngày + engine version, còn PostgreSQL vẫn lưu mỗi check và
+cache provenance. Raw HTML, credential và local evidence path không được ghi vào DTO.
+Frontend Quick Report tại `/quick-report` đã có hai bước lọc → check, permission gate,
+polling 2 giây khi operation active, result card theo thứ tự input và khôi phục
+operation theo user sau F5. Form state chỉ ở trình duyệt; PostgreSQL vẫn là nguồn
+trạng thái check. Google Safe Browsing và Microsoft SmartScreen đã dùng capability
+task HTTPS một lần qua Web Form Assistant v3; extension chỉ tự điền và FE poll trạng
+thái bền vững. Tổng cộng tám adapter đã kết nối theo routing server; Netcraft có
+exact preview/approval và cờ bật gửi riêng. Khối export nic.top đã bỏ khỏi UI. Playwright
+verify/Browser Evidence thuộc workflow evidence riêng, chưa chạy trong Quick Report.
 
 Quick Report dừng tự làm mới khi batch hoàn tất; mỗi khối domain xử lý nút form trong fragment riêng để giảm render lại danh sách khi thao tác liên tiếp.
 
 Quick Report giữ kết quả và lượt check đang chạy khi F5 hoặc chuyển menu; danh sách đã check được khôi phục vào ô nhập. **Xóa cache** dọn kết quả, cache lọc và ô nhập để bắt đầu lại. Kết quả lưu trong RAM của server, mất khi restart server; bấm **Kiểm tra tất cả** tạo lượt check thay thế.
 
-Quick Report: các nút mở/tự điền form dùng Chrome đã cài trên Windows, macOS
-(`/Applications` hoặc `~/Applications`) và Linux (`google-chrome` hoặc
-`google-chrome-stable` trong PATH). Chrome cần có Web Form Assistant trong
-profile sử dụng; chạy ứng dụng trên cùng máy với Chrome.
+Quick Report web không yêu cầu backend chạy cùng máy với Chrome. Load extension từ
+`chrome_extension/cloudflare-profile-worker/`, mở **Options** và cấu hình exact origin
+ứng dụng (HTTPS ở production; HTTP chỉ localhost). Build FE với ID extension công khai
+trong `VITE_FORM_ASSISTANT_EXTENSION_ID`. Task Google/Microsoft có TTL ngắn, dùng một
+lần, chỉ nằm trong session của tab và luôn `fill_only`; nếu extension chưa kết nối,
+UI chỉ mở link thủ công và không báo đã tự điền.
+
+Chẩn đoán kết nối web: ô trạng thái hiển thị ID frontend và Application origin
+để đối chiếu với extension đã cài. Thiếu ID, ID sai định dạng, thiếu browser
+messaging API, origin bị từ chối và timeout là các lỗi riêng. Nút Kiểm tra lại
+có loading và toast; không cần mở form hoặc gửi report để kiểm tra kết nối.
+Nếu ID đúng nhưng trang chưa có API extension: kiểm tra đã nạp/bật bản v3 trong
+đúng Chrome profile, Reload extension rồi reload web. Nếu đã chuyển extension
+sang folder khác, phải cập nhật mã trong chính folder đang được Chrome nạp.
+Nếu báo “Extension chưa cho phép trang”, mở Options của đúng extension có ID
+đang hiển thị và lưu Application origin trùng địa chỉ web. Nạp extension từ
+folder khác có thể tạo ID mới với cấu hình riêng; origin của bản cũ không được
+tự động chuyển sang. FE nhận cả mã lỗi legacy có tiền tố `Error:`.
+
+### Telegram login trên web mới
+
+Backend chỉ đọc `backend/.env`. Tạo file này từ `backend/.env.example`, điền
+`DOMAINCHECK_TELEGRAM_CLIENT_ID` và `DOMAINCHECK_TELEGRAM_CLIENT_SECRET` do BotFather
+cấp, rồi đăng ký chính xác callback dev:
+
+```text
+http://127.0.0.1:5173/api/v1/auth/telegram/callback
+```
+
+Mở frontend bằng đúng `http://127.0.0.1:5173`; không đổi qua `localhost` giữa flow.
+Giao diện React hỗ trợ **Sáng / Tối**, chuyển bằng nút trên thanh đầu trang và
+trang đăng nhập. Lần đầu chọn theo hệ điều hành; lựa chọn được lưu trên trình
+duyệt và giữ qua tải lại. Form, bảng, cảnh báo và dialog dùng cùng bảng màu;
+nút và dialog dùng Radix Themes. Dialog hỗ trợ Tab/Esc và trả focus về nút mở.
+Thiết kế dùng gradient indigo–violet cho nút chính và mục điều hướng đang chọn,
+header chuyển sắc nhẹ, card có đổ bóng và form chia nhóm; hai mode dùng chung bố
+cục. Hover/active/focus/disabled có trạng thái riêng, tôn trọng reduced motion.
+Trang login hiển thị readiness và khóa nút nếu backend chưa có cấu hình.
+Token exchange dùng Authorization Basic theo Telegram OIDC; login đầu tiên tạo user
+`pending`, chưa tự cấp admin hoặc quyền nghiệp vụ.
+
+RBAC không tự cấp quyền nghiệp vụ theo tên role. `admin` là system role toàn quyền
+trong permission catalog nhưng vẫn chịu owner isolation. Khi admin kích hoạt một
+tài khoản thường, hệ thống gán role `user`; seed mới cấp toàn bộ quyền nghiệp vụ,
+trừ `users.*` và `roles.*` (hiện 51/56 quyền). Admin có thể điều chỉnh tại
+**Role & quyền**. Bộ mặc định bao gồm gửi mail, đọc IMAP và chạy worker; các bước
+preview/approve và owner isolation vẫn được thực thi.
+
+`sync-rbac` chạy lại vẫn giữ permission admin đã chọn cho role `user`. Sau khi
+đổi quyền role, các phiên của thành viên bị thu hồi; người dùng đăng nhập lại.
+Để áp dụng lại bộ mặc định trên DB đã có role `user`, chạy
+`domaincheck-admin sync-rbac --reset-user-permissions`; lệnh thay toàn bộ quyền
+của role này và thu hồi phiên thành viên.
 
 Bộ công cụ hỗ trợ 2 người rà soát, xác minh và báo cáo (takedown) các domain
 giả mạo thương hiệu công ty để lừa đảo.
@@ -777,3 +954,122 @@ Với `.org` và `.ong`, Quick Report định tuyến kênh Registry tới web f
 chính thức của Public Interest Registry (PIR): `https://pir.org/report-abuse/`.
 Ứng dụng chỉ mở form thủ công và cung cấp nội dung report copy-ready, không tự
 submit.
+# Quick Report web: provider actions (2026-10-16)
+
+Đối chiếu registrar/registry với bản cũ và hướng dẫn test:
+[`docs/quick-report-routing-audit.md`](docs/quick-report-routing-audit.md).
+Kết quả hiển thị hạ tầng bằng icon + tên, và hai dòng **Registrar: email**,
+**Registry: email**. Các nút theo thứ tự Google → Microsoft → Chống Lừa Đảo →
+Cốc Cốc → Cloudflare → Registrar → Registry (chỉ hiện kênh áp dụng).
+Form có adapter chỉ hiện một nút extension; mất kết nối thì nút này bị khóa.
+Form khác mở thẳng URL bằng nút **Registrar · tên** hoặc **Registry · tên**,
+draft đúng kênh được hiển thị inline để copy. Khối Cloaking HTTP đã
+ẩn khỏi giao diện; backend vẫn kiểm tra như trước. Email là contact để đối
+chiếu, không có thao tác SMTP tự động tại đây.
+
+**Thêm từng tài khoản mail:** vào Tài khoản gửi mail → Thêm tài khoản, nhập
+SMTP username (email), host, port và password rồi Lưu tài khoản. Mỗi lần lưu
+thêm một tài khoản; không cần nhập danh sách JSON hoặc đủ nhiều tài khoản.
+Nhãn tùy chọn, bỏ trống sẽ lấy email. Port 465 tự chọn Implicit TLS (tương
+đương `ssl=true` ở cấu hình cũ), 587 tự chọn STARTTLS. IMAP/proxy/chữ ký không
+bắt buộc; chưa điền hồ sơ tổ chức vẫn có thể lưu mail. Thiếu trường hoặc lưu
+lỗi sẽ hiện thông báo ngay trong hộp thoại. Lưu không tự kết nối/gửi mail.
+
+Backend cần `DOMAINCHECK_SECRET_MASTER_KEY` trong `backend/.env` để mã hóa mật
+khẩu mail (32 byte ngẫu nhiên, URL-safe base64). Thiếu khóa trả lỗi cấu hình
+máy chủ, không phải trùng tài khoản. Sau khi đặt khóa cần restart backend.
+Giữ khóa ổn định và sao lưu riêng: không thay khóa tùy tiện sau khi đã lưu mail.
+Lỗi trùng chỉ ra cùng host/port/username của chính user và hướng dẫn mở Sửa.
+
+Giao diện web dùng Sonner cho thông báo light/dark: lưu profile/mail/role,
+cập nhật user, mở form, copy, export và kết quả Netcraft đều có phản hồi.
+Thông báo có nút đóng; lỗi chi tiết vẫn nằm tại trang/biểu mẫu để đối chiếu.
+Khóa user, thu hồi phiên, xóa role và tắt sender yêu cầu xác nhận trước khi
+thực hiện. Nút đang xử lý được khóa để tránh bấm lặp. Quick Report có thanh
+tiến độ và toast khi lượt đang theo dõi kết thúc; refresh lịch sử không tạo
+toast hoàn tất mới. Mất mạng hiện banner; lỗi tải dữ liệu có nút thử lại.
+
+Trước khi dùng Quick Report, mỗi user phải lưu đủ **Thương hiệu**, **Người liên
+hệ** và **Email liên hệ hợp lệ** tại **Cài đặt mail → Profile tổ chức**. Trang
+sẽ hiện các mục còn thiếu và link cấu hình; lưu xong quay lại Quick Report hoặc
+bấm **Kiểm tra lại**. Backend cũng chặn check mới, task form, preview/submit
+Netcraft và export nếu hồ sơ chưa đủ, kể cả gọi API trực tiếp. Không yêu cầu
+SMTP/IMAP cho workflow này; cờ bật gửi Netcraft là điều kiện riêng của máy chủ.
+
+Quick Report hỗ trợ tám form qua Web Form Assistant: Google, Microsoft,
+Cloudflare, Chống Lừa Đảo, Cốc Cốc, GoDaddy, .CO và .XYZ. Backend chọn form
+theo kết quả check; extension chỉ điền nội dung, người dùng duyệt và submit
+thủ công. Reload extension sau khi cập nhật mã nguồn. Khi extension chưa kết
+nối, trang cung cấp link mở form thủ công.
+
+Netcraft có nút **Xem trước Netcraft**, hiển thị đúng email/URL/nội dung tiếng
+Anh sẽ gửi. Cần contact email trong hồ sơ và xác nhận nội dung. Server mặc định
+tắt gửi thật; muốn bật, đặt `DOMAINCHECK_NETCRAFT_SUBMIT_ENABLED=true` trong
+`backend/.env` rồi khởi động lại backend. Trạng thái `UNKNOWN` không được gửi
+lại tự động. Bản xem trước hết hạn sau 30 phút hoặc khi hồ sơ thay đổi.
+
+Sau khi cập nhật backend, chạy Alembic `upgrade head` để tạo ledger migration
+`0004_provider_submissions` trước khi dùng Netcraft.
+
+Quick Report: nhóm Google GSB, Microsoft, Chống Lừa Đảo, Cốc Cốc và Netcraft
+nằm trong một khối toàn chiều ngang, có nội dung đối chiếu bên dưới. Hàng kế
+chia ba cột CDN, Registrar, Registry; mỗi cột có nút và nội dung riêng.
+Nút extension ghi **Mở và tự điền**. Form thường mở thẳng URL trong tab mới,
+không mở thêm modal copy. Chọn mẫu và copy ngay trong phần nội dung inline.
+Netcraft dùng nút **Gửi API**: một lần bấm tạo exact preview phía server rồi gửi,
+không có modal/checkbox xác nhận. Máy chủ vẫn phải bật gửi Netcraft và tài khoản
+phải có quyền; nút khóa khi đã gửi, đang gửi hoặc kết quả chưa xác định. Lỗi
+FAILED cho phép thử gửi lại explicit. Giao diện giảm padding/margin và chiều
+cao preview; màn hình nhỏ tự xếp các cột dọc.
+
+Quick Report ẩn hẳn nhóm CDN/Registrar/Registry không có form áp dụng; các nhóm
+còn lại tự chia đều chiều ngang. Nút báo cáo dùng gradient xanh cyan–blue, nút
+phụ copy/refresh giữ màu trung tính. Nếu Netcraft báo API chưa bật, đặt
+`DOMAINCHECK_NETCRAFT_SUBMIT_ENABLED=true` trong `backend/.env`, rồi restart
+FastAPI (reload mã nguồn không bảo đảm nạp lại biến môi trường). Đây là cờ cho
+phép gửi thật khi người dùng bấm Gửi API, không tự gửi lúc tải trang. File mẫu
+vẫn mặc định false cho cài đặt mới.
+
+Quick Report đã bỏ khối Báo cáo nic.top và nút xuất Excel khỏi frontend theo yêu
+cầu. Đây chỉ là tiện ích xuất URL .top để gửi thủ công, không phải bước kiểm tra
+hay gửi report tự động. Backend export legacy được giữ tương thích; các form
+Registry áp dụng theo domain vẫn hiển thị bình thường.
+
+### Quick Report: cache trong ngày
+
+Cache chống check mạng lặp lại được scope theo user/ngày/engine/full URL, hết
+hạn vào nửa đêm theo múi giờ user. Nhãn Cache phản ánh nguồn của từng check.
+Nút **Xoá cache hôm nay** xuất hiện khi có quyền `quick_report.clear_cache`,
+chỉ xoá cache Quick Report tài khoản hiện tại trong hôm nay; không xoá lịch sử,
+draft hoặc trạng thái gửi. Sau đó nhập lại URL và bấm Kiểm tra để check mới.
+Nút bị khoá khi operation hiện tại đang tải/chạy hoặc đang tạo job. Redis lỗi
+thì báo lỗi, không thông báo xoá thành công. Cache có thể mất nếu Redis restart.
+### Quick Report: danh sách tích luỹ trong ngày (thay cách hiển thị theo operation)
+
+Ô nhập URL luôn hiển thị; nhập danh sách mới rồi Lọc danh sách → Kiểm tra, không
+cần bấm Danh sách mới. Khi một lượt đang chạy, vẫn nhập được nhưng nút check
+chờ lượt đó kết thúc. Danh sách kết quả lấy từ database theo tài khoản/ngày,
+không chỉ từ operation cuối: đã check 10 URL rồi thêm 2 URL mới thì giữ đủ 12.
+F5/mở lại vẫn tải danh sách hôm nay; mỗi URL chỉ hiển thị bản check mới nhất.
+Sang ngày mới, màn hình lấy ngày mới theo múi giờ user, lịch sử cũ không bị xoá.
+
+Mặc định ẩn kết quả cũ, chỉ hiện kết quả mới của lượt gần nhất. Bỏ chọn
+checkbox để xem lại lịch sử trong ngày. Bộ đếm: kết quả cũ (đã có trong ngày hoặc cache hit),
+check mới (network trong lượt gần nhất), tổng URL duy nhất trong ngày. Nhãn
+Cache trên từng thẻ chỉ xuất hiện khi check đó thực sự dùng Redis; kết quả cũ
+trong database không bảo đảm Redis vẫn còn cache. Xoá cache hôm nay vẫn giữ
+nguyên lịch sử trong DB nhưng dọn các thẻ đang hiển thị; nhập lại URL và bấm Kiểm tra để check mạng mới.
+
+Nếu lịch sử hiện **Chưa có job**, đây là bản ghi pending/running cũ không có
+job item Quick Report gắn với worker, không phải URL đang chờ được xử lý.
+Nhập lại đúng URL ở ô nhập rồi bấm Lọc danh sách → Kiểm tra để tạo lượt mới.
+Ứng dụng không tự đưa bản ghi này vào worker hoặc tự check lại khi tải lịch sử.
+
+Ví dụ: check 10 URL lần đầu → hiện 10; check tiếp 10 URL mới → chỉ hiện 10 mới,
+10 cũ tự ẩn và vẫn được tính trong tổng ngày. Bấm Xoá cache hôm nay → dọn danh
+sách đang xem. Nhập lại toàn bộ 20 URL và Kiểm tra → hiện đủ 20 kết quả mới.
+Mỗi lượt mới tự bật ẩn kết quả cũ, kể cả trước đó đã bỏ chọn để xem lịch sử.
+
+Thứ tự thẻ Quick Report của lượt hiện tại và số # luôn theo danh sách URL vừa
+nhập, khớp thứ tự worker chạy tuần tự. Nếu hiện lại lịch sử cũ, các URL ngoài
+lượt hiện tại nằm phía sau; số # không còn dựa vào vị trí xuất hiện trong ngày.

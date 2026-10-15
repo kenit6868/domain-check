@@ -1,5 +1,135 @@
 # CẨM NANG VẬN HÀNH KỸ THUẬT SOC (TECHNICAL OPERATIONS GUIDE)
 
+## Cấu hình web tách package
+
+FastAPI chỉ đọc `backend/.env`, tạo từ `backend/.env.example`; không đọc `.env`
+ở repository root và không đọc `config.ini` legacy. `compose.yaml` ở root chỉ là
+lớp điều phối PostgreSQL/Redis và truyền `backend/.env` cho container database.
+Frontend chỉ được dùng biến public `VITE_*` trong `frontend/.env` khi cần; không
+đặt Telegram, SMTP/IMAP, proxy hoặc master key trong frontend.
+
+Thứ tự khởi tạo web dev/production là Alembic `upgrade head` →
+`domaincheck-admin sync-rbac` → chạy API → Telegram login tạo user `pending` →
+bootstrap admin đầu tiên bằng OIDC subject. Bootstrap chỉ cấp role `admin`, role
+này luôn có toàn bộ permission catalog nhưng không bỏ qua owner isolation. Khi
+kích hoạt tài khoản thường, hệ thống gán role `user`; permission của role này do
+admin chỉnh trong trang **Role & quyền**. Seed role mới gán toàn bộ permission
+trừ `users.*` và `roles.*` (51 quyền hiện tại), gồm cả gửi/đọc mail và worker.
+
+## Giai đoạn chuyển đổi web
+
+React dùng Radix Themes và token màu dùng chung cho light/dark; nút **Sáng / Tối**
+lưu preference cục bộ ở `domaincheck.appearance`, không ghi DB. CSS Tailwind dark
+variant bám `.dark` để tránh form sáng theo hệ điều hành trong giao diện tối.
+Shared `Button`, `AppDialog`, `ThemeToggle` nằm trong `frontend/src/components/shared`;
+dialog giữ focus, hỗ trợ Esc và không đóng khi click ngoài để tránh mất form.
+Các trang nghiệp vụ được tải theo route, shell giữ nguyên trong lúc tải.
+Visual system tập trung ở `frontend/src/styles/app.css`: semantic palette,
+`--action-gradient`, `page-heading` và các trạng thái nút. Gradient dành cho primary
+action và active navigation; secondary/danger giữ phân cấp và màu ngữ nghĩa.
+PageHeader và header admin/mail dùng cùng `page-heading`; Quick Report có nhóm
+Danh sách mục tiêu và action bar responsive. Không thêm thư viện hay font CDN.
+
+Ứng dụng React/FastAPI đang ở giai đoạn nền tảng, chưa thay Streamlit trong vận
+hành. Trang auth/admin đã hoạt động nhưng không được dùng để suy ra các luồng
+check/send đã sẵn sàng.
+Chỉ route được mở sau khi có session, permission, owner isolation, durable claim
+và test parity. PostgreSQL migration hiện chỉ áp dụng cho database dev/test theo
+thao tác explicit; chưa import `data/`, `config.ini`, delivery hoặc evidence thật.
+
+Mọi preview/send tương lai phải theo chuỗi server-side: tạo revision → duyệt đúng
+account/recipient/attachment hash → claim delivery → SMTP → checkpoint. OIDC,
+Redis hoặc reconnect UI không phải nguồn sự thật của delivery. Cookie Dashboard
+Cloudflare vẫn chỉ được giữ RAM trong session worker và chưa có route nhận Cookie.
+
+User mới từ Telegram ở trạng thái `pending`. Quản trị viên bootstrap bằng OIDC
+subject ổn định qua CLI cục bộ, sau đó dùng trang **Người dùng** để kích hoạt/khóa,
+gán role hoặc revoke session; dùng trang **Role & quyền** để cấu hình permission
+cho role `user` và các role tùy biến. Role `admin` được catalog quản lý nên không
+thể giảm/sửa quyền từ UI.
+Migration `0003_explicit_role_permissions` xóa một lần quyền `user` do seed cũ
+cấp sẵn. Với DB hiện có, chạy `domaincheck-admin sync-rbac --reset-user-permissions`
+để thay bằng bộ mặc định mới; không cần migration schema. Những lần chạy
+`sync-rbac` thường tiếp theo giữ nguyên lựa chọn này. Đổi quyền role thu hồi phiên của
+mọi thành viên; yêu cầu họ đăng nhập lại sau khi lưu.
+Backend kiểm tra permission và CSRF độc lập với việc FE ẩn nút. Không thể vô hiệu
+hóa hoặc gỡ role của admin hoạt động cuối cùng, kể cả hai request chạy đồng thời.
+
+Trang **Tài khoản gửi mail** lưu nhiều SMTP account cùng IMAP folder Unicode,
+proxy và chữ ký override theo đúng owner. Password/credential được mã hóa, màn
+hình chỉ biết trạng thái “đã lưu”; để trống secret khi sửa nghĩa là giữ nguyên,
+không dùng mask làm giá trị. Đặt account mặc định được serialize và constraint DB
+chỉ cho một default mỗi user. Bấm lưu không test connection và không gửi mail.
+Khi được cấp `mail_accounts.test_own`, operator có thể bấm **Kiểm tra SMTP** hoặc
+**Kiểm tra IMAP** trên đúng account. Đây là hai action riêng: SMTP chỉ xác minh
+transport/TLS và đăng nhập, IMAP chỉ đăng nhập rồi đóng kết nối; không gửi thư,
+không mở folder và không đọc message. Lỗi hiển thị là mã đã sanitize. Không chạy
+với hạ tầng thật trong giai đoạn phát triển; chờ egress policy và phê duyệt vận hành.
+
+Cache Redis web được coi là lớp tăng tốc có thể mất. Mỗi key mang owner, feature,
+business day, bucket, schema version và hash input; không dùng cache chung theo
+hostname. Xóa cache chỉ được gọi cho feature có quyền riêng và ngày đã chọn, không
+xóa check history, delivery, approval hoặc evidence. Redis unavailable khiến check
+cache miss; không được suy ra trạng thái chưa gửi từ việc cache trống.
+
+Artifact web nằm sau port private storage. Adapter filesystem sinh object key bằng
+owner/evidence/artifact UUID, staging cả batch rồi mới commit, và rollback file đã
+move nếu commit dở. Chỉ PNG/JPEG decode hợp lệ vượt qua kiểm MIME/signature/byte/
+dimension/hash. Download luôn lookup DB theo owner, kiểm quyền view của feature trong
+artifact kind và đọc lại bytes với size/SHA-256; không dùng local path do client gửi.
+
+Trong backend web, tạo repository owned bằng owner từ session/ExecutionContext một lần;
+không chuyển owner từ DTO vào từng method. Get/list/count/update/delete đều giữ scope,
+nested resource phải qua composite owner FK và ID ngoài owner được che bằng 404. Worker
+có thể claim hàng đợi toàn cục bằng `SKIP LOCKED`, nhưng sau claim chỉ dùng owner/actor/
+account scope trong row. Heartbeat lease dùng token + expected version để stale worker
+không tiếp tục xử lý.
+
+Job web giữ membership và `input_index` cố định. Worker claim bằng transaction ngắn,
+chỉ start item khi lease còn hiệu lực và checkpoint từng item trước khi sang item kế.
+Stop cooperative không nhận thêm item; pending được giữ để resume explicit. Nếu process
+chết khi item đang chạy, recovery đánh dấu item `UNKNOWN` (kể cả lúc đang stop), không
+tự chuyển thành `FAILED` hoặc retry. Action retry chỉ nhận item `FAILED` đã chọn.
+
+Preview web không giữ body trong session/ledger. Formatter server-side tạo exact plan,
+lưu JSON immutable ở private artifact rồi ghi revision/fingerprint/expiry và snapshot
+version của sender, profile, evidence. Sửa subject/body/recipient tạo revision mới.
+Approve và send boundary đọc lại đúng bytes đã preview; revision cũ, hết hạn, account
+hoặc chữ ký đổi, evidence version/hash đổi đều bị khóa và yêu cầu tạo preview mới.
+
+Delivery web được materialize từ preview đã duyệt bằng business identity do adapter
+workflow tạo ở server. Khóa nghiệp vụ gồm workflow/identity/recipient/channel/draft
+identity và account là scope unique riêng; preview ID hoặc fingerprint không phải khóa
+dedupe. Delivery có một Message-ID ổn định qua mọi attempt. `claim_intent` khóa row,
+kiểm tra lại exact preview rồi ghi attempt `intent`; transaction này bắt buộc commit
+trước khi transport được gọi. Transport checkpoint ở transaction sau thành `SENT`,
+`FAILED` hoặc `UNKNOWN`. Chỉ `FAILED` được operator retry; `UNKNOWN`, `SENT` và claim
+đang chạy không được tự retry. Sweeper thấy lease hết sau intent phải đóng attempt là
+`UNKNOWN`, vì PostgreSQL không thể biết SMTP server đã nhận DATA hay chưa.
+
+Quick Report web tạo operation bền vững trước khi probe: API ghi target/check/job/item
+theo owner và trả `202`; process `domaincheck-worker` claim bằng lease rồi gọi compatibility
+adapter `run_cdn_check()` ngoài transaction. Kết quả từng URL được sanitize/checkpoint
+riêng; lỗi một URL không xóa kết quả URL khác. Redis hit vẫn tạo check mới với provenance
+`reused=true`, không giả làm quan sát mạng mới. Chạy worker dev bằng
+`domaincheck-worker --once` hoặc bỏ `--once` để polling; chưa chạy worker này với egress
+thật trước khi NET-01 và cấu hình triển khai được nghiệm thu.
+
+Frontend web dùng feature-based architecture: route/provider/layout ở `src/app`,
+component dùng chung ở `src/components`, mỗi nghiệp vụ nằm trong
+`src/features/<feature>/{api,hooks,components,pages,schemas,utils}`, còn Axios và
+TanStack Query primitives ở `src/lib`. Component không gọi `fetch`/Axios trực tiếp;
+API module validate response, hook quản lý server state và component chỉ render DTO.
+Axios client dùng `withCredentials`, tự thêm `X-CSRF-Token` cho method ghi và chuẩn hóa
+lỗi thành `ApiError`; không lưu session token trong local/session storage.
+
+Quick Report React chỉ gửi request sau khi operator bấm **Lọc danh sách** rồi
+**Kiểm tra**. Hook lưu active operation ID dưới key có user ID để F5 gọi lại GET thay
+vì tạo check mới; polling dừng khi job terminal. Logout xóa query cache và browser
+snapshot. Trang hiện chỉ cho copy full URL và đọc CDN/registrar/registry/recipient/
+cloaking DTO. Tự điền provider, browser verify, Netcraft submit và nic.top export vẫn
+bị khóa đến khi có permission/idempotency/capability API; không mô phỏng side effect.
+
 Report Lead Triage theo bố cục: brand impersonation, redirect chain, backend
 findings và evidence/request. Nội dung hành vi cùng URL/redirect/ảnh vẫn lấy từ
 Domain Worker; registrar chỉ được nêu khi ghi chú cung cấp `reg=`. Tất cả backend
@@ -100,10 +230,20 @@ Evidence; dòng “không tìm thấy” chỉ phản ánh hai kênh Registrar/R
 
 Quick Report: có thể F5 hoặc chuyển menu rồi quay lại trong khi check nền; kết quả và tiến độ vẫn được giữ khi server còn chạy. Dùng **Xóa cache** để xóa cả kết quả, cache lọc và ô nhập trước lượt mới; restart server không khôi phục kết quả RAM.
 
-Quick Report: các nút mở/tự điền form dùng Chrome đã cài trên Windows, macOS
-(`/Applications` hoặc `~/Applications`) và Linux (`google-chrome` hoặc
-`google-chrome-stable` trong PATH). Chrome cần có Web Form Assistant trong
-profile sử dụng; chạy ứng dụng trên cùng máy với Chrome.
+Quick Report web dùng Web Form Assistant v3 trên máy operator, không gọi Chrome từ
+server. Cấu hình exact app origin trong trang **Options** của extension và build FE với
+`VITE_FORM_ASSISTANT_EXTENSION_ID`. FE đăng ký device theo user, tạo capability task
+một lần từ check đã hoàn tất rồi gửi token trực tiếp cho extension; token không nằm
+trong URL provider/localStorage. Extension exchange qua HTTPS, giữ payload trong
+`chrome.storage.session` của tab và checkpoint status về API. Google/Microsoft luôn
+`fill_only`; nếu mất session hoặc extension chưa kết nối, dùng link manual và tạo task
+mới khi cần, không tái sử dụng capability cũ.
+
+Web login dùng Telegram Authorization Code + PKCE. Ở dev, truy cập FE và đăng ký
+callback cùng host `127.0.0.1:5173`; Vite proxy `/api` sang FastAPI nhưng browser vẫn
+giữ binding/session cookie tại origin FE. Token endpoint yêu cầu HTTP Basic, không gửi
+client secret trong form body. Trang login đọc status allowlist để phân biệt API down,
+Telegram chưa cấu hình và callback thất bại; không hiển thị raw provider error.
 ## HƯỚNG DẪN CHI TIẾT CẤU HÌNH, SCRIPTS VÀ BIỂU MẪU CHO 9 PHƯƠNG ÁN
 
 ---
@@ -785,3 +925,189 @@ with open(os.path.join(OUTPUT_DIR, "screenshot.png"), "rb") as f:
     for chunk in iter(lambda: f.read(4096), b""): sha.update(chunk)
 print(f"[+] SHA256: {sha.hexdigest()}")
 ```
+# Quick Report action boundary — 2026-10-16
+
+Compatibility packaging: backend wheel includes only phishing_toolkit.py,
+cloaking_detector.py, browser_evidence.py and quick_report_actions.py at module
+root using explicit Hatch force-include; editable installs expose src + repo
+root via Hatch dev-mode-dirs. No per-request sys.path mutation. Wheel regression
+extracts to isolated temp install and disables site/.pth, then imports and
+resolves routing outside checkout cwd. Wheel must not include secrets/runtime.
+Full backend suite is also run from backend cwd to catch import regressions.
+
+Routing parity: `core/quick_report_routes.py` đọc WEB_FORM_REGISTRARS và
+_static_registry_lookup của toolkit, không nhân bản contact table. DTO có
+report_forms với channel/label/form_url/autofill_provider/note. Adapter .CO/XYZ
+được chọn bằng URL form đã cấu hình, giữ ưu tiên suffix 2-level (com.co →
+CentralNic). GET checks/{id}/form-drafts yêu cầu open_form + configured profile,
+đọc check owned, dùng formatter legacy theo profile owner, trả private/no-store;
+không network, không persist body vào DB/audit, không submit. Các bảng contact
+vẫn là nguồn duy nhất; audit chi tiết tại docs/quick-report-routing-audit.md.
+
+Worker startup: `python -m domaincheck.workers.cli`; package sau cài đặt resolve
+compatibility module độc lập cwd. `LegacyQuickReportAdapter.validate_runtime` import requests,
+whois, dns.resolver, ipwhois và toolkit trước khi mở DB/claim job; các dependency
+được khai báo trong backend package. `run_quick_report_worker.bat` dùng venv backend
+và cwd root. Chỉ API không tự chạy worker; GET polling không khởi động probe.
+Trong lúc adapter chạy ngoài transaction, worker renew lease theo token/version
+mỗi 10 giây. Lease mất/stop thì hủy async checkpoint path; thread probe nếu đã
+chạy không thể force-kill nhưng không được checkpoint tiếp sau cancellation.
+
+Extension bridge validate env ID riêng với runtime.sendMessage availability;
+không đánh đồng thiếu browser API với thiếu env. Error mapping không đưa raw
+runtime response vào UI. Public diagnostic hiển thị ID/origin, không token.
+Ping manual có loading/toast; sequence counter chặn initial ping ghi đè retry
+mới. Không mở form trong connectivity probe. Runtime web chỉ xuất hiện khi
+Chrome có extension phù hợp externally_connectable; nếu copy extension ra
+folder khác, phải update/reload bản tại folder Chrome đang sử dụng.
+Handshake error code không bao gồm `Error:`: external listener serialize
+error.message; bridge vẫn normalize prefix để hỗ trợ extension đã nạp bản cũ.
+Origin rejection khác runtime không có receiving end/channel đóng; không đưa
+raw runtime error ra giao diện. Mỗi extension ID có origin/device config riêng.
+
+Mail editor dùng `accountFormError` và `prepareMailAccount`: submit thiếu
+SMTP host/username hoặc port sai hiện lỗi tại modal; label rỗng được thay bằng
+SMTP username đã trim. Chỉ trim public host/username/label, giữ nguyên password.
+Mỗi request POST tạo một account, không có minimum account count. Port input
+465/587 đồng bộ transport; IMAP/proxy vẫn optional. API save error được truyền
+vào modal thay vì chỉ xuất hiện phía sau overlay. Không thay API/secret policy.
+
+Mail API phân loại MailSettingsConflict bằng allowlist: thiếu encryption key
+hoặc key unavailable trả 503 với chỉ dẫn cấu hình; thiếu SMTP/IMAP/password và
+account disabled giữ 409 có nội dung riêng. Unique constraint owner+normalized
+identity trả 409 hướng dẫn sửa account đã có; lỗi integrity khác không lộ SQL,
+parameters hoặc credential. Dev thiếu master key được khởi tạo cục bộ sau khi
+xác minh chưa có encrypted account; không ghi giá trị khóa vào tài liệu/log.
+
+Frontend feedback: `AppProviders` mount một Sonner Toaster theo appearance,
+ConnectionNotice và render error boundary. `createQueryClient` dùng MutationCache
+đọc meta pendingMessage/successMessage để cập nhật cùng toast; lỗi mutation dùng
+thông báo tĩnh theo HTTP status, không đưa raw payload/contact/secret lên toast.
+Query polling không phát toast lỗi/thành công; read error dùng QueryError tại
+chỗ. Kết quả nghiệp vụ HTTP 200 như mail connection failed và Netcraft UNKNOWN
+được phân loại riêng, không coi HTTP thành công là nghiệp vụ thành công.
+`useConfirmation` dùng AppDialog chung, mặc định focus Hủy; callback chỉ chạy
+sau xác nhận. Mutation không tự retry. Logout chỉ clear cache/chuyển trang sau
+server success; network error khi tải /me không bị coi là chưa đăng nhập.
+
+Readiness: `GET /api/v1/quick-reports/readiness` chỉ trả ready/missing cho owner
+đang đăng nhập có quyền quick_report.view. Shared `missing_report_profile`
+kiểm tra brand_name/contact_name không rỗng sau trim và contact_email hợp lệ.
+Dependency configured_profile trả 409 trước check/task/preview/submit/export
+nếu thiếu hồ sơ. GET lịch sử/status vẫn giữ để không mất khả năng tra cứu;
+giao diện chỉ mount workflow sau readiness thành công, fail closed khi API lỗi.
+Không yêu cầu cấu hình mail transport hoặc extension để đạt readiness hồ sơ.
+
+`quick_report_actions.py` dùng chung cho legacy và web: Netcraft POST tới endpoint
+cố định, verified TLS, timeout 15 giây, không redirect/retry và không lưu response
+body; exporter XLSX dùng literal string cells để tránh formula injection.
+Backend `QuickReportActions` lưu exact payload trong immutable private artifact.
+Migration 0004 thêm `provider_submissions`, unique theo owner/provider/ngày/full
+URL hash và composite owner FK tới check/artifact. Preview revision, expiry,
+profile version và artifact hash được kiểm tra lại trước durable SENDING intent.
+Intent commit trước network; lease hết hạn thành UNKNOWN, chỉ FAILED được retry
+explicit. Không rebind SUBMITTED/SENDING/UNKNOWN bằng preview mới.
+
+API preview/submit yêu cầu `quick_report.submit_netcraft`, Origin và CSRF; đọc
+status cùng permission, export yêu cầu `quick_report.export`. Cross-owner trả
+404. Cờ `DOMAINCHECK_NETCRAFT_SUBMIT_ENABLED` mặc định false. Export tạo bytes
+trong bộ nhớ, không ghi shared runtime path. Task form chỉ chuyển public contact,
+brand, draft và full URL; token/payload extension vẫn nằm trong session storage,
+không vào provider URL. Tám adapter HTTPS đều được coordinator chạy fill-only.
+
+Kiểm thử dùng PostgreSQL/Redis cô lập, mock provider và fixture; chưa gọi form
+hay Netcraft thật. CLAUDE.md không đọc/cập nhật theo chỉ dẫn từ phiên trước.
+
+### Quick Report compact UI — 2026-10-16
+
+Result cards show infrastructure icon/name and channel-filtered registrar/registry
+contacts. Cloaking HTTP is hidden only in React; backend checks are unchanged.
+Provider actions follow Google/Microsoft/ChongLuaDao/CocCoc/Cloudflare/Registrar/
+Registry order. Adapter-supported forms expose only their extension button,
+disabled offline. Other forms open a dialog filtered by both channel and form URL;
+they reuse the owned form-drafts endpoint and legacy formatters. Netcraft remains
+last, with its existing preview/approval flow. No external action occurs on render.
+
+Quick Report three-column previews (2026-10-16): GET form-drafts supports optional
+include_providers=true, returning general/infrastructure/routing drafts from the
+same legacy formatters and task adapter. Default response stays compatible. The
+endpoint remains owner/permission/profile scoped, no-store, and read-only with no
+provider task creation, network request or submission. Netcraft text is indicative;
+its immutable approval preview remains the send boundary. React validates the DTO,
+shows service/channel selectors and copy controls beneath three grouped action
+areas. Extension actions explicitly say “Mở và tự điền”; desktop draft panels align.
+
+### Dense report layout and direct Netcraft action — 2026-10-16
+
+Supersedes the earlier three-column preview UI: general providers occupy one
+full-width block; CDN, registrar and registry are separate columns below it.
+Manual forms use direct HTTPS anchors and inline drafts, with no duplicate modal.
+The Netcraft click itself authorizes submission: React creates the immutable server
+preview and immediately submits its exact revision/fingerprint with confirmed=true.
+No confirmation dialog or checkbox remains. Backend permission, configured-profile,
+submit-enabled flag, claim/intent ledger, dedupe, expiry and UNKNOWN protections
+remain enforced. Render/refresh never sends. UI tests mock all provider calls.
+
+### Empty routing groups and Netcraft runtime config — 2026-10-16
+
+React selects applicable CDN/registrar/registry groups from server providers and
+report_forms, independent of draft fetch state, and distributes remaining columns
+evenly. Empty groups are not mounted. Report actions use cyan/blue gradients with
+visible hover/focus/disabled states. Netcraft local submit flag was enabled by
+operator request and FastAPI restarted; example config stays opt-in false. No
+report was sent to verify configuration; authenticated GET status confirms it.
+
+2026-10-16: removed Quick Report nic.top export UI, NictopExport component and
+unused frontend download API helper. Existing backend export route and legacy
+functions remain compatible; no check/routing/report behavior or runtime data changes.
+
+### Quick Report cache UX — 2026-10-16
+
+Operation view counts reused=true as cached, source=network as newly checked and
+unresolved separately; default hideCached only filters confirmed reused records.
+Original input indices/order are preserved and toggle causes no HTTP mutation.
+All-cache results have explicit empty-state guidance. The owned existing POST
+/cache/clear receives only feature=quick-report; server resolves actor/day/timezone.
+UI uses clear_cache permission, blocks during local operation load/create/active
+states, validates response, reports count/day and handles failure. Clear never
+invalidates durable checks or resets provenance, sends reports or creates jobs.
+Concurrent operations in another tab can repopulate cache; stop them before clear
+if a completely fresh next batch is required. No backend/storage schema changed.
+
+### Daily Quick Report accumulation — 2026-10-16
+
+GET /api/v1/quick-reports/daily is read-only, private/no-store, view-permission gated.
+It scopes checks by authenticated owner + workflow quick_report + business day in
+actor timezone. SQL row_number by workflow_key selects latest created_at/id; first
+seen ordering is retained. No new schema, probe, Redis access or mutation on read.
+Daily DB history remains after cache clear or Redis loss. Browser query keys bind
+user and refresh every 2s during active work, otherwise 30s for other-tab/day changes.
+Current operation fills missing rows/updates same check, never replaces a newer DB
+check from another tab. URL identity follows hostname/path/query legacy identity.
+Input stays mounted; submit blocks during active current operation. Daily results
+show all by default; old/new totals refer to latest operation, not Redis inventory.
+Existing operation GET remains compatible. Failed daily loading shows an error and
+keeps current operation visible; no browser-only history is used as source of truth.
+
+Daily history orphan status (2026-10-16): read endpoint checks owner-scoped
+JobItem -> quick_report Job membership for each displayed check ID. Unlinked
+pending/running rows project status not_queued, without updating database rows.
+Linked pending records retain pending. UI explains missing job and manual recheck;
+never auto-enqueues historical rows. Current production investigation found the
+reported pgslotgamer.co/vi-vn/ and dn88.buzz records have no associated job items;
+worker was running and recorded other operations completed normally.
+
+2026-10-16 visibility correction: daily old-result filter defaults on and resets
+per operation key. All daily rows outside current operation (including orphan/
+failed/pending history) are old for display; current Redis hits are also hidden.
+Successful cache clear calls workflow.reset to clear current operation/session
+pointer and visible cards, without deleting DB history or auto-checking. Failed
+clear retains the current view. New checks after clear get new IDs and display
+normally. Regression covers 10 old +10 new -> clear -> recheck all20 and F5.
+This supersedes the earlier default-show-all daily UI choice.
+
+2026-10-16 ordering fix: daily merge must retain current operation input order
+before appending historical-only rows. Replacing Map values did not reorder keys,
+so daily first-seen ordering previously produced misleading #/status positions.
+Worker already awaits each item in input_index order; no concurrency change.
+Regression supplies reversed daily rows with succeeded/running/pending input order.

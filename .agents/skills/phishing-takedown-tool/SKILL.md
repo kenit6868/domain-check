@@ -1,4 +1,4 @@
----
+﻿---
 name: phishing-takedown-tool
 description: Thực hiện thay đổi hoặc đánh giá workflow Domain Check Tool về kiểm tra phishing, báo cáo takedown, worker, SMTP/IMAP và evidence; không dùng cho công việc Streamlit thuần túy.
 ---
@@ -11,6 +11,79 @@ Streamlit, dùng `developing-with-streamlit` thay vì skill này; nếu một pa
 cả UI lẫn nghiệp vụ, dùng cả hai skill.
 
 ## Invariant cần giữ
+
+- Quick Report Netcraft dùng ledger owner/provider/ngày/full URL hash và exact
+  immutable preview có revision/expiry/profile version. Commit SENDING intent
+  trước HTTP; lease hết hạn thành UNKNOWN, không tự retry. Chỉ FAILED được
+  retry explicit. Gửi thật mặc định tắt bằng `DOMAINCHECK_NETCRAFT_SUBMIT_ENABLED`.
+  Export nic.top chỉ lấy check thành công của owner, giữ full URL và dùng literal
+  XLSX cells. Provider form được routing phía server; HTTPS coordinator luôn
+  chạy tám adapter ở chế độ fill-only.
+  Trước check/task/preview/submit/export, API phải kiểm tra hồ sơ owner có
+  thương hiệu, tên liên hệ và email hợp lệ; readiness không phụ thuộc SMTP/IMAP.
+  Giao diện fail closed khi chưa tải được readiness hoặc thiếu cấu hình.
+  Quick Report worker là process riêng; startup kiểm tra dependency/legacy import
+  trước claim job, giữ heartbeat khi adapter chạy lâu. FE không được mô tả
+  pending/queued là đang probe; polling GET không thay thế worker process.
+
+- Trong web multiuser, mọi target/check/job/case/preview/delivery/evidence/cache
+  phải scope bằng `owner_user_id` lấy từ session server-side; `actor_user_id` và
+  `sender_account_id` là identity riêng. Không dùng global path/config/cache hoặc
+  owner do client gửi. Redis không là nguồn duy nhất của approval, progress hay
+  delivery truth. Cross-owner reference phải bị chặn ở repository và database.
+  Repository owned phải cố định owner từ session/context khi khởi tạo; method resource
+  không nhận owner override. Worker chỉ được lookup toàn cục lúc claim, sau đó dùng
+  owner/actor/account scope từ row và lease token + optimistic version.
+  Job phải giữ membership/input order bền vững và checkpoint từng item. Stop là
+  cooperative, không nhận item mới. Lease chết khi item đang chạy phải phục hồi thành
+  `UNKNOWN` kể cả trong stop recovery; không tự đổi thành `FAILED` hay retry. Retry
+  chỉ reset đúng failed subset do operator/action hợp lệ chọn.
+  Cache key phải có owner/feature/business day/version và hash input nhạy cảm; TTL
+  tới local midnight theo timezone operation. Redis loss chỉ là cache miss, còn
+  clear chỉ xóa namespace được cấp quyền, không xóa approval/delivery/evidence.
+- External action qua API cần permission riêng, xác nhận explicit, durable
+  intent/claim và idempotency/recovery. Preview exact gắn revision, account config
+  version và attachment hash; SMTP outcome bất định không được retry mù. Secret
+  mail/proxy/integration mã hóa có key version, không trả plaintext/mask như value.
+  Exact subject/plain/HTML body và delivery plan phải nằm trong private immutable
+  artifact; DB/audit/job metadata chỉ giữ hash/reference và metadata allowlist. Mỗi
+  edit tạo revision server-side mới. Approve/send phải revalidate latest revision,
+  expiry, account/profile/evidence version và artifact bytes; không tin fingerprint
+  hoặc nội dung do client tự khai là đã duyệt.
+  Quick Report web phải ghi target/check/job trước khi worker gọi `run_cdn_check()`;
+  giữ full URL/path/query và input order. Cache hit theo owner/ngày/engine vẫn tạo check
+  mới với provenance, không được ghi thành quan sát mạng mới. DTO không chứa raw HTML,
+  credential hoặc local evidence path; không thay pipeline nhẹ bằng `run_check()`.
+  React Quick Report phải gọi API qua shared Axios boundary, validate DTO và giữ
+  operation/query key theo user; component không tự tính verdict/routing/recipient.
+  F5 chỉ GET lại operation bền vững, không POST check mới. Khi form-task/submit/export
+  chưa có API permission/idempotency tương ứng, phải khóa và mô tả là chưa khả dụng,
+  không dùng mock/demo success trong runtime.
+  Delivery business key phải do adapter workflow phía server tạo và không dùng preview
+  ID/content hash để vượt sent dedupe. Ghi attempt intent + stable Message-ID trước
+  SMTP; transaction intent phải commit trước side effect. Chỉ `FAILED` xác định được
+  retry explicit. Claim hết hạn hoặc mất checkpoint sau intent phải thành `UNKNOWN`,
+  không tự retry hoặc suy ra chưa gửi từ Redis/session.
+- Artifact web phải dùng object key do server sinh có owner/operation scope, không
+  dùng filename/path client. Validate toàn batch ảnh (decode, MIME/signature, byte,
+  dimension, hash) trước commit; file immutable và download phải kiểm lại owner,
+  permission feature cùng size/SHA-256. Không phục vụ artifact bằng static route.
+- Telegram web login dùng OIDC Authorization Code + PKCE, state/nonce one-time và
+  app session opaque HttpOnly. User mới pending; không cấp admin theo username hay
+  người login đầu tiên. FE chỉ dùng permission cho UX, backend vẫn enforce action.
+  Telegram token exchange dùng HTTP Basic cho Client ID/Secret theo provider contract;
+  không gửi secret trong form body. Dev callback phải cùng browser origin/host với FE
+  để giữ binding cookie; không trộn `localhost` và `127.0.0.1`. Public auth status chỉ
+  trả configured/issuer/redirect URI, không client ID/secret/raw provider error.
+- Bootstrap admin chỉ bằng thao tác local explicit theo issuer + OIDC subject ổn
+  định. Thay status/role phải revoke session qua `authz_version`, ghi audit allowlist
+  và dùng transaction khóa invariant admin hoạt động cuối cùng. Role `admin` luôn
+  có toàn bộ permission catalog, không sửa qua API và không bỏ qua owner isolation.
+  Role `user` mới seed toàn permission trừ `users.*`/`roles.*`; admin được sửa permission nhưng
+  không sửa identity/xóa system role. Sync RBAC thường giữ nguyên lựa chọn permission user;
+  `--reset-user-permissions` thay bằng bộ mặc định và revoke phiên thành viên.
+  Actor chỉ có quyền gán role (kể cả `user`) không được cấp permission vượt
+  effective permission nếu thiếu quyền quản trị role đầy đủ.
 
 - `abuse@cloudflare.com` là inbox không được Cloudflare theo dõi: không được
   tạo recipient/draft SMTP mới hoặc gửi lại từ job legacy. IP, ASN hay contact
@@ -69,6 +142,11 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Cookie Dashboard flow không phụ thuộc `api_token`; `account_id` có thể fallback
   từ đúng một value hex 32 ký tự trong cookie `curr-account`, không persist Cookie.
 - Web Form Assistant extension phải giữ coordinator không chứa selector provider;
+  web multiuser truyền task bằng capability ngắn hạn một lần, bind owner/device/
+  provider/target. Chỉ persist hash; raw token không nằm trong provider URL, Redis,
+  localStorage, log hoặc popup. Sau exchange, payload/status token chỉ ở
+  `chrome.storage.session` của tab; restart yêu cầu task mới. Extension phải so exact
+  app origin đã cấu hình và provider origin allowlist trước khi mở tab.
   mỗi adapter riêng tuân theo contract `matches`, `waitUntilReady`, `fill`,
   `validate`, `captchaPending`, `submit`, `detectSuccess`. Thêm provider không
   được làm thay đổi hành vi adapter Cloudflare đã kiểm thử.
@@ -149,6 +227,11 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
 - Gửi email, submit report, đọc IMAP và mở URL nghi ngờ đều là hành động ngoài
   hệ thống: chỉ thực hiện khi người dùng cho phép rõ ràng; mặc định là draft/
   preview.
+- Connection test của web là action explicit riêng theo owner và permission:
+  SMTP chỉ được connect/TLS/login rồi đóng, không gọi `send_message`; IMAP chỉ
+  TLS/login/logout, không select/list/search/fetch mailbox. Lỗi và audit chỉ giữ
+  mã/transport sanitize, không raw exception hoặc secret. Lưu account không được
+  tự kích hoạt connection test.
 - Lead Triage giữ bản nháp cục bộ qua chuyển menu/F5 trong cache review riêng,
   chỉ khôi phục dữ liệu đã có, không tự check/capture/gửi khi nạp cache. Nút xóa
   cache chỉ bỏ trạng thái review; sent log và file evidence audit vẫn được giữ.
@@ -378,3 +461,22 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   khi phù hợp.
 - Tuân theo quy tắc cập nhật tài liệu trong `AGENTS.md`; không lặp lại quy tắc
   chung đó tại đây.
+
+## Quick Report direct actions
+
+Theo yêu cầu chủ dự án, nút Netcraft Gửi API là thao tác explicit tạo exact
+server preview rồi submit ngay, không yêu cầu modal/checkbox lần hai. Giữ
+permission, configured profile, submit-enabled flag, durable intent/dedupe và
+UNKNOWN lock. Không gửi khi render/refresh; không bật server flag chỉ để test.
+Form thường mở thẳng URL vì draft đã hiển thị inline; không thêm modal copy.
+
+## Quick Report daily history
+
+Ô nhập luôn hiển thị. Danh sách tích luỹ trong ngày phải đọc DB owned theo
+workflow/day và chọn check mới nhất cho mỗi workflow_key, không dùng operation
+cuối/sessionStorage làm toàn bộ lịch sử. Cache clear không xoá danh sách này.
+Mặc định ẩn cũ theo mỗi lượt, cho phép xem lại; không gắn nhãn Redis cache cho kết quả
+chỉ vì nó thuộc lượt trước. Query daily không tạo job/probe/gửi report.
+
+Xoá cache thành công phải dọn operation đang xem/session pointer để thẻ cũ biến mất;
+DB history vẫn giữ. Nhập lại URL sau clear tạo check mới và hiển thị lại bình thường.

@@ -1,4 +1,4 @@
-# Domain Check Tool — hướng dẫn dự án cho Codex
+﻿# Domain Check Tool — hướng dẫn dự án cho Codex
 
 ## Mục tiêu
 
@@ -251,6 +251,340 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-10-16 — Sửa thứ tự thẻ Quick Report: lượt hiện tại theo input order, lịch
+  sử ngày ngoài lượt xếp sau; số # khớp worker tuần tự. Không đổi worker/runtime.
+  Thêm regression daily response đảo thứ tự. FE 47/47,
+  typecheck/lint/build và compileall đạt. CLAUDE.md không đọc/cập nhật.
+
+- 2026-10-16 — Daily Quick Report mặc định ẩn thẻ thuộc lượt cũ (mọi state) và
+  cache hit, reset lựa chọn ẩn khi tạo lượt mới. Clear cache thành công dọn
+  operation/session pointer để thẻ biến mất; giữ DB history, không tự check lại.
+  Test 10+10/clear/recheck20 + clear failure; FE 46/46, typecheck/lint/build và
+  compileall. Không sửa backend; CLAUDE.md không đọc/cập nhật theo chỉ dẫn.
+
+- 2026-10-16 — Daily Quick Report phân biệt pending/running lịch sử không có
+  job item: DTO not_queued, UI Chưa có job và hướng dẫn nhập lại URL. Không đổi
+  runtime history, tự enqueue hoặc check lại. Kiểm tra membership cùng owner và
+  job_type; giữ pending cho record thực sự có job. FE 45/45 + typecheck/lint/build;
+  backend 118 đạt/2 skip, compileall đạt. CLAUDE.md không đọc/cập nhật.
+
+- 2026-10-16 — Sửa Quick Report theo danh sách tích luỹ ngày: ô nhập luôn hiện,
+  GET /quick-reports/daily đọc DB owner/workflow/ngày, chọn latest mỗi URL;
+  không mất kết quả cũ khi thêm batch/F5/xoá Redis cache. Mặc định hiện cũ và
+  mới, checkbox ẩn là tuỳ chọn; bộ đếm cũ/mới tách khỏi provenance Redis. API
+  operation cũ giữ tương thích; không migration. FE scenario 10+2/F5, backend
+  A/B/day/latest/permission được kiểm thử. FE 44/44 + typecheck/lint/build,
+  backend 118 đạt/2 skip trên PostgreSQL sạch; compileall đạt.
+  CLAUDE.md không đọc/cập nhật.
+
+- 2026-10-16 — Quick Report thêm cache/new counts, mặc định ẩn kết quả cache,
+  toggle xem lại và all-cache guidance; nút Xoá cache hôm nay theo permission,
+  dùng API owner/day hiện có. Không xoá lịch sử/provenance/delivery hoặc tự
+  check/gửi lại; khoá clear khi operation hiện tại đang tải/chạy. FE 43/43,
+  typecheck/lint/build; cache backend 6 đạt/1 integration skip; compileall đạt.
+  CLAUDE.md không đọc/cập nhật theo chỉ dẫn hiện hành.
+
+- 2026-10-16 — Bỏ khối Báo cáo nic.top, component export và download helper khỏi
+  React Quick Report theo yêu cầu; FE 38/38, typecheck/lint/build và compileall đạt. Giữ backend export tương thích, không đổi
+  check/routing/registry form. Cập nhật README/technical guide/implementation plan.
+  CLAUDE.md không đọc/cập nhật theo chỉ dẫn hiện hành.
+
+- 2026-10-16 — Quick Report ẩn nhóm form không áp dụng, chia đều cột còn lại,
+  nút báo cáo xanh cyan–blue nổi bật. Bật Netcraft submit flag cục bộ theo yêu
+  cầu và restart FastAPI; file mẫu giữ false, loại khai báo trùng. Không gửi
+  report thật; FE regression + typecheck/lint/build, compileall/pip check.
+  CLAUDE.md không đọc/cập nhật theo chỉ dẫn hiện hành.
+
+- 2026-10-16 — Quick Report dense layout: nhóm GSB/Microsoft/Chống Lừa Đảo/
+  Cốc Cốc/Netcraft toàn hàng; dưới là ba cột CDN/Registrar/Registry. Form thường
+  mở URL trực tiếp, bỏ modal copy trùng. Netcraft một lần bấm tạo exact preview
+  rồi gửi API, bỏ xác nhận UI theo yêu cầu; giữ server permission/flag/ledger/
+  dedupe/UNKNOWN. Giảm khoảng cách và chiều cao preview. FE 38/38, typecheck/lint/build và compileall đạt. Kiểm thử chỉ mock,
+  không gửi report thật; CLAUDE.md không đọc/cập nhật theo chỉ dẫn hiện hành.
+
+- 2026-10-16 — Quick Report chia ba cột báo cáo cộng đồng/hạ tầng/registrar-registry,
+  mẫu nội dung inline theo dịch vụ, copy và nhãn Mở và tự điền rõ ràng. Thông tin
+  hạ tầng/contact chung hàng. GET form-drafts thêm include_providers opt-in, giữ
+  owner/permission/profile/no-store và formatter legacy; không tạo task/gửi report
+  khi xem. Microsoft không có draft văn bản; Netcraft giữ exact approval riêng.
+
+- 2026-10-16 — Thu gọn Quick Report React: hạ tầng icon/tên, routing hai dòng
+  email; ẩn Cloaking HTTP trên UI. Sắp nút Google/Microsoft/Chống Lừa Đảo/Cốc Cốc/
+  Cloudflare/Registrar/Registry; form có adapter chỉ hiện nút extension, form khác
+  mở draft đúng channel + form URL trong dialog. Giữ nguyên backend và approval
+  Netcraft. FE 34/34 test, typecheck/lint/build và compileall đạt; không gửi report
+  thật. CLAUDE.md không đọc/cập nhật theo chỉ dẫn hiện hành.
+
+- 2026-10-16 — Sửa Quick Report GET 500 khi API chạy từ backend cwd: Hatch
+  editable path và wheel force-include chỉ bốn module compatibility cần thiết,
+  không config.ini/.env/runtime. Test subprocess ngoài repo cwd và isolated
+  wheel (không editable .pth) đạt; full backend chạy từ backend cwd 119/119,
+  compileall/pip check đạt. Chrome khôi phục 6/6 kết quả đã có và preview draft
+  thành công, không check/gửi lại. CLAUDE.md không đọc/cập nhật theo chỉ dẫn cũ.
+
+- 2026-10-16 — Audit registrar/registry Quick Report: bổ sung toàn bộ manual
+  form/draft từ 23 registrar form rule và 76 registry entry; 48 registrar email
+  rule vẫn dùng resolver legacy. Sửa XYZ family và com.co/CentralNic routing
+  theo form URL; API draft owned/private và FE preview/copy. Quick Report cũ
+  chỉ hiển thị email contact, không có SMTP action. Không tuyên bố toàn bộ web
+  migration hoàn tất; audit ở docs/quick-report-routing-audit.md. Không submit
+  hoặc kết nối mail thật; CLAUDE.md không đọc/cập nhật theo chỉ dẫn cũ.
+  Backend cô lập 117/117, FE 33/33 + typecheck/lint/build; legacy 415 giữ baseline
+  4 failure + 7 error; compileall/pip check/diff check đạt.
+
+- 2026-10-16 — Sửa vận hành Quick Report không có kết quả: khai báo dependency
+  requests/python-whois/dnspython/ipwhois, startup preflight trước claim và
+  heartbeat trong check lâu. Thêm run_quick_report_worker.bat; FE phân biệt
+  pending/queued với running. Lượt người dùng chọn được phục hồi đúng 4 item
+  lỗi thiếu dependency và hoàn tất 4/4 bằng worker thật; worker giữ chạy nền,
+  không SMTP/IMAP/provider submit. Backend fixture 112/112, FE 32/32 và
+  typecheck/lint/build; legacy giữ baseline 415 / 4 failure / 7 error;
+  compileall/pip check đạt. CLAUDE.md không đọc/cập nhật theo chỉ dẫn cũ.
+
+- 2026-10-16 — Sửa handshake extension trả `Error: origin_not_allowed` làm FE
+  mất phân loại lỗi: worker trả error.message, FE tương thích cả prefix legacy.
+  Tách runtime receiving-end-not-found/channel-closed. Chrome thật xác nhận
+  bản extension mới đã nhận message nhưng chưa lưu đúng origin; không tự sửa
+  permission hoặc mở form. FE 31/31 + lint/build; CLAUDE.md giữ nguyên.
+
+- 2026-10-16 — Sửa chẩn đoán Quick Report extension: tách thiếu/sai ID, thiếu
+  browser runtime, origin bị chặn, timeout; trim ID public và sanitize lỗi.
+  Retry có loading/toast, sequence guard không để ping cũ ghi đè kết quả mới.
+  UI hiển thị ID/origin. FE 30/30 và build; kiểm tra Chrome thật xác nhận env
+  hợp lệ nhưng messaging API chưa được expose, không khẳng định đã kết nối.
+  Không mở form/submit; CLAUDE.md không đọc/cập nhật theo chỉ dẫn cũ.
+
+- 2026-10-16 — Sửa lỗi thêm mail bị báo chung “account conflicts”: thiếu khóa
+  mã hóa trả 503 có hướng dẫn, trùng identity theo owner trả 409 riêng, lỗi
+  SMTP/IMAP precondition có thông báo cụ thể; không lộ SQL/secret. Dev xác minh
+  chưa có sender/encrypted account rồi khởi tạo master key trong backend/.env,
+  kiểm tra AES-GCM roundtrip và dev reload. Không lưu mail mẫu/kết nối mail thật.
+  Backend PostgreSQL/Redis cô lập 110/110; legacy 415 giữ baseline 4 failure +
+  7 error; compileall/pip check/diff check đạt. CLAUDE.md không đọc/cập nhật.
+
+- 2026-10-16 — Sửa form thêm mail đơn lẻ: nhãn tùy chọn fallback SMTP username,
+  validation hiện rõ thay vì khóa nút im lặng; lỗi API nằm trong modal. Port
+  465/587 tự chọn Implicit TLS/STARTTLS. SMTP-only không phụ thuộc profile,
+  IMAP/proxy hoặc số lượng account. FE 25/25, typecheck/lint/build; không đổi
+  backend hoặc kết nối mail thật. CLAUDE.md không đọc/cập nhật theo chỉ dẫn cũ.
+
+- 2026-10-16 — FE thêm Sonner toast theo theme, shared mutation feedback,
+  xác nhận khóa user/thu hồi phiên/xóa role/tắt mail; pending buttons, read-error
+  retry, offline banner, render error boundary và tiến độ Quick Report. Toast
+  không chứa raw API data; polling giữ im lặng. Logout chỉ kết thúc UI khi API
+  thành công và lỗi mạng /me có retry. Chỉ thay FE, không gọi provider/mail thật.
+  FE 24/24, typecheck/lint/build, npm audit và compileall/pip check đạt; Chrome
+  automation không kết nối nên chưa visual verify trên tab hiện tại. CLAUDE.md
+  không đọc/cập nhật theo chỉ dẫn phiên trước.
+
+- 2026-10-16 — Quick Report bắt buộc hồ sơ theo owner có brand_name,
+  contact_name và contact_email hợp lệ. API readiness chỉ trả missing/ready;
+  dependency chặn check mới, task form, Netcraft preview/submit và export bằng
+  409 khi chưa đủ cấu hình. React hiện checklist/link cấu hình trước khi mount
+  workflow; kiểm tra lại sau lưu. Không bắt SMTP/IMAP cho Quick Report.
+
+- 2026-10-16 — Quick Report bổ sung exact Netcraft preview/approval với ledger
+  owner/ngày/full URL, durable intent, FAILED retry explicit và UNKNOWN không
+  tự gửi lại; migration 0004. Export nic.top XLSX giữ full URL và literal cells.
+  Kết nối tám provider form theo routing server, public contact payload và
+  extension fill-only. Gửi Netcraft mặc định tắt bằng backend feature flag;
+  kiểm thử fixture/mock, không submit provider thật. CLAUDE.md không đọc/cập
+  nhật theo chỉ dẫn phiên trước.
+
+- 2026-10-15 — UI-04: làm mới React theo visual system indigo–violet, gradient
+  primary/active nav, header/card có chiều sâu nhẹ, avatar và icon tiles; nhóm
+  nhập URL Quick Report rõ hơn, action bar responsive. Giữ light/dark và toàn bộ
+  permission/workflow. FE 16/16 + typecheck/lint/build đạt; Chrome desktop/mobile
+  390×844 hai mode không tràn ngang. Chỉ lọc URL fixture cục bộ, không chạy check
+  hay gửi report. CLAUDE.md không đọc/cập nhật theo chỉ dẫn phiên trước.
+
+- 2026-10-15 — UI-03: React có light/dark, lưu preference trình duyệt và khởi tạo
+  trước render; Tailwind dark variant theo `.dark`, form/bảng/cảnh báo dùng chung
+  palette. Cài Radix Themes 3.3.0, shared Button/AppDialog/ThemeToggle; dialog hỗ
+  trợ focus trap/Esc/return focus, trang tải theo route. FE 16/16 test cùng
+  typecheck/lint/build đạt; đã xem Chrome hiện tại ở desktop và mobile 390×844.
+  Chỉ đổi frontend, không chạy nghiệp vụ hay gửi thật. CLAUDE.md không đọc/cập nhật
+  theo chỉ dẫn phiên trước.
+
+- 2026-10-15 — Theo yêu cầu mới, role `user` seed toàn quyền nghiệp vụ trừ
+  `users.*` và `roles.*` (51/56). Sync thường giữ lựa chọn admin; CLI thêm
+  `sync-rbac --reset-user-permissions` áp dụng bộ mặc định cho DB hiện có và
+  thu hồi phiên thành viên. Admin vẫn toàn quyền, owner isolation không đổi.
+  Backend DB/Redis test riêng 92/92; legacy 415 test giữ 4 failure + 7 error
+  baseline; compileall/pip check đạt. Đã áp dụng và xác minh DB dev user 51 quyền.
+  CLAUDE.md không đọc/cập nhật theo chỉ dẫn phiên trước.
+
+- 2026-10-15 — Hoàn tất RBAC-03: admin có toàn catalog (56 quyền); user ban đầu
+  rỗng, permission do admin chọn và sync không ghi đè. Migration 0003 bỏ quyền
+  user seed cũ; bootstrap chỉ gán admin; UI cho sửa permission user, khóa admin.
+  Gán role user cũng chặn vượt quyền. Backend PostgreSQL/Redis riêng 92/92;
+  frontend 13/13 + typecheck/lint/build; migration downgrade/upgrade/check,
+  compileall và pip check đạt. Legacy 415 test giữ 4 failure + 7 error baseline.
+  Không gửi SMTP/IMAP/provider thật. CLAUDE.md không đọc/cập nhật theo chỉ dẫn cũ.
+
+- 2026-10-15 — Chuẩn hóa initialization RBAC: thêm CLI idempotent
+  `domaincheck-admin sync-rbac` chạy sau Alembic để tạo permission catalog và
+  system role trước khi có admin. Bootstrap admin đầu tiên gán cả `admin` và
+  `user`, nên có quyền quản trị lẫn các workflow an toàn mặc định; user ngoài
+  vẫn `pending` cho tới khi admin kích hoạt.
+
+- 2026-10-15 — Sửa dependency cài đặt backend cho SQLAlchemy 2.1 async:
+  dùng `sqlalchemy[asyncio]` để clean virtualenv luôn có `greenlet` trước khi
+  Alembic import async engine. Lỗi thiếu `greenlet` không còn yêu cầu người dùng
+  cài tay một dependency ngoài khai báo dự án.
+
+- 2026-10-15 — Tách cấu hình web đúng package boundary: FastAPI và PostgreSQL
+  Compose dùng `backend/.env` tạo từ `backend/.env.example`; frontend chỉ nhận
+  biến public trong `frontend/.env` khi cần. Root không còn `.env.example` và
+  backend không đọc root `.env`; `compose.yaml` vẫn ở root với vai trò điều phối.
+
+- 2026-10-15 — Sửa Telegram web login: token exchange chuyển sang HTTP Basic theo
+  OIDC Telegram chính thức; Vite dev callback/cookie thống nhất ở
+  `127.0.0.1:5173`, backend đọc `backend/.env`, có status API không lộ secret và callback
+  error allowlist. FE đổi sang dark investigation console với login readiness,
+  sidebar/topbar cyan–indigo responsive; thiếu cấu hình thì khóa login và chỉ dẫn
+  callback. Backend PostgreSQL 17 + Redis 7 đạt 90/90; frontend 12/12 +
+  typecheck/lint/build; visual Playwright đạt ở 1440×1000 và 390×844. Legacy giữ
+  baseline 415 test / 4 failure / 7 error. Mock tests không gọi Telegram thật.
+  `CLAUDE.md` không đọc/cập nhật.
+
+- 2026-10-15 — Hoàn thành EXT-01: FastAPI tạo capability task Quick Report owned,
+  one-time exchange/status token và device registration; React Axios mở Google/
+  Microsoft qua Web Form Assistant v3, poll trạng thái và fallback link thủ công.
+  Extension kiểm exact app/provider origin, chỉ `fill_only`, giữ payload tạm trong
+  `chrome.storage.session`; token không vào provider URL/DB/Redis/localStorage.
+  PostgreSQL 17 + Redis 7 backend 87/87, test form-task/extension 15/15, frontend
+  11/11 + typecheck/lint/build và JS syntax đạt. Chỉ fixture/mock, không mở form hay
+  submit thật. Legacy giữ baseline 415 test / 4 failure / 7 error. Sáu adapter còn
+  lại thuộc EXT-02; `CLAUDE.md` không đọc/cập nhật.
+
+- 2026-10-15 — Chuẩn hóa frontend sang feature-based architecture: `app` giữ
+  provider/router/layout; `features` tách api/hooks/components/pages/schemas/utils;
+  `components/shared` và `lib/http|query` dùng chung. Thay toàn bộ HTTP runtime bằng
+  Axios 1.20.0 cùng cookie, CSRF interceptor và error normalization. Triển khai phần
+  check thật của QR-02: lọc explicit, permission gate, POST operation, polling, result
+  cards và phục hồi F5 theo user. Provider autofill/Netcraft/nic.top vẫn khóa vì chưa
+  có API capability/idempotency, nên QR-02 còn `in_progress`, không dựng success giả.
+  FE typecheck/lint/10 test/build đạt; không gọi network/provider/SMTP/IMAP/capture.
+  `CLAUDE.md` không đọc/cập nhật theo chỉ dẫn người dùng.
+
+- 2026-10-15 — Hoàn thành backend `QR-01`: API owned tạo/đọc Quick Report operation,
+  ghi target/check/job/item trước probe và trả `202`; worker process riêng gọi đúng
+  compatibility `run_cdn_check()`, checkpoint từng URL, giữ full URL/order/duplicate.
+  Redis cache tách owner/ngày/engine và DB ghi provenance; sanitizer loại raw HTML,
+  credential/local path. Test chỉ dùng fake adapter, không network/provider thật;
+  backend PostgreSQL + Redis 82/82;
+  Alembic check/compileall/pip check/diff check đạt;
+  legacy giữ baseline 415 test / 4 failure / 7 error. React page/form task/export còn
+  QR-02/EXT-01. `CLAUDE.md` không đọc/cập nhật.
+
+- 2026-10-15 — Hoàn thành `DELIVERY-01`: delivery được materialize từ exact preview
+  đã duyệt bằng business identity phía server, không dùng preview/hash để né dedupe;
+  Message-ID ổn định, row claim + optimistic version và attempt intent được ghi trước
+  side effect. Chỉ `FAILED` retry explicit; lease/mất checkpoint sau intent phục hồi
+  thành `UNKNOWN`. Sửa `OwnedRepository` refresh row sau khi chờ `FOR UPDATE`, chặn race
+  hai session cùng claim. Preview mới đã duyệt chỉ rebind delivery còn pending/failed,
+  không mở lại SENT/SENDING/UNKNOWN. Backend PostgreSQL + Redis 76/76; Alembic check, compileall,
+  pip check và diff check đạt. Legacy giữ đúng baseline 415 test / 4 failure / 7 error;
+  chưa có route gửi workflow hoặc SMTP/IMAP/provider/capture thật. `CLAUDE.md` không
+  được đọc/cập nhật theo chỉ dẫn.
+
+- 2026-10-15 — Hoàn thành `PREVIEW-01`: exact subject/plain/HTML body và delivery
+  plan được lưu trong immutable private JSON artifact; PostgreSQL giữ revision,
+  fingerprint, expiry, account/profile version, recipients và evidence references.
+  Advisory lock cấp revision; approve/send-boundary validation chặn revision cũ,
+  hết hạn, account/profile/evidence thay đổi, artifact mutation và cross-owner ID.
+  Backend PostgreSQL + Redis 69/69, test tập trung 11/11; Alembic check xác nhận không
+  cần migration mới, compileall/pip check/diff check đạt. Legacy giữ baseline 415 test,
+  4 failure + 7 error. Không gửi SMTP/IMAP/provider/capture thật.
+
+- 2026-10-15 — Hoàn thành `JOB-01` cho backend web: service tạo job/item bền vững
+  giữ input order và account scope; worker claim/heartbeat/start/checkpoint bằng lease
+  token + optimistic version; stop/resume cooperative và retry đúng failed subset.
+  Lease chết giữa item hoặc trong lúc stop được phục hồi thành `UNKNOWN`, không tự retry.
+  PostgreSQL + Redis backend 64/64; 12/12 test job; Alembic check, compileall và pip
+  check đạt. Legacy giữ đúng baseline 415 test / 4 failure / 7 error. Chỉ dùng fixture,
+  không SMTP/IMAP/provider/capture thật.
+
+- 2026-10-15 — Hoàn thành DB-02 và ISO-01 foundation: thêm `OwnedRepository` cố định
+  owner cho get/list/count/update/delete; Target, Artifact và Mail Settings dùng boundary
+  chung. Job claim đồng thời bằng `SKIP LOCKED`, reclaim lease hết hạn và heartbeat
+  yêu cầu token + optimistic version; stop theo owner. Test PostgreSQL xác minh A/B cùng
+  URL/account, direct/nested ID, HTTP 404, composite FK và cùng pooled connection không
+  rò dữ liệu. PostgreSQL 17 + Redis 7 fixture đạt 57/57; Alembic check, compileall và
+  pip check sạch. Không gọi network, SMTP/IMAP, capture hoặc runtime thật.
+
+- 2026-10-15 — Hoàn thành ART-01 cho web multiuser: thêm private artifact port và
+  filesystem adapter với key UUID scope owner/evidence, staging/rollback batch,
+  validation PNG/JPEG MIME/signature/byte/dimension/SHA-256 và integrity check khi
+  đọc. `GET /api/v1/artifacts/{id}` kiểm owner + permission feature, không lộ local
+  path/tên nguồn. Test tập trung 17/17; PostgreSQL 17 tạm chạy 48 test (47 đạt,
+  1 Redis integration skip), Alembic check sạch; legacy giữ baseline 415 test /
+  4 failure / 7 error. Không capture URL, gửi SMTP, đọc IMAP hay dùng runtime thật.
+
+- 2026-10-15 — Hoàn thành CACHE-01 cho web multiuser: Redis key có
+  owner/feature/business-day/bucket/version và chỉ giữ hash của input; TTL tới đúng
+  nửa đêm timezone IANA, gồm DST. Get/set fail-open khi Redis mất; clear theo
+  permission chỉ SCAN/UNLINK namespace owner và không chạm ledger/evidence/DB.
+  PostgreSQL 17 + Redis 7 tạm đạt 39/39, Alembic check sạch; flush/restart Redis
+  chỉ tạo cache miss. Không đọc `CLAUDE.md` theo chỉ dẫn hiện hành.
+
+- 2026-10-15 — Web MAIL-02 thêm action kiểm tra SMTP/IMAP theo owner và quyền
+  `mail_accounts.test_own`: SMTP chỉ TLS/login, IMAP chỉ TLS/login/logout, không
+  gửi thư hoặc đọc mailbox. Secret chỉ giải mã trong runtime, lỗi/audit sanitize;
+  React chỉ hiện nút khi có quyền. PostgreSQL test tạm 31/31, FE 6 test cùng
+  typecheck/lint/build đạt; không kết nối mail thật. NET-01 vẫn là release gate
+  trước khi cho phép egress production.
+
+- 2026-10-15 — Hoàn thành MAIL-01 cho web multiuser: migration `0002` bảo đảm một
+  sender mặc định mỗi owner; API + React quản lý profile, SMTP, IMAP folder Unicode,
+  proxy và chữ ký. Secret AES-GCM bind owner/account, GET chỉ trả cờ và PATCH bỏ
+  field secret giữ ciphertext; xóa account là soft-disable. PostgreSQL 24/24 và
+  Alembic upgrade/check/downgrade/upgrade đạt; không mở SMTP/IMAP hoặc gửi mail.
+
+- 2026-10-15 — Hoàn thành RBAC/admin foundation của web multiuser: API + React
+  quản lý user/role, kích hoạt/khóa, gán role, revoke session, audit allowlist,
+  bootstrap admin explicit theo Telegram OIDC subject và transaction bảo vệ admin
+  hoạt động cuối cùng. Lỗi API có request ID và DTO allowlist. PostgreSQL test tạm
+  đạt 21/21 gồm concurrent last-admin; FE typecheck/lint/4 test/build đạt. Full
+  legacy giữ đúng baseline 415 test, 4 failure + 7 error. Không gọi Telegram,
+  SMTP/IMAP hoặc provider thật; chưa mở workflow điều tra/gửi.
+
+- 2026-10-15 — Bắt đầu triển khai migration web theo plan M0/M1. Thêm
+  `docs/implementation-plan.md`, parity/storage/ADR; backend FastAPI, metadata và
+  Alembic 24 bảng PostgreSQL, owner composite constraints, ExecutionContext,
+  permission catalog, AES-GCM secret envelope, OIDC PKCE/state/nonce primitives
+  và repository isolation; auth DB tạo pending user, opaque session, `/me`, CSRF
+  logout và authz-version invalidation. Thêm React/TypeScript/Vite/Tailwind foundation gọi
+  health API thật; chưa mở workflow nghiệp vụ hoặc gửi. PostgreSQL test upgrade,
+  `alembic check`, downgrade và A/B isolation đạt; backend 16 test khi không DB
+  (5 integration skip), DB run 15/15 trước test route bổ sung, FE
+  typecheck/lint/2 test/build đạt. Full legacy vẫn
+  đúng baseline 415 test, 4 failure + 7 error; compileall và pip check đạt. Không
+  đọc config thật, import runtime, mở URL, gửi SMTP hay gọi live Telegram.
+
+- 2026-10-15 — Hoàn thiện prompt FE/BE cho nhiều user: mục 6.5 quy định owner,
+  actor, sender account, DB/cache/job/evidence isolation; mục 18.1–18.3 bắt buộc
+  lập implementation plan có task/dependency/acceptance và cập nhật tiến độ.
+  Bổ sung kiểm thử A/B, concurrent user và release gate; README dẫn tới bản mới.
+  Chỉ đổi tài liệu, chưa thực hiện plan, migration hoặc thay đổi ứng dụng.
+  Compileall, diff check và kiểm tra cấu trúc prompt đạt; không chạy unittest
+  vì không thay mã nguồn hoặc hành vi hiện tại.
+
+- 2026-10-15 — Chốt PostgreSQL + Redis theo lựa chọn chủ dự án trong prompt
+  FE/BE; thêm `targets`, phân biệt URL ổn định với từng lần check, thời điểm ghi
+  DB và 24 bảng nền tảng. MongoDB chỉ còn phần so sánh; chưa tạo database hoặc
+  migration thật. Chỉ cập nhật prompt, README và ghi chú này.
+
+- 2026-10-15 — Thêm `PROMPT_TACH_FE_BE_REACT.md`: khảo sát chức năng và đặc tả
+  chuyển FE React/Vite/Tailwind, BE Python API, Telegram login, RBAC, mail config
+  theo user; đề xuất PostgreSQL + Redis và phương án MongoDB thay thế. Tài liệu
+  quy định parity, migration, worker/evidence/extension và bốn menu cần bỏ khi
+  triển khai. README dẫn tới prompt; chưa đổi code, dependency hoặc runtime.
+  Compileall, kiểm tra cấu trúc Markdown và diff check đạt; không chạy unittest
+  vì chỉ đổi tài liệu. Số 415 test trong prompt là đếm tĩnh AST, không phải kết
+  quả chạy test.
 
 - 2026-10-06 — Lead Triage module version 23 định dạng report theo các mục
   Brand Impersonation, Observed Redirect Chain, Related Backend Findings và
@@ -1380,3 +1714,7 @@ test phải xanh trước khi bàn giao thay đổi lõi. Baseline hiện tại 
 Detector cloaking có test thuần cho scoring/profile/path/vantage, fake browser
 cho Playwright và mock attachment worker; không dùng URL nghi ngờ hay SMTP thật
 trong test.
+
+- Kiểm chứng đợt UI ba cột: FE 34/34, typecheck/lint/build; backend 118 đạt,
+  1 skip theo môi trường trên PostgreSQL test sạch; compileall đạt. Browser sáng/
+  tối và viewport 390px không tràn ngang. CLAUDE.md không đọc/cập nhật theo chỉ dẫn.

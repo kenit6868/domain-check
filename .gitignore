@@ -13,3 +13,9 @@ __pycache__/
 *.pyc
 dist/
 build/
+node_modules/
+.runtime/
+.env
+backend/.env
+frontend/.env
+*.egg-info/

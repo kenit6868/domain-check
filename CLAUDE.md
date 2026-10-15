@@ -1,5 +1,54 @@
 # CLAUDE.md
 
+> Legacy reference only. Do not use this file as the source of truth for the web
+> migration. Use `AGENTS.md`, `docs/implementation-plan.md`, the current source and
+> tests. CACHE-01 now scopes Redis keys by owner/feature/business day/version,
+> expires at local midnight, and treats Redis loss as a cache miss without touching
+> PostgreSQL delivery/evidence truth.
+
+## Web migration foundation (2026-10-15)
+
+`backend/` là package FastAPI mới; `frontend/` là React/Vite/Tailwind. Web chưa
+gọi core legacy cho tới khi owner/session repository được enforce. PostgreSQL là
+durable source, Redis chỉ cache/state ngắn hạn. Migration `0001_foundation` tạo
+24 bảng và composite FK ngăn gắn resource owner B vào owner A. `ExecutionContext`
+frozen tách actor/owner/operation/permission; không nhận owner từ feature payload.
+
+Secret mới dùng AES-GCM với key version và associated data owner+field. OIDC state
+ở Redis là one-time, browser-bound, PKCE + nonce; app session là opaque token
+riêng, chỉ hash nằm DB và không lưu Telegram token ở FE. Permission catalog nằm ở
+`domaincheck.domain.authz`; default user không có quyền send/start external action.
+Streamlit/file repository vẫn là legacy compatibility và không được dùng cho web
+multiuser. Chưa có cutover/runtime import hoặc external side effect thật.
+
+`core/mail/connectivity.py` là boundary MAIL-02: SMTP giữ implicit TLS cho 465,
+STARTTLS mặc định hoặc plain explicit, timeout 30 giây và chỉ authenticate; IMAP
+chỉ `IMAP4_SSL.login/logout`, không đọc folder/message. API test là POST có
+`mail_accounts.test_own` + CSRF, resolve account/secret theo owner, chạy blocking
+I/O ngoài event loop và chỉ audit code/transport đã sanitize. Save account không
+tự gọi tester. Test dùng mock hoàn toàn; production vẫn bị chặn bởi NET-01 egress.
+
+Administrative mutations nằm ở `application/admin.py` và `api/admin.py`. Thay
+status/role tăng `authz_version`, revoke session, chỉ ghi audit metadata allowlist và
+serialize invariant admin hoạt động cuối cùng bằng PostgreSQL advisory lock trong
+transaction. System role do seed quản lý. Bootstrap là lệnh local explicit theo
+Telegram issuer + subject, không theo username hay thứ tự login. Actor chỉ có
+`users.assign_roles` không thể cấp permission ngoài effective permission của mình;
+`roles.manage` là quyền quản trị role đầy đủ được cấp rõ ràng.
+
+Mail configuration lives in `application/mail_settings.py` and
+`api/mail_settings.py`. Every query is owner-scoped; normalized sender identity
+is unique per owner, while different owners may configure the same address.
+Migration `0002_sender_default_unique` adds secret field metadata and a partial
+unique index for one default account per owner. AES-GCM associated data binds the
+ciphertext to owner + stable account ID. GET returns only `has_*`; an omitted
+secret on PATCH preserves ciphertext. DELETE soft-disables the account. Saving
+never opens SMTP/IMAP and MAIL-02 remains a separate explicit action.
+
+Lệnh foundation: `python -m unittest discover -s backend/tests -v`; FE chạy
+`npm run typecheck`, `npm run lint`, `npm test`, `npm run build`. Integration DB
+cần PostgreSQL đã migrate và `DOMAINCHECK_TEST_DATABASE_URL` riêng.
+
 `pages/15_Lead_Triage.py` lưu `lead_triage_visible_targets` theo snapshot review.
 Check theo dòng chuyển vùng kết quả sang đúng target; batch chuyển sang các
 target vừa chọn. `lead_triage_results` vẫn giữ kết quả các target đã check để

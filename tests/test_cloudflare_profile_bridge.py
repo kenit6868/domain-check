@@ -31,10 +31,10 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
             bridge.server.shutdown()
             bridge.server.server_close()
 
-    def test_extension_is_restricted_to_supported_forms_and_localhost(self):
+    def test_extension_is_restricted_to_supported_forms_and_configured_https_origin(self):
         root = Path(__file__).resolve().parents[1]
         manifest = json.loads((root / "chrome_extension/cloudflare-profile-worker/manifest.json").read_text())
-        self.assertEqual(manifest["version"], "2.8.0")
+        self.assertEqual(manifest["version"], "3.0.0")
         expected_icons = {
             "16": "icons/icon16.png",
             "32": "icons/icon32.png",
@@ -44,8 +44,10 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
         self.assertEqual(manifest["icons"], expected_icons)
         self.assertEqual(manifest["action"]["default_icon"]["16"], expected_icons["16"])
         self.assertEqual(manifest["action"]["default_popup"], "popup.html")
-        self.assertEqual(manifest["permissions"], ["activeTab"])
-        for popup_file in ("popup.html", "popup.css", "popup.js"):
+        self.assertEqual(manifest["permissions"], ["activeTab", "storage"])
+        self.assertEqual(manifest["options_ui"]["page"], "options.html")
+        self.assertIn("https://*/*", manifest["externally_connectable"]["matches"])
+        for popup_file in ("popup.html", "popup.css", "popup.js", "options.html", "options.js"):
             self.assertTrue((root / "chrome_extension/cloudflare-profile-worker" / popup_file).is_file())
         for relative_path in expected_icons.values():
             self.assertTrue((root / "chrome_extension/cloudflare-profile-worker" / relative_path).is_file())
@@ -60,6 +62,7 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
             "https://gen.xyz/*",
         ])
         self.assertNotIn("<all_urls>", manifest["host_permissions"])
+        self.assertNotIn("<all_urls>", manifest["optional_host_permissions"])
         self.assertEqual(manifest["background"]["service_worker"], "background.js")
         coordinator = (root / "chrome_extension/cloudflare-profile-worker/content.js").read_text(encoding="utf-8")
         adapter = (root / "chrome_extension/cloudflare-profile-worker/adapters/cloudflare.js").read_text(encoding="utf-8")
@@ -96,6 +99,13 @@ class CloudflareProfileBridgeTests(unittest.TestCase):
         self.assertIn("assistant-command", coordinator)
         self.assertIn("buildChecklist", coordinator)
         self.assertIn("runAssistantCommand", coordinator)
+        self.assertIn("form-task-for-tab", coordinator)
+        self.assertNotIn("capabilityToken", coordinator)
+        background = (root / "chrome_extension/cloudflare-profile-worker/background.js").read_text(encoding="utf-8")
+        self.assertIn("domaincheck-open-form", background)
+        self.assertIn("origin_not_allowed", background)
+        self.assertIn("provider_origin_mismatch", background)
+        self.assertIn("chrome.storage.session", background)
         self.assertNotIn("attachShadow", coordinator)
         self.assertNotIn("pt-form-assistant", coordinator)
         background = (root / "chrome_extension/cloudflare-profile-worker/background.js").read_text(encoding="utf-8")

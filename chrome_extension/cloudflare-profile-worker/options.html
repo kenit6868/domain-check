@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kết nối Domain Check Tool</title>
+  <style>
+    body{font:15px system-ui,sans-serif;margin:0;background:#f8fafc;color:#0f172a}main{max-width:680px;margin:48px auto;padding:28px;background:#fff;border:1px solid #e2e8f0;border-radius:18px}label{display:grid;gap:8px;font-weight:650}input{padding:11px 12px;border:1px solid #cbd5e1;border-radius:9px;font:inherit}button{margin-top:16px;padding:10px 16px;border:0;border-radius:9px;background:#4f46e5;color:#fff;font-weight:700;cursor:pointer}p{line-height:1.6;color:#475569}#status{font-weight:650}.ok{color:#047857}.error{color:#be123c}code{word-break:break-all}
+  </style>
+</head>
+<body><main>
+  <h1>Kết nối Domain Check Tool</h1>
+  <p>Nhập đúng origin của ứng dụng. Extension chỉ nhận message và gọi API tại origin này. Production bắt buộc HTTPS; localhost chỉ dùng phát triển.</p>
+  <label>Application origin<input id="origin" placeholder="https://domaincheck.example" autocomplete="off"></label>
+  <button id="save" type="button">Cấp quyền và lưu</button>
+  <p id="status" aria-live="polite"></p>
+  <p>Device ID: <code id="device">—</code></p>
+  <script src="options.js"></script>
+</main></body>
+</html>
