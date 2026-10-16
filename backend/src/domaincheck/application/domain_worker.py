@@ -102,10 +102,33 @@ class DomainWorkerService:
 
 
 class DomainPrecheckWorker(QuickReportWorker):
-    def __init__(self, sessions, adapter, *, store=None, capture=None, now=None):
+    def __init__(self, sessions, adapter, *, store=None, capture=None, cloaking_capture=None, now=None):
         super().__init__(sessions, None, adapter, job_type="domain_worker_precheck",
                          now=now or (lambda: datetime.now(UTC)))
         self.store, self.capture = store, capture
+        self.cloaking_capture = cloaking_capture
+
+    async def _capture_cloaking(self, owner, case_id):
+        """Capture candidates during precheck without approving a disposition."""
+        from domaincheck.application.cloaking_review import CloakingReviewService
+        async with self._sessions() as session, session.begin():
+            case = await OwnedRepository(session, ReviewCase, owner).get(case_id)
+            if case is None or case.state in {'sent', 'skipped'}:
+                return
+            review = CloakingReviewService(session, self.store, owner=owner, actor=owner,
+                timezone=case.timezone, now=self._now(), request_id='precheck-cloaking-capture')
+            _, checks = await review.context(case_id)
+            if checks[0].result.get('evidence_set_id') or checks[0].result.get('review_capture_id'):
+                return  # Retain the already captured/reviewed source for this URL/day.
+            target, timezone = case.full_url, case.timezone
+        captured = await asyncio.to_thread(self.cloaking_capture, target, 'confirmed_cloaking')
+        async with self._sessions() as session, session.begin():
+            review = CloakingReviewService(session, self.store, owner=owner, actor=owner,
+                timezone=timezone, now=self._now(), request_id='precheck-cloaking-capture')
+            _, checks = await review.context(case_id)
+            if checks[0].result.get('evidence_set_id') or checks[0].result.get('review_capture_id'):
+                return
+            await review.capture(case_id, 'confirmed_cloaking', lambda *_: captured)
 
     async def _save_evidence(self, owner, check_id, target, uploads, manifest):
         evidence_id = uuid4()
@@ -198,7 +221,7 @@ class DomainPrecheckWorker(QuickReportWorker):
                     session.add(case)
                     await session.flush()
                 case.required_account_ids = sorted(set(case.required_account_ids or []) | set(account_scope))
-                if case_type == 'domain_evidence' and case.state == 'ready':
+                if case_type == 'domain_evidence' and case.state in {'ready', 'sent'}:
                     case.state = 'pending'
                 source = await session.scalar(select(CaseSource).where(CaseSource.owner_user_id == owner_id,
                     CaseSource.case_id == case.id, CaseSource.check_id == check_id))
@@ -216,4 +239,17 @@ class DomainPrecheckWorker(QuickReportWorker):
             check.result, check.status = result, status
             check.cache_provenance = {"reused": False, "source": "network", "observed_at": self._now().isoformat()}
             check.version += 1
+        if status == 'succeeded' and result.get('disposition') == 'cloaking_review':
+            reason = 'capture_disabled'
+            if self.cloaking_capture is not None and self.store is not None:
+                try:
+                    await self._capture_cloaking(owner_id, UUID(result['case_id']))
+                    reason = None
+                except Exception:
+                    reason = 'capture_failed'
+            async with self._sessions() as session, session.begin():
+                check = await OwnedRepository(session, Check, owner_id).get(check_id, for_update=True)
+                check.result = {**check.result, 'browser_verification_pending': bool(reason),
+                    'cloaking_capture_reason': reason}
+                check.version += 1
         return status

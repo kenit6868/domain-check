@@ -12,6 +12,12 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
 
 ## Invariant cần giữ
 
+- Evidence Review legacy thiếu source account vẫn đọc được; chỉ explicit preview
+  dưới case lock được bind lựa chọn enabled/owned, không tự chọn account mặc định.
+  Scope nguồn đã lưu không được thay bằng lựa chọn account tùy ý. Nếu mọi job
+  nguồn legacy thiếu scope, luôn hiện owned enabled choices, cho explicit preview
+  bổ sung union scope và giữ nguyên account/ledger đã có.
+
 - Canonical compatibility source nằm trong `backend/compat/`; file root chỉ là
   wrapper giữ runtime legacy. Sửa lõi tại backend/compat và kiểm tra cả legacy
   unittest lẫn wheel cô lập ngoài repo; không đưa source root trở lại backend build.
@@ -32,7 +38,12 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
 - Domain Worker web có precheck và normal SMTP batch: worker `domain_worker_precheck`, schema 4,
   owned Check/Job và ReviewCase/CaseSource; không ghi runtime legacy. HTTP cloaking
   và contacts song song, no-email không tạo case; capture thường validated mới ready.
-  Playwright cloaking còn pending ở web review, không suy ra approval từ HTTP.
+  Khi flag capture bật, worker tự chụp passive cloaking ngay trong precheck cho
+  case có email (kể cả LIKELY), lưu candidate cặp profile và ảnh khác nội bộ.
+  HTTP/capture không suy ra approval; ảnh tự hiện ở Review, lỗi cho retry/upload.
+  Nếu đã chụp được hai profile khỏe nhưng nội dung giống nhau, giữ cặp đối chiếu
+  comparison_only + thông báo chưa thấy khác biệt; không báo capture_failed chỉ
+  vì selector không tìm được chênh lệch, không nâng thành confirmed tự động.
   Luồng UI phải theo legacy: chọn account trước nhập URL/precheck, giữ account_scope
   của job và source queue qua F5; không chọn lại theo từng dòng hoặc biến precheck
   thành wizard draft/preview. UI precheck có metric cards, domain running và bảng
@@ -51,6 +62,15 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   riêng, no-email không vào queue. Evidence Review upload hợp lệ resolve mọi source
   check, giữ account của từng job. Artifact root phải độc lập CWD API/worker; không
   bypass hash khi đường dẫn lưu bị cấu hình lệch.
+  Evidence Review web theo legacy: chọn case ổn định/full URL hôm nay, 1–3 ảnh
+  atomic + thumbnail, create exact preview cùng thao tác lưu ảnh, confirm rồi
+  gửi sync trực tiếp, không worker job. Chỉ subset account thuộc union source;
+  preview version/hash bind check/images/logo/profile/recipients, send revalidate
+  đúng preview và row.preview_id. Case lock theo owner/case không khóa batch khác.
+  Dùng dispatcher/DeliveryService/MIME/Sent chung, ledger domain_worker ngày;
+  pending/failed retry, sent/unknown không reset. Queue giữ ready/partial/failed
+  đến đủ mọi source account/routes; GET/list chỉ reconcile expired intent unknown.
+  Ảnh và preview còn hợp lệ được reuse qua reload; no new cloaking approval từ review này.
   Advisory email dùng pure formatter cũ (Registrar/Registry/Hosting), không webform;
   không persist body, không coi mẫu này là exact SMTP preview/account approval.
   Gửi batch normal dùng `domain_worker.start` + CSRF + xác nhận; server build/approve
@@ -81,6 +101,8 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   disposition excluded_no_email và không có valid recipients/known ready routes.
   Giữ reason no_email/count riêng; lỗi/chưa rõ không làm cache no-email, không
   dùng dữ liệu hôm qua hoặc của owner khác; all-filtered không tạo job.
+  Route discovery chống trùng phải tính cả succeeded Check thuộc hai Review,
+  vì gửi trực tiếp không đổi observed disposition thành ready; sent truth ở ledger.
   All-filtered không tạo job rỗng. Retry chỉ known failed/unattempted, giữ SENT/
   UNKNOWN và Message-ID; tái dùng evidence, recipient scope không được đổi ngầm.
   Job finalize phải merge metadata; recovery dựa lease/intent, không retry mù.
@@ -94,7 +116,11 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   succeeded, server resolve recipients và 1–3 ảnh + manifest, account-owned signature,
   revision/expiry 30 phút. Body chỉ persist trong private immutable artifact, không DB/
   audit. Chỉ xác nhận start batch mới phê duyệt gửi thường; create preview riêng
-  không phê duyệt gửi. Cloaking approve/send web vẫn chưa triển khai.
+  không phê duyệt gửi. Cloaking Review web dùng service chuyên biệt kế thừa shared
+  evidence review/preview/sender: confirmed đúng hai ảnh, not_cloaking evidence riêng,
+  skip explicit; approve permission bắt buộc ở preview/send. Capture process riêng
+  chỉ lưu candidate, phải xem và xác nhận trước promote/preview. Không đổi observed
+  verdict/disposition thành ready; chặn đổi quyết định sau sent/unknown, ledger chung.
   Dừng hợp tác giữ URL đang chạy đến checkpoint; heartbeat stopping không hủy probe,
   pending giữ để resume, lease chết thành unknown. Queue terminal không bị reset.
 

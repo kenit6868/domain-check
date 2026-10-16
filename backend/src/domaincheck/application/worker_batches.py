@@ -85,12 +85,22 @@ async def current_batch(session, owner, now, timezone):
         Job.result_metadata['workflow_open'].astext == 'true', Job.state.in_(['completed', 'partial']))
         .order_by(Job.created_at.desc(), Job.id.desc())))
     for job in open_jobs:
-        ready = await session.scalar(select(JobItem.id).join(Check,
+        ready = list(await session.scalars(select(Check).join(JobItem,
             (Check.id == cast(JobItem.result_metadata['check_id'].astext, Check.id.type)) &
             (Check.owner_user_id == JobItem.owner_user_id)).where(JobItem.owner_user_id == owner,
-            JobItem.job_id == job.id, JobItem.state == 'succeeded', Check.result['disposition'].astext == 'ready').limit(1))
-        if ready:
-            return {'current_id': str(job.id), 'send_job_id': None, 'phase': 'awaiting_send', 'locked': True}
+            JobItem.job_id == job.id, JobItem.state == 'succeeded', Check.result['disposition'].astext == 'ready')))
+        from domaincheck.application.worker_send import delivery_key
+        for check in ready:
+            keys = {delivery_key(check.business_day, check.domain, recipient)
+                    for recipient in valid_recipients(check.result.get('recipients') or [])}
+            accounts = [UUID(value) for value in job.account_scope]
+            if not keys or not accounts:
+                continue
+            sent = set((await session.execute(select(Delivery.sender_account_id, Delivery.business_key).where(
+                Delivery.owner_user_id == owner, Delivery.sender_account_id.in_(accounts),
+                Delivery.business_key.in_(keys), Delivery.state == 'sent'))).all())
+            if any((account, key) not in sent for account in accounts for key in keys):
+                return {'current_id': str(job.id), 'send_job_id': None, 'phase': 'awaiting_send', 'locked': True}
     return {'current_id': None, 'send_job_id': None, 'phase': 'idle', 'locked': False}
 
 
@@ -147,7 +157,8 @@ async def filter_sent_inputs(session, owner, day, accounts, parsed):
     keys, latest = {}, {}
     for check in history:
         latest.setdefault(check.domain, check)
-        if check.status != 'succeeded' or check.result.get('disposition') not in {'ready', 'excluded_already_sent'}:
+        if check.status != 'succeeded' or check.result.get('disposition') not in {
+                'ready', 'excluded_already_sent', 'evidence_review', 'cloaking_review'}:
             continue
         keys.setdefault(check.domain, set()).update(delivery_key(day, check.domain, recipient)
             for recipient in valid_recipients(check.result.get('recipients') or []))

@@ -1219,6 +1219,22 @@ SMTP/IMAP connectivity: public DNS validation uses the operating-system resolver
 
 # UX Domain Worker — 2026-10-16
 
+## Domain Evidence Review web tương đương luồng legacy
+
+1. Từ Domain Worker mở queue hôm nay, chọn đúng case bằng Mở case; URL chọn được
+   giữ qua reload, không chọn theo row index. Xem lỗi capture/email nhận/accounts nguồn.
+2. Dùng ảnh đã lưu hoặc chọn 1–3 PNG/JPEG <=10 MB/ảnh; preview thumbnail, sửa toàn bộ
+   selection nếu có file lỗi. Tạo/cập nhật draft vừa lưu ảnh atomic vừa tạo exact plan.
+3. Đọc Subject/body theo account/người nhận, xác nhận rồi gửi trực tiếp (không job).
+   Đổi ảnh/account/profile hoặc preview quá hạn thì tạo lại; không bỏ kiểm integrity.
+4. Partial/failed giữ case và evidence; gửi tiếp chỉ pending/failed. Sent/UNKNOWN không
+   reset. Đối soát UNKNOWN với máy chủ mail; intent hết lease được khôi phục UNKNOWN.
+5. Chỉ sau đủ mọi account/recipient nguồn mới rời queue. Copy Sent lỗi không gửi lại
+   SMTP; thông báo kết quả tách biệt. Sang ngày mới precheck mới, không dùng case cũ.
+
+Không cần migration/config mới; cần quyền review view/upload/preview/send và mail
+account/allowlist hiện có. Kiểm thử bằng mocks/dry-run, không gửi email thật khi triển khai.
+
 Sau tạm dừng vẫn đọc được send-summary; 409 yêu cầu resume chỉ áp dụng khi cố tạo
 lượt gửi mới từ source đang pause. Không cần tạo lại precheck để xem tiến độ.
 
@@ -1251,3 +1267,40 @@ hiện cấu hình. Sau start xem batch X/Y, domain đã xử lý và thanh ti�
 giữa batch xem thời điểm chạy tiếp và đếm ngược HH:MM:SS (về 0 chờ worker);
 completed hiện “Job đã hoàn thành”, lỗi một
 phần giữ thông báo xử lý tiếp/retry. Không thay đổi API, database hay SMTP.
+# Khôi phục phạm vi gửi Evidence Review cũ
+
+## Duyệt cloaking trên web
+
+Sau khi gửi thành công từ hai trang Review, có thể nhập lại danh sách: backend
+lọc các domain đã hoàn tất mọi account/recipient trước precheck, không phụ thuộc
+disposition của Check đã duyệt. Nếu chỉ một phần gửi thành công, giữ phần thiếu
+để xử lý tiếp. Báo cáo test tổng luồng: `docs/testing/flow-audit-2026-10-17.md`.
+
+“Không có khác biệt rõ” khác “không chụp được”: nếu nhiều profile mở trang thành
+công nhưng nội dung giống nhau, hệ thống vẫn giữ hai ảnh đối chiếu, ghi rõ giới
+hạn này. IOC script chỉ tạo nghi vấn; người vận hành phải xem ảnh và không xác
+nhận cloaking chỉ vì verdict LIKELY. Không bỏ qua kiểm tra ảnh/manifest/hash.
+
+Precheck tự chụp cặp profile cho case nghi cloaking có email khi capture bật,
+không chờ thao tác thủ công tại Review. Trong lúc chụp, mục precheck vẫn đang xử
+lý; Review hiển thị trạng thái chụp và sau đó hiển thị hai ảnh/tên profile. Nếu
+capture thất bại, case vẫn giữ để chụp lại/upload; không tự gửi. Sau cập nhật worker
+phải nạp lại process lúc không có job đang chạy, không restart giữa job.
+
+Case hôm nay có email nhận được mở bằng queue ID. Kiểm tra HTTP/profile, chụp
+thụ động hoặc upload ảnh rồi chọn xác nhận cloaking/không cloaking/bỏ qua.
+Confirmed cần đúng hai ảnh + xác nhận khác biệt; not_cloaking cần bằng chứng
+report thường riêng (DOM/passive hoặc 1–3 ảnh). Xem exact draft theo account và
+recipient, xác nhận rồi gửi đồng bộ. Retry chỉ phần còn thiếu, không đổi kết luận
+sau khi đã có thư thành công hoặc chưa rõ. Đối soát UNKNOWN qua nhà cung cấp mail;
+không retry mù. Bỏ qua chỉ dành cho case chưa có lượt gửi thành công/chưa rõ.
+Browser capture cần flag/quyền hiện có, Chromium trong backend venv và mạng browser
+được cô lập theo deployment; không thêm DNS/proxy riêng hoặc sửa config.ini.
+
+Case có các job nguồn legacy không ghi account_scope cho phép bổ sung tài khoản
+ở lần tạo draft tiếp theo; danh sách không thu hẹp sau lựa chọn đầu tiên. Các
+tài khoản đã thuộc phạm vi vẫn được giữ để theo dõi đủ kết quả gửi.
+
+Nếu case cũ không ghi tài khoản nguồn, mở case và chọn tài khoản gửi trước khi
+tạo draft. Thao tác preview lưu lựa chọn và ảnh trong cùng transaction, không
+chạy precheck mới. Không tự chọn tài khoản mặc định; không cần migration.

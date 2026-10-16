@@ -25,6 +25,11 @@ PROFILE_FIELDS = ("brand_name", "contact_name", "contact_email", "company_name",
 
 
 class DomainWorkerPreviewService:
+    policy_version = POLICY_VERSION
+    feature = 'domain_worker'
+
+    def evidence_block(self, check, manifest):
+        return importlib.import_module('browser_evidence').format_email_evidence_manifest(manifest)
     def __init__(self, session, store, *, owner, actor, timezone, request_id, now):
         self.session, self.store, self.owner = session, store, owner
         self.timezone, self.now = timezone, now
@@ -108,7 +113,7 @@ class DomainWorkerPreviewService:
             "sender_email": account.smtp_username, "is_default": account.is_default}
             for account in accounts], "recipients": valid_recipients(check.result.get("recipients") or [])}
 
-    async def create(self, check_id, account_ids, *, lifetime=timedelta(minutes=30)):
+    async def create(self, check_id, account_ids, *, lifetime=timedelta(minutes=30), review_scope=None):
         if not 1 <= len(account_ids) <= 100 or len(set(account_ids)) != len(account_ids):
             raise ValueError("Choose between 1 and 100 distinct sender accounts")
         check = await self._check(check_id)
@@ -116,7 +121,9 @@ class DomainWorkerPreviewService:
             (JobItem.job_id == Job.id) & (JobItem.owner_user_id == Job.owner_user_id)).where(
             Job.owner_user_id == self.owner, Job.job_type == 'domain_worker_precheck',
             JobItem.result_metadata['check_id'].astext == str(check.id), JobItem.state == 'succeeded'))
-        if not scope or set(scope) != {str(account_id) for account_id in account_ids}:
+        chosen = {str(account_id) for account_id in account_ids}
+        allowed = set(review_scope) if review_scope is not None else set(scope or [])
+        if not allowed or (not chosen.issubset(allowed) if review_scope is not None else allowed != chosen):
             raise PreviewConflict('Use the sender accounts selected before this precheck')
         evidence, images = await self._evidence(check)
         # Lock the versions before rendering so content and version bindings agree.
@@ -158,9 +165,10 @@ class DomainWorkerPreviewService:
                 byte_size=manifest.byte_size, sha256=manifest.sha256, storage_key=manifest.storage_key, immutable=True))
             await self.session.flush()
             deliveries = prepare_deliveries(check, examples, config,
-                [by_id[key] for key in account_ids], evidence.manifest, f"logo-{logo_id}")
+                [by_id[key] for key in account_ids], evidence.manifest, f"logo-{logo_id}",
+                evidence_block=self.evidence_block(check, evidence.manifest))
             exact = await self.previews.create_revision(resource_type="check", resource_id=check.id,
-                feature="domain_worker", policy_version=POLICY_VERSION, deliveries=deliveries,
+                feature=self.feature, policy_version=self.policy_version, deliveries=deliveries,
                 resource_version=check.version, attachment_artifact_ids=[image.id for image in images] + [manifest.artifact_id],
                 inline_artifact_ids=[logo_id], now=self.now, lifetime=lifetime)
             return await self._response(exact, check)
@@ -176,7 +184,7 @@ class DomainWorkerPreviewService:
         if plan is None or plan.resource_type != "check" or plan.resource_id != check.id:
             raise PreviewNotFound("Domain Worker preview not found")
         exact = await self.previews.get_exact(preview_id, now=self.now)
-        if exact.payload.get("policy_version") != POLICY_VERSION:
+        if exact.payload.get("policy_version") != self.policy_version:
             raise PreviewNotFound("Domain Worker preview not found")
         return await self._response(exact, check)
 
@@ -193,11 +201,11 @@ class DomainWorkerPreviewService:
             "artifacts": exact.payload["artifacts"], "signature_logo": logo_response(logo)}
 
 
-def prepare_deliveries(check, examples, config, accounts, manifest, logo_cid):
+def prepare_deliveries(check, examples, config, accounts, manifest, logo_cid, *, evidence_block=None):
     """Render the shared legacy personalization, then escape the exact HTML body."""
     toolkit = importlib.import_module("phishing_toolkit")
     browser = importlib.import_module('browser_evidence')
-    block = browser.format_email_evidence_manifest(manifest)
+    block = browser.format_email_evidence_manifest(manifest) if evidence_block is None else evidence_block
     result = []
     for account in accounts:
         signature = {key: str((account.signature_overrides or {}).get(key) or "") for key in

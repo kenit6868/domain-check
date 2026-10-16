@@ -119,7 +119,9 @@ class WorkerFlowTests(unittest.IsolatedAsyncioTestCase):
             result = await upload_review_images(session, self.store, self.owner, 'Asia/Bangkok', self.now, case_id, [image()])
             self.assertEqual(len(result['check_ids']), 2)
         async with self.db.session_factory() as session:
-            self.assertEqual(await list_reviews(session, self.owner, 'Asia/Bangkok', self.now, 'domain_evidence'), [])
+            remaining = await list_reviews(session, self.owner, 'Asia/Bangkok', self.now, 'domain_evidence')
+            self.assertEqual(len(remaining), 1)
+            self.assertEqual(remaining[0]['state'], 'ready')
             for operation_id, expected_account in ((first, self.ids[0]), (second, self.ids[1])):
                 op = await self.service(session).get(operation_id)
                 self.assertEqual(op.checks[0].result['disposition'], 'ready')

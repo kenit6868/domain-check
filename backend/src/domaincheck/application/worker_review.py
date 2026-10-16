@@ -1,7 +1,8 @@
 """Current-day owned review queues populated by Domain Worker prechecks."""
+import hashlib
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from domaincheck.infrastructure.cache import business_day
 from domaincheck.infrastructure.db.models import Artifact, AuditEvent, CaseSource, Check, EvidenceSet, ReviewCase
@@ -17,15 +18,34 @@ async def review_checks(session, owner, case):
         .order_by(Check.created_at.desc(), Check.id.desc())))
 
 
+def review_lock_key(owner, case_id):
+    return int.from_bytes(hashlib.sha256(f'{owner}:evidence-review:{case_id}'.encode()).digest()[:8], 'big', signed=True)
+
+
+async def lock_review(session, owner, case_id):
+    if not await session.scalar(select(func.pg_try_advisory_xact_lock(review_lock_key(owner, case_id)))):
+        raise ValueError('This evidence case is being processed in another session')
+
+
 async def list_reviews(session, owner, timezone, now, kind):
     cases = await OwnedRepository(session, ReviewCase, owner).list(criteria=(
         ReviewCase.case_type == kind, ReviewCase.business_day == business_day(now, timezone),
-        ReviewCase.state.in_(['pending', 'failed', 'partial'])), order_by=(ReviewCase.created_at.desc(),), limit=500)
+        ReviewCase.state.in_(['pending', 'failed', 'partial', 'ready', 'sending'])), order_by=(ReviewCase.created_at.desc(),), limit=500)
     result = []
     for case in cases:
         checks = await review_checks(session, owner, case)
+        if kind == 'domain_evidence' and checks and case.required_account_ids:
+            from domaincheck.application.evidence_review import EvidenceReviewService
+            await EvidenceReviewService(session, None, owner=owner, actor=owner, timezone=timezone, now=now).ledger(case, checks)
+            if case.state == 'sent':
+                continue
+        if kind == 'cloaking' and checks and case.required_account_ids:
+            from domaincheck.application.cloaking_review import CloakingReviewService
+            await CloakingReviewService(session, None, owner=owner, actor=owner, timezone=timezone, now=now).ledger(case, checks)
+            if case.state == 'sent':
+                continue
         expected = 'cloaking_review' if kind == 'cloaking' else 'evidence_review'
-        check = next((row for row in checks if row.result.get('disposition') == expected
+        check = next((row for row in checks if row.result.get('disposition') in ({expected, 'ready'} if kind == 'domain_evidence' else {expected})
                       and valid_recipients(row.result.get('recipients') or [])), None)
         if check is None:
             continue
@@ -33,20 +53,23 @@ async def list_reviews(session, owner, timezone, now, kind):
             'state': case.state, 'sender_account_ids': case.required_account_ids,
             'recipients': valid_recipients(check.result.get('recipients') or []),
             'cloaking_verdict': (check.result.get('cloaking') or {}).get('verdict'),
-            'evidence_reason': check.result.get('evidence_reason')})
+            'evidence_reason': check.result.get('evidence_reason'), 'evidence_version': case.evidence_version,
+            'has_evidence': bool(check.result.get('evidence_set_id')),
+            'evidence_failure_code': check.result.get('evidence_failure_code')})
     return result
 
 
 async def upload_review_images(session, store, owner, timezone, now, case_id, uploads):
+    await lock_review(session, owner, case_id)
     case = await OwnedRepository(session, ReviewCase, owner).get(case_id, for_update=True)
     if case is None or case.case_type != 'domain_evidence':
         raise LookupError('Evidence review case not found')
-    if case.business_day != business_day(now, timezone) or case.state not in {'pending', 'failed', 'partial'}:
+    if case.business_day != business_day(now, timezone) or case.state not in {'pending', 'failed', 'partial', 'ready'}:
         raise ValueError('A pending current-day evidence review is required')
     if not case.required_account_ids:
         raise ValueError('Run a new precheck with sender accounts selected before adding evidence')
     checks = [row for row in await review_checks(session, owner, case)
-        if row.business_day == case.business_day and row.result.get('disposition') == 'evidence_review'
+        if row.business_day == case.business_day and row.result.get('disposition') in {'evidence_review', 'ready'}
         and valid_recipients(row.result.get('recipients') or [])]
     if not checks:
         raise ValueError('No normal report with valid recipients remains in this case')

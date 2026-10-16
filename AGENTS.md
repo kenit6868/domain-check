@@ -29,7 +29,10 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
   SMTP batch normal; `application/worker_batches.py` giữ lifecycle/owner lock,
   lọc lịch sử trước precheck và workspace recovery/history API. Cloaking chưa send web.
   `application/worker_review.py` và React `ReviewQueuePage.tsx` phục vụ queue owned
-  trong ngày; evidence review nhận ảnh thủ công và đưa source checks về ready.
+  trong ngày. `application/evidence_review.py`, `api/evidence_review.py` và React
+  `EvidenceReviewPage.tsx` phục vụ ảnh thủ công/exact preview/gửi SMTP trực tiếp,
+  retry ledger chung; `application/delivery_dispatch.py` chia sẻ SMTP/checkpoint/Sent
+  với Domain Worker. Review không tạo worker job, không nới owner/day/account scope.
 - `lead_triage.py`, `pages/15_Lead_Triage.py`: tách ghi chú hạ tầng được dán,
   đối chiếu DNS/IP, dùng precheck/pipeline/report Domain Worker, thêm backend
   context, capture DOM chung Phản hồi NCC và gửi report đã duyệt qua SMTP;
@@ -272,6 +275,72 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-10-17 — Rà soát tổng luồng bằng DB cô lập/mock: thêm journey test ghép
+  precheck, batch thường, hai Review, hai account, partial retry và lọc input lại.
+  Phát hiện/sửa route discovery bỏ qua Check cloaking_review/evidence_review dù
+  ledger đã sent; nay lọc theo đủ route/account chung, giữ phần thiếu và scope ngày.
+  Báo cáo tại docs/testing/flow-audit-2026-10-17.md; không mail/probe/runtime thật.
+  Backend DB sạch 237 đạt/2 skip; journey + send 28/28; FE 92/92; wheel 3/3;
+  lint/typecheck/build/compileall/pip check đạt. Legacy 420 giữ 4 failure/7 error
+  khi chạy lại; lần đầu thêm lỗi lock CSV chập chờn trên Windows, đã ghi báo cáo.
+
+- 2026-10-16 — Điều tra trực tiếp slotcatalog.co: 4 profile browser HTTP 200,
+  text similarity 0.997, LIKELY từ IOC đơn profile khiến selector bỏ hết ảnh.
+  Canonical selector nay giữ cặp comparison_only từ profile khỏe/nonterminal,
+  không tự khẳng định khác biệt; Review có ghi chú và clear lỗi capture cũ.
+  Đã nhập hai ảnh chụp thực tế vào đúng owned case, không tạo draft/gửi email.
+  FE 92/92, backend PostgreSQL 236 đạt/2 skip, wheel cô lập 3/3;
+  lint/typecheck/build/compileall/pip check đạt. Legacy 420 giữ baseline
+  4 failure/7 error; regression selector mới đạt. Reinstall backend và reload
+  worker lúc idle; không sửa config.ini hoặc thay DNS/proxy.
+
+- 2026-10-16 — Sửa thiếu capture cloaking trong precheck web: worker tự chụp
+  candidate bằng detector passive cũ sau HTTP/contact, kể cả LIKELY; no-email
+  không chụp. Giữ cặp profile khác biệt mạnh nhất + ảnh khác nội bộ, Review hiện
+  sẵn ảnh/tên profile và nút chụp lại; không auto approve/send. Capture ngoài DB
+  transaction, lỗi giữ queue và thông báo, không mất evidence đã duyệt.
+  Backend PostgreSQL sạch 236 đạt/2 skip; cloaking 15/15; FE 92/92 (2 workers);
+  wheel 3/3, lint/typecheck/build/compileall đạt. Legacy 419 giữ 4 failure/7 error.
+  Worker all/precheck đã reload lúc idle; không probe URL/gửi mail thật.
+
+- 2026-10-16 — Cloaking Review web triển khai current-day owned detail/images,
+  ba quyết định, upload atomic hai ảnh đối chiếu hoặc 1–3 ảnh report thường riêng,
+  exact preview + approve/send sync, skip, passive capture process riêng với ảnh
+  candidate chờ duyệt. Tái dùng preview/MIME/SMTP/Sent/ledger Domain Worker;
+  giữ sent/unknown, case lock, partial retry và original detector observations.
+  Không migration, dependency hoặc permission mới; không gửi/probe thật.
+  FE 91/91; backend PostgreSQL sạch 231 đạt/2 skip; Cloaking Review 12/12 gồm
+  regression nguồn HTTP mới, capture subprocess và ảnh nội bộ không attach.
+  Wheel cô lập 3/3, typecheck/lint/build/compileall/pip check đạt. Browser fixture
+  desktop 1440px/mobile 390px không lỗi/tràn ngang. Legacy 419 giữ 4 failure/7 error.
+
+- 2026-10-16 — Sửa Evidence Review legacy ẩn tài khoản sau preview đầu: source
+  jobs đều không ghi scope thì tiếp tục hiện mọi owned enabled account, preview
+  explicit bổ sung union scope, giữ ledger; source job có scope vẫn giới hạn cũ.
+  Backend PostgreSQL sạch 221 đạt/2 skip, Evidence Review 10/10; compileall đạt.
+  Legacy 419 giữ baseline 4 failure/7 error. Không migration hoặc SMTP thật.
+
+- 2026-10-16 — Evidence Review sửa lỗi case legacy thiếu required_account_ids:
+  cho mở case, chọn explicit tài khoản enabled thuộc owner và bind tại preview
+  dưới case lock. Không chạy precheck lại, không suy đoán default account; scope
+  đã lưu tiếp tục bắt buộc, giữ exact preview/hash và ledger chống gửi trùng.
+  Xác nhận case thực tế mở được, có 2 tài khoản owned để chọn; không gửi thật.
+  Backend 220 đạt/2 skip, FE 88/88, lint/typecheck/build/compileall đạt;
+  legacy 419 giữ baseline 4 failure/7 error. Không migration/cấu hình mới.
+
+- 2026-10-16 — Domain Evidence Review web đối chiếu legacy: case ngày/full URL,
+  1–3 ảnh thumbnail/atomic, tài khoản nguồn, exact preview rồi gửi SMTP sync không
+  job. Shared dispatcher/ledger/Message-ID/Sent, partial retry giữ sent/unknown;
+  scoped advisory lock, owned image route, reset confirmation khi sửa ảnh/account,
+  reload preview/images/deliveries. Sent đủ nguồn mới ẩn case; source ready không
+  treo batch nhờ workspace đối chiếu ledger, không sửa source check/version khi đọc
+  trạng thái để giữ binding của exact preview/Sent. Không migration/dependency/config
+  mới, không email/probe thật.
+  FE 88/88; backend PostgreSQL cô lập 219 đạt/2 skip, wheel cô lập mới 3/3;
+  lint/typecheck/build/compileall/pip check đạt. Legacy 419 giữ baseline
+  4 failure/7 error. Browser fixture desktop/mobile 390px không tràn ngang trang;
+  reload worker lúc idle, API health 200.
 
 - 2026-10-16 — Thu gọn account cell: chỉ email một lần, badge/sent counts cùng
   dòng, ẩn zero errors/unknown và bỏ Chi tiết gửi/khung card. Giữ nguyên metadata

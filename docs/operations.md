@@ -286,3 +286,28 @@ Successful callback returns /, errors return /login. BotFather callback remains
 GET /api/v1/auth/telegram/status retains the public configured/redirect_uri fields;
 the login card shows a user-facing setup notice rather than infrastructure details.
 Restart FastAPI after updating auth routes if the Windows reloader does not exit.
+
+# Domain Evidence Review web
+
+Queue `/domain-evidence-review` theo owner/ngày/full URL. Chọn case, dùng ảnh đã lưu
+hoặc chọn 1–3 PNG/JPEG <=10 MB/ảnh, tạo exact draft và xác nhận gửi trực tiếp. Không
+tạo worker job. Tài khoản chỉ được chọn trong union job nguồn; retry giữ sent và
+unknown, chỉ xử lý pending/failed. Reload đọc case/ảnh/preview/ledger từ backend.
+Nếu request gửi mất kết nối, đối chiếu trạng thái trước khi retry; không suy ra chưa
+gửi. Lease intent hết hạn thành unknown. Giữ scope/hash/version, không chỉnh runtime
+hoặc bỏ integrity guard. Quyền review hiện có, không migration/dependency/cờ gửi mới.
+# Cloaking Review web
+
+Precheck/all workers now invoke the same bounded capture adapter automatically
+for cloaking cases with recipients when browser capture is enabled. Restart idle
+worker processes to load this change. No migration/new flag is needed. Capture
+failure does not fail or auto-send the case; inspect capture_reason in review detail.
+
+Routes `/domain-worker/reviews/cloaking/{id}` now support detail, owned images,
+multipart `/previews` (decision, confirmed_difference, account_ids, optional files
+or use_capture), explicit `/send`, `/skip`, and `/capture` (decision JSON).
+Preview/send require existing approve permission as well as the action permission.
+Capture uses existing check_domain.capture permission and browser capture flag,
+with a bounded child browser process; it creates candidates only. No new migration,
+queue service or configuration is required. API hot reload applies these handlers;
+no SMTP worker restart is needed. Test with fixtures; do not probe/send on render.

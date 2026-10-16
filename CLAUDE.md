@@ -1368,6 +1368,37 @@ SMTP/IMAP connectivity: public DNS validation uses the operating-system resolver
 
 # Domain Worker UX — 2026-10-16
 
+Domain Evidence Review web đối chiếu `pages/12_Domain_Evidence_Review.py` và
+`domain_worker.prepare_manual_evidence_preview/send_manual_evidence_item`: direct
+sync SMTP sau exact preview, không worker job. `application/evidence_review.py`
+điều phối case owned/day, union source accounts và known recipient routes;
+`DomainWorkerPreviewService.create(review_scope=...)` chỉ nhận trusted server scope
+để cho subset nguồn, default DW vẫn exact source scope. Giữ formatter/MIME/logo và
+manifest shared; evidence images vẫn owned Check. Dedicated review image route
+kiểm case→check→artifact, không nới permission artifact domain_worker toàn cục.
+
+`api/evidence_review.py`: GET detail/images, POST multipart previews, POST exact
+send với check/preview/revision/fingerprint/confirmed; permission review tương ứng,
+CSRF/profile và no-store. Session advisory lock theo owner+case ngăn send đồng thời;
+upload/preview dùng try xact lock cùng key, không khóa toàn Domain Worker. Connection
+giữ advisory lock nhưng commit transaction trước SMTP; unlock/invalidate trong finally.
+`delivery_dispatch.py` dùng chung SMTP/checkpoint/Sent với worker: intent commit trước
+side effect, checkpoint riêng từng email, cùng Message-ID/business key domain_worker.
+Send revalidate row.preview_id để plan khác không thay nội dung đã duyệt. Scope/authz/
+ngày/evidence/hash được kiểm trước mỗi intent, UNKNOWN/SENT không reset.
+
+Review GET/list reconcile expired owned intents thành UNKNOWN, không network; queue
+ready/partial/failed vẫn selectable và chỉ sent đủ mọi source account/routes mới ẩn.
+Workspace awaiting-send kiểm ledger của mọi route/account nguồn để bỏ qua check
+đã gửi đủ. Không sửa result/version của source check khi đọc trạng thái: giữ nguyên
+binding preview trong lúc Sent copy có thể còn chạy sau SMTP accepted.
+Preview/evidence cũ không bị xóa khi retry; ảnh upload thay đổi invalidates check hash.
+Nếu có cloaking case hiện tại cùng URL thì direct normal review bị chặn. React
+`EvidenceReviewPage.tsx` tách khỏi cloaking page, giữ selected case bằng URL, thumbnail
+local revoke đúng, atomic validation, reload owned images/preview, confirm reset khi
+đổi account/ảnh; không cho switch case khi mutation đang chạy. Pure unknown không mở
+retry; lỗi Sent copy báo riêng kể cả khi SMTP đã hoàn tất. Không thêm dependency/schema.
+
 Sửa 409 send-summary khi pause: control_mode guard chỉ ở WorkerSendService._start,
 không đặt trong summary. GET summary phải đọc được paused/cancelled job cùng source
 và ledger mà không đổi trạng thái. Start paused yêu cầu resume, start cancelled bị
@@ -1418,3 +1449,73 @@ batch. completed có banner thành công; partial/failed giữ cảnh báo và r
 Các màu trạng thái hỗ trợ nhãn chữ/progress native, cả light/dark. BatchCountdown
 lấy next_run_at từ backend, tick 1 giây và cleanup khi unmount; zero chỉ chờ worker,
 không start job hoặc đánh dấu chạy/thành công phía client. Reload tính lại từ deadline.
+# Evidence Review legacy account scope
+
+## Cloaking Review web implementation
+
+2026-10-17 flow audit: input route discovery in `worker_batches.filter_sent_inputs`
+includes succeeded evidence_review/cloaking_review Checks as well as ready and
+excluded_already_sent. Review retains the observation disposition; sent truth is
+the shared ledger. Only all account/route keys sent exclude the input. The composed
+`tests/test_worker_journey.py` covers two source accounts, normal batch, both direct
+reviews, partial retries, queue/workspace completion, all-filtered no-job, and day
+separation. This closes the precheck-after-successful-cloaking-review gap.
+
+Canonical `_select_browser_evidence_pair` keeps a `profile_comparison_only` pair
+when valid nonterminal profiles were captured but none met the difference threshold
+(e.g. LIKELY from a single-profile IOC, 0.997 text similarity). It does not change
+the detector verdict or claim observed difference: difference_observed is false.
+Prefer the lowest-similarity valid comparison, then two healthy distinct profiles.
+Review detail exposes capture_comparison_only and the UI explains the limitation.
+Successful capture clears prior pending/failure metadata. No automatic approval or
+SMTP is triggered. Actual slotcatalog.co investigation reproduced four HTTP 200
+browser profiles and imported the captured desktop/mobile pair into its existing
+case; no draft was created and no email sent.
+
+DomainPrecheckWorker now receives capture_review from workers/cli when the existing
+browser_capture_enabled flag is enabled. After contact/HTTP classification and
+durable case creation, it captures cloaking candidates before checkpointing the
+JobItem complete. Browser work runs outside DB transactions; only candidate import
+holds the case lock. LIKELY is not skipped; no-email never captures. Capture errors
+keep a succeeded precheck with capture_failed and pending manual review. Existing
+reviewed/captured sources and terminal case states are retained. The UI defaults to
+the available candidate pair and labels capture as retry when images already exist.
+
+`application/cloaking_review.py` specializes the shared evidence review service,
+exact preview renderer, and synchronous sender; `api/cloaking_review.py` exposes
+owned detail/images/previews/send/skip/capture under `/domain-worker/reviews/cloaking`.
+No sending Job or legacy JSON queue is created. Original Check cloaking verdict,
+disposition and browser-verification flag remain unchanged: `review_decision` and
+ReviewCase.disposition record the explicit operator choice. Preview resource
+version/result hash binds that decision with evidence, profile, account and logo.
+The external confirmed block uses the canonical legacy `format_evidence_block`;
+normal disposition uses shared Browser Evidence formatting without cloaking blocks.
+
+`core/review_capture.py` runs a bounded 180-second child process and imports only
+owned, validated image bytes from a private temporary directory. Confirmed mode
+uses passive legacy profile capture; normal mode reuses LegacyBrowserCaptureAdapter.
+Capture writes a separate candidate evidence set, does not approve/send, and merges
+HTTP evidence without downgrading it. Explicit preview validates/promotes only the
+candidate matching the selected decision; uploaded images are committed atomically
+with preview. Failure leaves existing approved evidence and delivery history intact.
+Only the representative pair is previewed/attached. Remaining profile screenshots
+are private `cloaking_review:observation` artifacts, retained for internal evidence
+and excluded from review image routes and SMTP attachments. A new HTTP-only source
+for the same case does not replace the reviewed primary check/evidence/preview.
+Artifacts and SMTP intent are reused through shared classes. Delivery dedupe is
+still owner/day/domain/account/channel/recipient in the domain_worker ledger.
+Case/session advisory lock prevents concurrent preview/capture/skip/send, without
+locking Domain Worker. SENT/UNKNOWN remain immutable under retries. After any
+accepted/unknown mail, changing disposition or skipping is prohibited. Expired
+intent becomes UNKNOWN. Shared sender always uses specialized service validation.
+
+For source jobs whose account_scope is consistently empty, keep all enabled
+owned choices visible after initial preview. Explicit preview may extend the
+case scope by union, preserving prior delivery requirements and ledger. Jobs
+with a recorded source scope retain their existing subset restriction.
+
+Empty legacy ReviewCase.required_account_ids does not block reading a valid
+current-day normal case. Detail exposes enabled owned sender choices, initially
+unselected. Only explicit preview under the owner/case advisory lock binds the
+chosen enabled owned IDs. Existing nonempty scope remains enforced. Upload and
+exact preview validation are unchanged; no default account inference or SMTP.

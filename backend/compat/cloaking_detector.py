@@ -910,6 +910,23 @@ def _select_browser_evidence_pair(result: dict) -> tuple[list[dict], dict]:
                 reason = "strongest_visual_comparison"
                 break
 
+    difference_observed = bool(selected_profiles)
+    if not selected_profiles:
+        # A single-profile IOC can trigger LIKELY while browser content is alike.
+        # Keep a comparison pair for review without claiming a visual difference.
+        available = [comparison for comparison in result.get('comparisons') or []
+            if comparison.get('available') and len(set(comparison.get('profiles') or [])) >= 2]
+        available.sort(key=lambda comparison: float(comparison.get('text_similarity', 1.0)))
+        pairs = [list(comparison['profiles'][:2]) for comparison in available]
+        healthy = [name for name, profile in profiles.items()
+                   if profile.get('screenshot_path') and not profile.get('error') and not profile.get('terminal_state')]
+        if len(healthy) >= 2:
+            pairs.append(healthy[:2])
+        for names in pairs:
+            if len(set(names)) == 2 and all(name in healthy for name in names):
+                selected_profiles = names
+                reason = 'profile_comparison_only'
+                break
     screenshots = []
     for name in selected_profiles:
         profile = profiles[name]
@@ -921,7 +938,8 @@ def _select_browser_evidence_pair(result: dict) -> tuple[list[dict], dict]:
             "title": profile.get("title", ""),
             "final_url": profile.get("final_url", ""),
         })
-    return screenshots, {"profiles": selected_profiles, "reason": reason}
+    return screenshots, {"profiles": selected_profiles, "reason": reason,
+                         "difference_observed": difference_observed}
 
 
 def probe_playwright_cloaking(

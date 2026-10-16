@@ -102,10 +102,33 @@ Xác minh Playwright cloaking còn chờ bước review, không coi HTTP là k�
 Danh sách thường chỉ nhận URL có email hợp lệ và ảnh/manifest hợp lệ. Cloaking đi
 `/cloaking-review`; domain thường thiếu ảnh đi `/domain-evidence-review`; không email
 bị loại. Dùng các link queue trên Domain Worker để chuyển trang. Domain Evidence
-Review chọn đúng case và upload 1–3 PNG/JPEG, thumbnail hiện ngay; áp dụng ảnh hợp lệ
-đưa các lượt nguồn về `ready`, giữ nguyên tài khoản của từng lượt. Không upload ảnh
+Review chọn đúng case và upload 1–3 PNG/JPEG, thumbnail hiện ngay; tạo preview và
+gửi trực tiếp ngay tại review như bản Streamlit cũ, không tạo job mới. Không upload ảnh
 inline trong Domain Worker. Cloaking Review web hiện hiển thị queue riêng, chưa có
 approval/send cloaking. Domain thường đủ bằng chứng đã có gửi SMTP batch trên web.
+
+**Domain Evidence Review web:** danh sách chỉ gồm case của bạn trong ngày, gộp theo
+full URL và giữ tài khoản từ các job nguồn. Chọn **Mở case**, xem ảnh đã lưu (nếu có)
+hoặc chọn 1–3 ảnh PNG/JPEG, mỗi ảnh tối đa 10 MB; cả batch ảnh phải hợp lệ. Thumbnail
+hiện ngay, ảnh chỉ được lưu khi **Tạo / cập nhật draft để xem**. Không có nút lưu ảnh
+trung gian. Mặc định chọn tài khoản nguồn đang bật; có thể chọn một phần trong phạm vi
+nguồn, không thêm account bên ngoài. Sau preview, đọc Subject/body tiếng Anh theo từng
+account/recipient, tick xác nhận rồi **Gửi mail domain này**. Nội dung/ảnh/logo/profile
+được khóa version/hash; thay ảnh hoặc tài khoản phải tạo preview mới.
+
+Gửi đồng bộ trực tiếp qua SMTP helper và lưu Sent như Domain Worker, không cần worker
+gửi riêng cho review. Kết quả từng account/recipient giữ trong ledger chung; chỉ gửi
+phần pending/failed, không gửi lại SENT/SENDING/UNKNOWN. Case partial còn trong queue,
+dùng lại ảnh/preview còn hợp lệ và **Gửi tiếp các mục còn thiếu**; preview hết hạn thì
+tạo lại bằng ảnh đã lưu, không cần upload lại. UNKNOWN cần đối soát máy chủ mail.
+Sau khi mọi account nguồn/recipient đã sent, case rời queue; giữ audit/source history.
+Sang ngày mới phải precheck lại. API timeout/mất kết nối không có nghĩa chưa gửi:
+reload để đọc trạng thái; không tự gửi lại. Lỗi lưu Sent tách khỏi SMTP accepted.
+
+Quyền review dùng `domain_evidence_review.view/upload/preview/send` hiện có; chỉ
+operator có quyền send mới thấy nút gửi được mở. Không cần migration hoặc cờ gửi mới;
+SMTP/IMAP vẫn theo account và mail endpoint allowlist hiện tại. Cloaking Review
+vẫn là luồng riêng, không được gửi bằng endpoint normal evidence review.
 
 Trong lúc precheck có số đếm riêng và bảng URL đủ điều kiện cập nhật dần.
 Sau khi hoàn tất, **Cấu hình gửi worker** lọc lại delivery trong ngày, cho xem danh sách
@@ -1333,3 +1356,48 @@ Callback đăng ký trong BotFather vẫn là `/api/v1/auth/telegram/callback`; 
 đổi sang `/login`. Không cần đổi Client ID/Secret hoặc cấu hình extension.
 
 SMTP/IMAP connectivity: public DNS validation uses the operating-system resolver (the same resolver as mail sockets), with a three-second guard deadline. Exact host:port allowlisting and rejection of any non-public result remain required. DNS failures return `dns_failed`, separately from endpoint/address policy rejection; tests authenticate only and never send/read mail.
+# Sửa case Evidence Review cũ thiếu tài khoản
+
+Case cũ chưa lưu tài khoản nguồn vẫn mở được. Chọn tài khoản gửi của bạn và tạo
+draft để lưu phạm vi gửi; không cần precheck lại. Sau khi lưu, chỉ các tài khoản
+đã chọn thuộc phạm vi case được dùng cho preview và gửi tiếp.
+Với case từ job cũ không ghi phạm vi tài khoản, danh sách vẫn hiện đủ tài khoản
+đang bật sau khi tạo draft. Có thể chọn thêm tài khoản và tạo lại draft; lịch sử
+đã gửi của các tài khoản trước được giữ nguyên.
+
+## Cloaking Review trên web
+
+Kiểm tra xuyên suốt Domain Worker và hai trang Review: xem
+[báo cáo kiểm thử 2026-10-17](docs/testing/flow-audit-2026-10-17.md).
+Domain đã gửi đủ từ Review cũng được lọc trước precheck bằng ledger backend;
+nếu còn thiếu tài khoản/người nhận thì vẫn được xử lý tiếp.
+
+Mở **Cloaking Review**, chọn đúng case trong ngày, rồi chọn một trong ba hướng:
+
+Khi browser capture đã bật, Domain Worker tự chụp thụ động ngay trong precheck
+cho case nghi cloaking có email, kể cả HTTP đã là LIKELY. Trang Review hiển thị
+sẵn cặp ảnh từ hai profile khác nhau được detector chọn theo khác biệt mạnh nhất,
+kèm tên profile. Ảnh còn lại giữ nội bộ. Không tự xác nhận cloaking hoặc gửi mail.
+Nút “Chụp lại bằng chứng” dành cho thử lại; lỗi/tắt capture có thông báo riêng.
+Nếu browser mở/chụp được trang nhưng nội dung các profile giống nhau, vẫn hiển thị
+cặp ảnh để đối chiếu và ghi rõ chưa quan sát khác biệt. Dấu hiệu script nghi
+cloaking không thay cho xác nhận khác biệt thực tế; không coi tình huống này là
+website không truy cập được hoặc capture thất bại.
+
+- **Xác nhận cloaking:** chụp tự động hoặc tải đúng hai ảnh đối chiếu PNG/JPEG
+  (mỗi ảnh tối đa 10 MB), kiểm tra ảnh và xác nhận sự khác biệt trước khi tạo draft.
+- **Không cloaking:** tạo bộ bằng chứng report thường riêng bằng chụp DOM/passive
+  hoặc tải 1–3 ảnh. Draft và attachment không chứa bằng chứng cloaking cũ.
+- **Bỏ qua:** đóng case chưa có email thành công/chưa rõ; không gửi mail.
+
+Chọn tài khoản, tạo draft, đọc đúng nội dung theo từng người nhận, xác nhận rồi gửi
+trực tiếp. Không tạo job gửi mới. Khi lỗi một phần, dùng lại ảnh/draft còn hợp lệ
+và gửi tiếp mục lỗi/chưa gửi; thư đã thành công và kết quả chưa rõ không tự gửi lại.
+Case chỉ rời danh sách chờ khi đủ mọi tài khoản nguồn. Reload giữ case qua URL.
+
+Chụp tự động dùng `DOMAINCHECK_BROWSER_CAPTURE_ENABLED` và quyền
+`check_domain.capture` hiện có; chạy browser trong process riêng, có timeout,
+không click/type/submit. Cloaking capture dùng detector đa profile cũ (gồm
+Googlebot Smartphone) và cặp ảnh khác biệt mạnh nhất; ảnh chỉ là bản chờ duyệt.
+Upload dùng quyền `cloaking_review.upload`; preview cần `.preview` và `.approve`,
+gửi cần `.send` và `.approve`, bỏ qua cần `.skip`. Không có migration hoặc dependency mới.

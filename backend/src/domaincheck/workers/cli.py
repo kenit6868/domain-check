@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from domaincheck.core.review_capture import capture_review
 import secrets
 
 from redis.asyncio import Redis
@@ -56,7 +57,9 @@ async def run(*, once: bool, poll_seconds: float, job_type: str = "all") -> None
             max_file_bytes=settings.artifact_max_file_bytes,
             max_dimension=settings.artifact_max_dimension, max_pixels=settings.artifact_max_pixels)
     precheck_worker = DomainPrecheckWorker(database.session_factory, LegacyWorkerPrecheckAdapter(),
-                                         store=precheck_store, capture=precheck_capture)
+                                         store=precheck_store, capture=precheck_capture,
+                                         cloaking_capture=capture_review
+                                         if precheck_capture is not None else None)
     send_store = FilesystemArtifactStore(settings.artifact_root)
     envelope = SecretEnvelope.from_base64_keys(
         {settings.secret_key_version: settings.secret_master_key.get_secret_value()}, settings.secret_key_version

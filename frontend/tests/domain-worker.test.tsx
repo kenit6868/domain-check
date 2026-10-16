@@ -356,33 +356,42 @@ it('previews manual images on the evidence page and submits only the selected ca
   let uploaded = false
   const restore = installApiMock((config) => {
     if (config.url === '/domain-worker/workspace') return { current_id: null, send_job_id: null, phase: 'idle', locked: false, history: [] }
-    if (config.url === '/me') return me
+    if (config.url === '/me') return { ...me, permissions: [...me.permissions, 'domain_evidence_review.preview'] }
     if (config.url === '/domain-worker/reviews/evidence') return uploaded ? [] : [review]
-    if (config.url === `/domain-worker/reviews/evidence/${caseId}/images`) { uploaded = true; expect(config.data).toBeInstanceOf(FormData); return { state: 'ready' } }
+    const preview = { id: operationId, check_id: checkId, revision: 1, fingerprint: 'a'.repeat(64), requested_url: review.requested_url,
+      expires_at: '2100-01-01T00:00:00Z', deliveries: [{ sender_account_id: accountId, recipient: 'abuse@example.com', channel: 'registrar', draft_identity: 'report', subject: 'Fixture', text_body: 'Exact fixture draft' }] }
+    if (config.url === `/domain-worker/reviews/evidence/${caseId}`) return { ...review, evidence_version: uploaded ? 1 : 0,
+      accounts: [{ ...accounts[0], enabled: true }], source_job_ids: [operationId], images: uploaded ? [{ id: secondAccount, mime_type: 'image/png', byte_size: 100 }] : [],
+      preview: uploaded ? preview : null, deliveries: [] }
+    if (config.url === `/domain-worker/reviews/evidence/${caseId}/previews`) { uploaded = true; expect(config.data).toBeInstanceOf(FormData); return { preview, case_id: caseId, evidence_version: 1 } }
     throw new Error(`Unexpected request ${config.url ?? ''}`)
   })
   try {
     view(`/domain-evidence-review?case=${caseId}`)
-    await userEvent.upload(await screen.findByLabelText('Ảnh bằng chứng'), new File(['fixture'], 'capture.png', { type: 'image/png' }))
+    await userEvent.upload(await screen.findByLabelText(/Ảnh bằng chứng \(/), new File(['fixture'], 'capture.png', { type: 'image/png' }))
     expect(await screen.findByAltText('Ảnh đã chọn 1')).toHaveAttribute('src', 'blob:local-image')
-    await userEvent.click(screen.getByRole('button', { name: 'Dùng bằng chứng cho case này' }))
-    expect(await screen.findByText(/Đã bổ sung bằng chứng/)).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Tạo / cập nhật draft để xem' }))
+    expect(await screen.findByText('Exact fixture draft')).toBeVisible()
     expect(uploaded).toBe(true)
   } finally { restore(); create.mockRestore(); revoke.mockRestore() }
 })
 
-it('keeps cloaking in its own queue without normal upload, draft or send actions', async () => {
+it('keeps cloaking in its own queue and respects view-only permissions', async () => {
   const restore = installApiMock((config) => {
     if (config.url === '/domain-worker/workspace') return { current_id: null, send_job_id: null, phase: 'idle', locked: false, history: [] }
     if (config.url === '/me') return me
     if (config.url === '/domain-worker/reviews/cloaking') return [{ ...review, cloaking_verdict: 'POSSIBLE' }]
+    if (config.url === `/domain-worker/reviews/cloaking/${caseId}`) return { ...review, evidence_version: 0,
+      accounts: [{ id: accountId, sender_email: 'sender@example.com', enabled: true }], source_job_ids: [],
+      images: [], preview: null, deliveries: [], cloaking: { verdict: 'POSSIBLE', score: 20 } }
     throw new Error('Unexpected request')
   })
   try {
     view(`/cloaking-review?case=${caseId}`)
-    expect(await screen.findByText(/Case đã được tách khỏi batch thường/)).toBeVisible()
+    expect(await screen.findByText(/Kết quả precheck: POSSIBLE/)).toBeVisible()
     expect(screen.queryByLabelText('Ảnh bằng chứng')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /gửi|preview|draft/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Gửi mail domain này' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Tạo / cập nhật draft để xem' })).toBeDisabled()
   } finally { restore() }
 })
 

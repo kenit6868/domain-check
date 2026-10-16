@@ -32,6 +32,10 @@ examples = email_examples('fixture.cc', 'https://fixture.cc/path?q=1', {
 assert examples[0]['advisory'] and 'Reported URL: https://fixture.cc/path?q=1' in examples[0]['body']
 from domaincheck.core.email_content import bundled_logo_bytes
 from domaincheck.application.sent_copy import SentCopyService, LegacySentCopyAdapter
+from domaincheck.application.evidence_review import EvidenceReviewService, EvidenceReviewSender
+from domaincheck.application.cloaking_review import CloakingReviewService, CloakingReviewSender
+from domaincheck.core.review_capture import capture_review
+from domaincheck.application.delivery_dispatch import dispatch_intent
 import inspect, phishing_toolkit
 assert 'message_id' in inspect.signature(phishing_toolkit._imap_save_sent).parameters
 from browser_evidence import format_email_evidence_manifest

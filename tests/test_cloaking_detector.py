@@ -627,6 +627,22 @@ class CloakingDetectorTests(unittest.TestCase):
         )
         self.assertEqual(pair["reason"], "title_difference")
 
+    def test_similar_content_with_single_profile_ioc_still_has_review_pair(self):
+        result = {'verdict': 'LIKELY', 'profiles': {
+            name: {'name': name, 'screenshot_path': name + '.png', 'error': ''}
+            for name in ['desktop_direct', 'googlebot_smartphone']},
+            'signals': [{'kind': 'known_cloaking_ioc', 'weight': 70, 'profiles': ['desktop_direct']}],
+            'comparisons': [{'profiles': ['desktop_direct', 'googlebot_smartphone'], 'available': True,
+                'text_similarity': 0.997, 'keyword_delta': [], 'final_url_changed': False}]}
+        shots, pair = cd._select_browser_evidence_pair(result)
+        self.assertEqual(len(shots), 2)
+        self.assertEqual(len(set(pair['profiles'])), 2)
+        self.assertEqual(pair['reason'], 'profile_comparison_only')
+        self.assertFalse(pair['difference_observed'])
+        self.assertEqual(result['verdict'], 'LIKELY')
+        result['profiles']['googlebot_smartphone']['terminal_state'] = 'browser_error'
+        self.assertEqual(cd._select_browser_evidence_pair(result)[0], [])
+
 
 if __name__ == "__main__":
     unittest.main()

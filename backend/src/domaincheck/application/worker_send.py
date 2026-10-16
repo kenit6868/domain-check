@@ -413,20 +413,10 @@ class DomainSendWorker:
                             expected_size=artifact.byte_size, expected_sha256=artifact.sha256)
                         blobs.append((binding, data))
                     message = compose_message(intent, blobs)
-                # Intent committed above; no database transaction during SMTP.
-                try:
-                    outcome, stage, reason = await asyncio.to_thread(self.sender.send, spec, message)
-                except Exception:
-                    outcome, stage, reason = 'unknown', 'send_message', 'transport_outcome_uncertain'
-                async with self.sessions() as session, session.begin():
-                    await DeliveryService(session, self.store, owner_user_id=owner, actor_user_id=actor,
-                        request_id='domain-worker-send').checkpoint(intent.delivery_id, attempt_id=intent.attempt_id,
-                        claim_token=intent.claim_token, outcome=outcome, smtp_stage=stage,
-                        result={'reason_code': reason, 'evidence_source': 'browser_or_manual'}, now=self.now())
-                if outcome == 'sent' and self.sent_copier is not None:
-                    from domaincheck.application.sent_copy import SentCopyService
-                    await SentCopyService(self.sessions, self.store, self.sent_copier, self.envelope).save(
-                        owner, actor, intent.delivery_id, message=message)
+                from domaincheck.application.delivery_dispatch import dispatch_intent
+                await dispatch_intent(self.sessions, self.store, self.sender, self.envelope,
+                    owner=owner, actor=actor, intent=intent, spec=spec, message=message,
+                    now=self.now, sent_copier=self.sent_copier)
             except Exception:
                 async with self.sessions() as session:
                     uncertain = await session.scalar(select(Delivery.id).where(Delivery.owner_user_id == owner,

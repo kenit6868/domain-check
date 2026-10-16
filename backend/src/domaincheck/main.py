@@ -17,6 +17,8 @@ from domaincheck.api.mail_settings import router as mail_settings_router
 from domaincheck.api.quick_reports import router as quick_reports_router
 from domaincheck.api.domain_checks import router as domain_checks_router
 from domaincheck.api.domain_worker import router as domain_worker_router
+from domaincheck.api.evidence_review import router as evidence_review_router
+from domaincheck.api.cloaking_review import router as cloaking_review_router
 from domaincheck.api.form_tasks import router as form_tasks_router
 from domaincheck.application.context import SystemClock
 from domaincheck.core.mail import AllowlistedMailConnectionTester, StandardMailConnectionTester
@@ -129,6 +131,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(quick_reports_router, prefix=settings.api_prefix)
     app.include_router(domain_checks_router, prefix=settings.api_prefix)
     app.include_router(domain_worker_router, prefix=settings.api_prefix)
+    app.include_router(evidence_review_router, prefix=settings.api_prefix)
+    app.include_router(cloaking_review_router, prefix=settings.api_prefix)
     app.include_router(form_tasks_router, prefix=settings.api_prefix)
     return app
 
