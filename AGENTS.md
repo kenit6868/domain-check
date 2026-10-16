@@ -252,6 +252,14 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-10-16 — Tách /login Telegram riêng; / thành dashboard protected theo
+  permission. 401 route nội bộ về /login, đăng nhập thành công về /, logout về
+  /login; pending vẫn bị chặn. Callback lỗi/expired về login với mã allowlist.
+  Login card cyan–blue responsive sáng/tối, không đổi OIDC/cookie/security policy.
+  FE 56/56; backend 120 đạt/2 skip; typecheck/lint/build/compileall. Visual QA login
+  390px + desktop sáng/tối bằng fixture cô lập; không login Telegram thật.
+  CLAUDE.md không đọc/cập nhật theo chỉ dẫn hiện hành.
+
 - 2026-10-16 — Sửa thứ tự thẻ Quick Report: lượt hiện tại theo input order, lịch
   sử ngày ngoài lượt xếp sau; số # khớp worker tuần tự. Không đổi worker/runtime.
   Thêm regression daily response đảo thứ tự. FE 47/47,

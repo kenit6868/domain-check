@@ -492,3 +492,10 @@ by mock FE integration test. No backend mutation/API change beyond existing clea
 2026-10-16: fix daily/current merge ordering in React. Current operation input order
 sets card order and numbering; historical-only entries follow. Sequential worker
 behavior unchanged. Regression verifies reversed daily response cannot reorder it.
+
+2026-10-16 AUTH/UI refinement: dedicated /login; authenticated dashboard at /;
+protected route 401 redirect; authenticated login redirect; logout to login;
+callback success to / and callback errors to login. Pending gate and RBAC retained.
+New responsive cyan/blue Telegram card with light/dark themes. Router and callback
+regressions cover anonymous deep links, dashboard permissions, pending, network
+outage and safe error codes. No live Telegram login, SMTP or report during tests.

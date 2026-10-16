@@ -1073,3 +1073,17 @@ Mỗi lượt mới tự bật ẩn kết quả cũ, kể cả trước đó đ�
 Thứ tự thẻ Quick Report của lượt hiện tại và số # luôn theo danh sách URL vừa
 nhập, khớp thứ tự worker chạy tuần tự. Nếu hiện lại lịch sử cũ, các URL ngoài
 lượt hiện tại nằm phía sau; số # không còn dựa vào vị trí xuất hiện trong ngày.
+
+### Trang đăng nhập và dashboard
+
+- `/login` là trang đăng nhập Telegram riêng, hỗ trợ sáng/tối và mobile.
+- `/` là dashboard cần đăng nhập, hiển thị các công cụ được cấp quyền, không có
+  nút đăng nhập Telegram. Người chưa có phiên truy cập trang nội bộ sẽ về `/login`.
+- Đăng nhập thành công luôn về `/`; tài khoản pending vẫn bị chặn và chờ duyệt.
+- Đã đăng nhập mà mở `/login` sẽ tự về dashboard. Đăng xuất về `/login`.
+- `/app` và `/pending` giữ làm đường dẫn tương thích về `/` sau khi qua kiểm tra phiên.
+- Telegram bị huỷ, callback lỗi hoặc flow hết hạn quay về `/login` với thông báo
+  an toàn. Lỗi kết nối `/me` không bị hiểu nhầm thành chưa đăng nhập; có nút thử lại.
+
+Callback đăng ký trong BotFather vẫn là `/api/v1/auth/telegram/callback`; không
+đổi sang `/login`. Không cần đổi Client ID/Secret hoặc cấu hình extension.

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
@@ -66,14 +66,16 @@ async def telegram_callback(
     session: AsyncSession = Depends(get_db_session),
 ):
     if error or not code or not state:
-        response = RedirectResponse("/?login_error=telegram_denied", status_code=status.HTTP_303_SEE_OTHER)
+        response = RedirectResponse("/login?login_error=telegram_denied", status_code=status.HTTP_303_SEE_OTHER)
         response.delete_cookie("dc_oidc_binding", path="/api/v1/auth/telegram/callback")
         return response
     binding = request.cookies.get("dc_oidc_binding")
     if not binding or request.app.state.oidc is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Login flow is missing or expired")
+        response = RedirectResponse('/login?login_error=telegram_expired', status_code=status.HTTP_303_SEE_OTHER)
+        response.delete_cookie('dc_oidc_binding', path='/api/v1/auth/telegram/callback')
+        return response
     try:
-        claims, return_path = await request.app.state.oidc.exchange_code(
+        claims, _return_path = await request.app.state.oidc.exchange_code(
             code=code, state=state, browser_binding=binding
         )
         login = await AuthService(session).login_oidc_identity(
@@ -84,10 +86,10 @@ async def telegram_callback(
             timezone=request.app.state.settings.default_timezone,
         )
     except (OIDCError, AuthenticationError, KeyError) as exc:
-        response = RedirectResponse("/?login_error=telegram_callback", status_code=status.HTTP_303_SEE_OTHER)
+        response = RedirectResponse("/login?login_error=telegram_callback", status_code=status.HTTP_303_SEE_OTHER)
         response.delete_cookie("dc_oidc_binding", path="/api/v1/auth/telegram/callback")
         return response
-    destination = "/pending" if login.user.status == "pending" else return_path
+    destination = "/"
     response = RedirectResponse(destination, status_code=status.HTTP_303_SEE_OTHER)
     secure = request.app.state.settings.environment == "production"
     response.delete_cookie("dc_oidc_binding", path="/api/v1/auth/telegram/callback")
@@ -114,4 +116,3 @@ async def logout(
     await AuthService(session).revoke(user.session_id)
     response.delete_cookie("dc_session", path="/")
     response.delete_cookie("dc_csrf", path="/")
-

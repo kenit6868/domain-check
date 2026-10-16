@@ -1,13 +1,12 @@
-import { Button } from '../../components/shared/Button'
+﻿import { Button } from '../../components/shared/Button'
 import { ThemeToggle } from '../../components/shared/ThemeToggle'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Suspense } from 'react'
-import { ChevronRight, FileSearch, Layers3, LogOut, Mail, ShieldCheck, UserCog, Users, Wifi } from 'lucide-react'
+import { ChevronRight, FileSearch, LayoutDashboard, Layers3, LogOut, Mail, ShieldCheck, UserCog, Users, Wifi } from 'lucide-react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
 
 import { logoutCurrentUser } from '../../features/auth/api/authApi'
 import { useCurrentUser } from '../../features/auth/hooks/useCurrentUser'
-import type { Me } from '../../features/auth/types'
 import { ApiError } from '../../lib/http/errors'
 import { QueryError } from '../../components/shared/QueryError'
 import { toast } from '../../lib/notifications'
@@ -19,12 +18,12 @@ export function AppShell() {
     sessionStorage.clear()
     toast.dismiss()
     queryClient.clear()
-    window.location.assign('/')
+    window.location.assign('/login')
   } })
   if (me.isPending) return <FullPageMessage title="Đang xác thực phiên…" />
   if (me.isError) {
     if (!(me.error instanceof ApiError) || me.error.status !== 401) return <FullPageMessage title="Chưa thể tải phiên đăng nhập" action={<QueryError message="Không thể xác minh phiên. Kiểm tra kết nối rồi thử lại." onRetry={() => { void me.refetch() }} />} />
-    return <FullPageMessage title="Bạn chưa đăng nhập" action={<a className="primary-button" href="/api/v1/auth/telegram/start?return_path=/app">Đăng nhập bằng Telegram</a>} />
+    return <Navigate to="/login" replace />
   }
   if (me.data.status === 'pending') {
     return <FullPageMessage title="Tài khoản đang chờ duyệt" detail="Quản trị viên cần kích hoạt tài khoản trước khi bạn có thể dùng công cụ." />
@@ -49,13 +48,6 @@ export function AppShell() {
   )
 }
 
-export function AuthorizedLanding({ me }: { me: Me }) {
-  if (me.permissions.includes('quick_report.view')) return <Navigate to="/quick-report" replace />
-  if (me.permissions.includes('mail_accounts.view_own')) return <Navigate to="/settings/mail" replace />
-  if (me.permissions.includes('users.view')) return <Navigate to="/admin/users" replace />
-  if (me.permissions.includes('roles.view')) return <Navigate to="/admin/roles" replace />
-  return <FullPageMessage title="Không có trang được cấp quyền" />
-}
 
 function Navigation({ permissions, mobile = false }: { permissions: string[]; mobile?: boolean }) {
   const items = [
@@ -64,11 +56,11 @@ function Navigation({ permissions, mobile = false }: { permissions: string[]; mo
     { permission: 'users.view', to: '/admin/users', icon: <Users size={18} />, label: 'Người dùng' },
     { permission: 'roles.view', to: '/admin/roles', icon: <UserCog size={18} />, label: 'Role & quyền' },
   ].filter((item) => permissions.includes(item.permission))
-  return <nav className={mobile ? 'flex min-w-max gap-2' : 'mt-6 space-y-1'} aria-label="Điều hướng chính">{!mobile && <p className="mb-3 px-3 font-mono text-[10px] uppercase tracking-[0.2em] nav-heading">Workspace</p>}{items.map((item) => <NavItem key={item.to} {...item} />)}</nav>
+  return <nav className={mobile ? 'flex min-w-max gap-2' : 'mt-6 space-y-1'} aria-label="Điều hướng chính">{!mobile && <p className="mb-3 px-3 font-mono text-[10px] uppercase tracking-[0.2em] nav-heading">Workspace</p>}<NavItem to="/" icon={<LayoutDashboard size={18} />} label="Dashboard" />{items.map((item) => <NavItem key={item.to} {...item} />)}</nav>
 }
 
 function NavItem({ to, icon, label }: { to: string; icon: React.ReactNode; label: string }) {
-  return <NavLink to={to} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}><span className="nav-icon">{icon}</span><span>{label}</span><ChevronRight size={14} className="nav-chevron" aria-hidden="true" /></NavLink>
+  return <NavLink to={to} end={to === '/'} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}><span className="nav-icon">{icon}</span><span>{label}</span><ChevronRight size={14} className="nav-chevron" aria-hidden="true" /></NavLink>
 }
 
 export function FullPageMessage({ title, detail, action }: { title: string; detail?: string; action?: React.ReactNode }) {

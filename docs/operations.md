@@ -152,3 +152,10 @@ flush/restart chỉ gây cache miss; PostgreSQL, artifact, approval và delivery
 `clear_cache` của đúng feature, dùng SCAN/UNLINK trong namespace owner; nếu Redis
 không sẵn sàng API trả 503. Không dùng `FLUSHDB` trong vận hành ứng dụng.
 
+
+Login navigation: open /login for Telegram; / is now an authenticated dashboard.
+Successful callback returns /, errors return /login. BotFather callback remains
+/api/v1/auth/telegram/callback; no provider config change required. Diagnostic
+GET /api/v1/auth/telegram/status retains the public configured/redirect_uri fields;
+the login card shows a user-facing setup notice rather than infrastructure details.
+Restart FastAPI after updating auth routes if the Windows reloader does not exit.

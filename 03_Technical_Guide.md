@@ -1111,3 +1111,21 @@ before appending historical-only rows. Replacing Map values did not reorder keys
 so daily first-seen ordering previously produced misleading #/status positions.
 Worker already awaits each item in input_index order; no concurrency change.
 Regression supplies reversed daily rows with succeeded/running/pending input order.
+
+### Dedicated login routing — 2026-10-16
+
+React public /login is LoginPage in features/auth/pages. Root / now mounts
+DashboardPage under AppShell, with permission-filtered tool links and no Telegram
+login action. AppShell sends only unauthenticated 401 sessions to /login with
+replace; transport/server errors keep retry UI. Active /login redirects to /;
+pending users remain gated by AppShell. Logout clears session/query client and
+navigates /login. Legacy /app and /pending alias / behind the session gate.
+
+Telegram callback success always redirects / (stored return_path no longer selects
+the destination); missing/expired binding, denied or failed exchange redirect
+/login?login_error=<allowlisted_code>. Session HttpOnly/Secure/SameSite and CSRF
+cookie rules unchanged. OIDC PKCE/state/nonce and backend authz stay in place.
+Frontend login uses current-user query plus health/provider readiness, never starts
+OIDC automatically. No dependency/config/migration changes. Source foundation page
+renamed DashboardPage; auth preview used isolated anonymous fixtures with external
+actions disabled, avoiding logout or Telegram calls during visual verification.

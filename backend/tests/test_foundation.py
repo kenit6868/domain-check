@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 import asyncio
@@ -130,7 +130,7 @@ class FoundationTests(unittest.TestCase):
 
         response = asyncio.run(run())
         self.assertEqual(response.status_code, 303)
-        self.assertEqual(response.headers["location"], "/?login_error=telegram_denied")
+        self.assertEqual(response.headers["location"], "/login?login_error=telegram_denied")
         self.assertNotIn("sensitive", response.text)
 
     def test_default_role_includes_business_permissions_and_excludes_administration(self):
@@ -174,4 +174,3 @@ class FoundationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
