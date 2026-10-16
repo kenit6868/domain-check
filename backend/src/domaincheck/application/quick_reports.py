@@ -203,7 +203,7 @@ class QuickReportWorker:
                 )
                 await repo.finalize_job(
                     job_id=job_id, worker_token=worker_token, expected_version=job.version,
-                    state=terminal, stage="completed", result_metadata={"failed_count": failures},
+                    state=terminal, stage="completed", result_metadata={**(job.result_metadata or {}), "failed_count": failures},
                     now=self._now(),
                 )
         return job_id

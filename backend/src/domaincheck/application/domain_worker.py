@@ -9,12 +9,13 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 
-from domaincheck.application.jobs import JobItemInput, JobNotFound, JobService
+from domaincheck.application.jobs import JobConflict, JobItemInput, JobNotFound, JobService
+from domaincheck.application.worker_batches import filter_sent_inputs, guard_batch
 from domaincheck.application.quick_reports import QuickReportWorker
 from domaincheck.core.investigation import validate_target
 from domaincheck.core.worker_precheck import ENGINE_VERSION, disposition, valid_recipients
 from domaincheck.infrastructure.cache import business_day
-from domaincheck.infrastructure.db.models import Artifact, CaseSource, Check, EvidenceSet, Job, ReviewCase, Target
+from domaincheck.infrastructure.db.models import Artifact, CaseSource, Check, EvidenceSet, Job, ReviewCase, SenderAccount, Target
 from domaincheck.infrastructure.db.owned import OwnedRepository
 
 
@@ -27,6 +28,7 @@ class WorkerOperation:
     job: Job
     checks: tuple
     items: tuple
+    input_summary: dict | None = None
 
 
 class DomainWorkerService:
@@ -41,9 +43,20 @@ class DomainWorkerService:
     async def create(self, targets: list[str], sender_account_ids: list[UUID] | None = None) -> WorkerOperation:
         if not 1 <= len(targets) <= 100:
             raise ValueError("Enter between 1 and 100 URLs")
-        parsed = list(dict.fromkeys(validate_target(value) for value in targets))
+        await guard_batch(self.session, self.owner, self.now, self.timezone)
+        parsed = [validate_target(value) for value in targets]
+        accounts = list(dict.fromkeys(sender_account_ids or []))
+        if accounts:
+            rows = await OwnedRepository(self.session, SenderAccount, self.owner).list(
+                criteria=(SenderAccount.id.in_(accounts), SenderAccount.enabled.is_(True)), limit=len(accounts))
+            if len(rows) != len(accounts):
+                raise JobConflict('Sender account scope contains an unavailable account')
         checks, inputs = [], []
         day = business_day(self.now, self.timezone)
+        parsed, input_summary = await filter_sent_inputs(self.session, self.owner, day, accounts, parsed)
+        input_summary.update({'business_day': str(day), 'sender_account_ids': [str(value) for value in accounts]})
+        if not parsed:
+            return WorkerOperation(None, (), (), input_summary)
         # Lock in hash order, while preserving operator order in job membership.
         for digest in sorted(hashlib.sha256(url.encode()).hexdigest() for url, _ in parsed):
             await self.session.execute(select(func.pg_advisory_xact_lock(int.from_bytes(
@@ -68,7 +81,8 @@ class DomainWorkerService:
         snapshot = await self.jobs().create_job(job_type="domain_worker_precheck", business_day=day,
                                                timezone=self.timezone, items=inputs,
                                                sender_account_ids=sender_account_ids)
-        return WorkerOperation(snapshot.job, tuple(checks), snapshot.items)
+        snapshot.job.result_metadata = {'input_summary': input_summary, 'workflow_open': bool(accounts)}
+        return WorkerOperation(snapshot.job, tuple(checks), snapshot.items, input_summary)
 
     async def get(self, operation_id: UUID) -> WorkerOperation:
         try:
@@ -83,7 +97,8 @@ class DomainWorkerService:
         by_id = {check.id: check for check in checks}
         if len(by_id) != len(ids):
             raise WorkerNotFound("Domain Worker membership is incomplete")
-        return WorkerOperation(snapshot.job, tuple(by_id[key] for key in ids), snapshot.items)
+        return WorkerOperation(snapshot.job, tuple(by_id[key] for key in ids), snapshot.items,
+                               snapshot.job.result_metadata.get('input_summary'))
 
 
 class DomainPrecheckWorker(QuickReportWorker):

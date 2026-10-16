@@ -70,9 +70,16 @@ async def get_send_job(job_id: UUID, request: Request, response: Response,
 
 
 @router.post('/send-jobs/{job_id}/stop')
+@router.post('/send-jobs/{job_id}/pause')
 async def stop_send_job(job_id: UUID, request: Request, response: Response,
     session: AsyncSession = Depends(get_db_session), actor=Depends(require_permission('domain_worker.stop', csrf=True))):
     return await send_action(session, actor, request, response, 'control', job_id, 'stop')
+
+
+@router.post('/send-jobs/{job_id}/cancel')
+async def cancel_send_job(job_id: UUID, request: Request, response: Response,
+    session: AsyncSession = Depends(get_db_session), actor=Depends(require_permission('domain_worker.stop', csrf=True))):
+    return await send_action(session, actor, request, response, 'control', job_id, 'cancel')
 
 
 @router.post('/send-jobs/{job_id}/resume')
@@ -137,9 +144,43 @@ def serialize(operation):
             "evidence_reason": result.get("evidence_reason"),
             "evidence_failure_code": result.get("evidence_failure_code"),
             "browser_verification_pending": bool(result.get("browser_verification_pending"))})
+    summary = getattr(operation, 'input_summary', None)
+    if operation.job is None:
+        return {'id': None, 'state': 'completed', 'stage': 'all_filtered', 'checks': [],
+            'business_day': summary['business_day'], 'sender_account_ids': summary['sender_account_ids'],
+            'input_summary': summary, 'no_job': True}
     return {"id": operation.job.id, "state": operation.job.state, "stage": operation.job.stage,
             "business_day": operation.job.business_day.isoformat(),
-            "sender_account_ids": getattr(operation.job, 'account_scope', None) or [], "checks": checks}
+            "sender_account_ids": getattr(operation.job, 'account_scope', None) or [], "checks": checks,
+            'input_summary': summary}
+
+
+@router.get('/workspace')
+async def worker_workspace(request: Request, response: Response, session: AsyncSession = Depends(get_db_session),
+    actor=Depends(require_permission('domain_worker.view'))):
+    from domaincheck.application.worker_batches import workspace_state
+    response.headers['Cache-Control'] = 'private, no-store'
+    return await workspace_state(session, actor.user_id, request.app.state.clock.now(), actor.timezone)
+
+
+@router.post('/prechecks/{operation_id}/close')
+async def close_precheck(operation_id: UUID, request: Request, response: Response,
+    session: AsyncSession = Depends(get_db_session), actor=Depends(require_permission('domain_worker.stop', csrf=True))):
+    from domaincheck.application.worker_batches import guard_batch
+    svc = service(session, actor, request)
+    try:
+        state = await guard_batch(session, actor.user_id, svc.now, actor.timezone, allowed_source=operation_id)
+        operation = await svc.get(operation_id)
+        if operation.job.state in {'queued', 'running', 'stopping'} or state['phase'] == 'sending':
+            raise JobConflict('Stop the current processing before closing this batch')
+        operation.job.result_metadata = {**operation.job.result_metadata, 'workflow_open': False}
+        operation.job.version += 1
+    except WorkerNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except JobConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    response.headers['Cache-Control'] = 'private, no-store'
+    return serialize(operation)
 
 
 @router.post("/prechecks", status_code=202)
@@ -155,6 +196,8 @@ async def create_precheck(body: PrecheckCreate, request: Request, response: Resp
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     response.headers["Cache-Control"] = "private, no-store"
+    if operation.job is None:
+        response.status_code = 200
     return serialize(operation)
 
 
@@ -173,9 +216,16 @@ async def get_precheck(operation_id: UUID, request: Request, response: Response,
 async def control(operation_id, action, request, response, session, actor, item_ids=None):
     svc = service(session, actor, request)
     try:
+        if action != 'stop':
+            from domaincheck.application.worker_batches import guard_batch
+            state = await guard_batch(session, actor.user_id, svc.now, actor.timezone, allowed_source=operation_id)
+            if state['phase'] == 'sending':
+                raise JobConflict('Wait until the sending batch finishes before retrying precheck')
         operation = await svc.get(operation_id)
         if action != "stop" and operation.job.business_day != business_day(svc.now, actor.timezone):
             raise JobConflict("Run a new precheck for the current day")
+        if action != 'stop':
+            operation.job.result_metadata = {**operation.job.result_metadata, 'workflow_open': bool(operation.job.account_scope)}
         if action == "stop":
             await svc.jobs().request_stop(operation_id)
         elif action == "resume":

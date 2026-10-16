@@ -35,7 +35,19 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Playwright cloaking còn pending ở web review, không suy ra approval từ HTTP.
   Luồng UI phải theo legacy: chọn account trước nhập URL/precheck, giữ account_scope
   của job và source queue qua F5; không chọn lại theo từng dòng hoặc biến precheck
-  thành wizard draft/preview. Main list chỉ ready có email + evidence; review có page
+  thành wizard draft/preview. UI precheck có metric cards, domain running và bảng
+  ready tăng dần, không đưa pending/cloaking/thiếu ảnh vào bảng ready;
+  chỉ hiện cấu hình khi còn mục cần gửi, sau start chuyển sang progress
+  batch X/Y theo domain JobItem và thông báo kết thúc rõ completed/partial.
+  Countdown dựa next_run_at bền vững, về 0 chờ backend, không tự start từ client.
+  Bảng ready dùng cùng owned send-job query với panel, cập nhật per-account và
+  recipient/channel; chỉ hiển thị domain sent khi đủ mọi delivery/account nguồn.
+  Không suy ra sent từ precheck/single account; missing pending, UNKNOWN giữ riêng.
+  Một bảng xuyên suốt, không render bảng SMTP thứ hai; khi gửi chỉ metrics email,
+  precheck chuyển sang details tổng kết. Account cell chỉ email + trạng thái/counts,
+  không lặp label=email hoặc expander chi tiết. Giữ attempts/lỗi/stage/Message-ID
+  trong backend/API, dùng chung owned query/cache, không xóa ledger theo UI.
+  Chỉ ready có email + evidence được gửi; review có page
   riêng, no-email không vào queue. Evidence Review upload hợp lệ resolve mọi source
   check, giữ account của từng job. Artifact root phải độc lập CWD API/worker; không
   bypass hash khi đường dẫn lưu bị cấu hình lệch.
@@ -60,6 +72,24 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Legacy validate file và web validate owned artifact trước khi gọi pure formatter
   chung. DOM thiếu metadata cũ phải capture lại, không đoán URL hoặc nói đã click.
   UI chỉ hiển thị Đã gửi/Hoàn tất gửi; Sent lưu tự động, chỉ cảnh báo lỗi thực tế.
+  Batch lifecycle phải dùng cùng owner lock cho create precheck/start/resume/retry.
+  FE phục hồi active IDs/history từ workspace API, không để storage/form ghi đè
+  batch đang chạy; lỗi polling giữ progress đã biết và chặn tạo mới. Chờ xác nhận
+  chỉ kết thúc khi send hoặc explicit close, không xóa kết quả. Lọc trước probe
+  theo đủ route/account trong ledger ngày; một SENT không đại diện cả domain.
+  Tái dùng no-email theo owner/day/domain chỉ khi latest terminal Check succeeded,
+  disposition excluded_no_email và không có valid recipients/known ready routes.
+  Giữ reason no_email/count riêng; lỗi/chưa rõ không làm cache no-email, không
+  dùng dữ liệu hôm qua hoặc của owner khác; all-filtered không tạo job.
+  All-filtered không tạo job rỗng. Retry chỉ known failed/unattempted, giữ SENT/
+  UNKNOWN và Message-ID; tái dùng evidence, recipient scope không được đổi ngầm.
+  Job finalize phải merge metadata; recovery dựa lease/intent, không retry mù.
+  Tạm dừng gửi dùng stop checkpoint + control_mode pause, giữ owner lock khi
+  stopped/current-day; resume chỉ pending. Ngừng hẳn dùng cancel, không downgrade
+  bằng pause và chặn resume/retry/start từ cùng source; giữ delivery ledger/history.
+  Cả hai hoàn tất domain in-flight trước dừng, không hủy SMTP giữa chừng.
+  Summary GET phải đọc được pause/cancel; control-mode guard chỉ chặn thao tác
+  start/resume/retry phù hợp, không đặt trong hàm tổng kết read-only.
   Luồng exact preview tương thích có `domain_worker.preview`: chỉ ready/current day/item
   succeeded, server resolve recipients và 1–3 ảnh + manifest, account-owned signature,
   revision/expiry 30 phút. Body chỉ persist trong private immutable artifact, không DB/

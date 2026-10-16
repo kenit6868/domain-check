@@ -1,5 +1,13 @@
 # Vận hành foundation web
 
+Domain Worker nay giữ batch hiện tại từ backend qua F5/nhiều tab. Precheck/chờ xác
+nhận/chờ gửi/đang gửi khóa việc tạo lượt khác cùng user. Kết thúc lượt này chỉ đóng
+chờ xác nhận, không xóa ảnh/ledger/kết quả; lịch sử vẫn xem được. Lọc đã gửi đủ diễn
+ra trước precheck; all-filtered không enqueue. Retry các mục lỗi tái dùng precheck,
+giữ thư thành công và unknown, không đổi recipient scope. Theo dõi Message-ID/mã lỗi/
+số lần thử khi đối soát. Khởi động lại worker/API để dùng logic lock/recovery mới;
+không có schema migration hay cấu hình mới. Không dọn runtime hoặc reset ledger.
+
 Sau SMTP accepted, worker lưu bản sao Sent bằng helper legacy chung; Gmail tự lưu.
 IMAP dùng account owned và endpoint allowlist, timeout 30s; status copy tách khỏi
 SMTP. Nếu Sent lỗi, không retry SMTP của delivery `sent`. Phục hồi chỉ APPEND bản

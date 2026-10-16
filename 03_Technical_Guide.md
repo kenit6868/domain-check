@@ -2,6 +2,18 @@
 
 ## Cấu hình web tách package
 
+Domain Worker lifecycle: GET `/domain-worker/workspace` là nguồn khôi phục batch
+owned đang chạy và lịch sử 50 lượt; mutation dùng chung owner advisory lock, chặn
+create precheck khi precheck/send khác đang chạy hoặc batch mới đang chờ xác nhận.
+POST `/prechecks/{id}/close` kết thúc chờ xác nhận mà không xóa kết quả. Khóa input
+FE là hỗ trợ UX, backend vẫn chặn request đồng thời/tab khác. Khi lease hết hạn,
+chỉ phục hồi theo checkpoint: SMTP intent chưa kết luận → UNKNOWN, không retry mù;
+phần pending/failed có thể tiếp tục hoặc retry, không giữ khóa user vĩnh viễn.
+Trước enqueue precheck, so sánh đủ mọi route/account/người nhận trong ledger ngày;
+all-filtered trả 200/no_job/id=null. Retry gửi giữ sent/unknown và Message-ID, tái
+dùng evidence còn hợp lệ, không chạy lại toàn bộ probe. Metadata job được merge ở
+finalize; không được ghi đè input_summary/workflow_open. Không cần Alembic migration.
+
 Worker draft normal phải dùng shared formatter evidence legacy, không block viết
 riêng rút gọn. Projection capture giữ control label/href, navigation nguồn/đích,
 redirect, page title và aggregate form signals; không giữ raw HTML/giá trị input.
@@ -1204,3 +1216,38 @@ renamed DashboardPage; auth preview used isolated anonymous fixtures with extern
 actions disabled, avoiding logout or Telegram calls during visual verification.
 
 SMTP/IMAP connectivity: public DNS validation uses the operating-system resolver (the same resolver as mail sockets), with a three-second guard deadline. Exact host:port allowlisting and rejection of any non-public result remain required. DNS failures return `dns_failed`, separately from endpoint/address policy rejection; tests authenticate only and never send/read mail.
+
+# UX Domain Worker — 2026-10-16
+
+Sau tạm dừng vẫn đọc được send-summary; 409 yêu cầu resume chỉ áp dụng khi cố tạo
+lượt gửi mới từ source đang pause. Không cần tạo lại precheck để xem tiến độ.
+
+Theo dõi gửi có strip nhỏ chung hàng cho trạng thái batch, thống kê email và thời
+gian chờ; tự wrap theo chiều rộng, không dùng thẻ KPI/counter cỡ lớn trong gửi.
+Các nút điều khiển, cảnh báo và bảng domain giữ nguyên.
+
+Chỉ một bảng theo dõi domain xuyên suốt. Khi gửi, mở Kết quả precheck nếu cần
+đối chiếu; không hiển thị đồng thời cả hai bộ thẻ KPI. Account có email duy nhất,
+badge trạng thái và số gửi/lỗi/chưa rõ gọn, không expander chi tiết. Các nút pause/resume/cancel
+và tiến độ batch nằm ngay phía trên bảng.
+
+Tạm dừng job giữ lượt đang gửi; đợi checkpoint domain hiện tại rồi dùng Tiếp tục
+job để xử lý pending. Ngừng hẳn job kết thúc lượt, không tiếp tục/retry từ job đó;
+không xóa lịch sử hay đánh dấu đã gửi mục chưa chạy. Sau ngừng hẳn có thể precheck
+mới để xử lý phần còn thiếu. Không thay đổi schema/dependency/cấu hình.
+
+Bảng ready đồng thời là bảng theo dõi gửi: từng domain có trạng thái chung và khối
+kết quả theo tài khoản gửi, đếm đã gửi/tổng recipients, lỗi, chưa rõ. Khi chọn hai
+tài khoản, một tài khoản xong không đánh dấu domain hoàn tất. Gửi lại chỉ phần lỗi,
+các trạng thái cập nhật từ backend và được khôi phục khi reload.
+
+Precheck lọc cả no-email đã xác định hôm nay từ DB cùng user/domain, hiển thị lý do
+và số lượng riêng; không tạo job nếu mọi mục là no-email/đã gửi. Không cache lỗi,
+không áp dụng hôm sau và không chặn phần gửi còn thiếu của domain đã có route.
+
+Precheck xem thẻ số liệu lớn, domain đang kiểm tra và bảng domain đủ điều kiện tăng
+dần qua polling. Không hiển thị domain bị loại trong bảng này. Có email còn cần gửi mới
+hiện cấu hình. Sau start xem batch X/Y, domain đã xử lý và thanh tiến độ. Khi nghỉ
+giữa batch xem thời điểm chạy tiếp và đếm ngược HH:MM:SS (về 0 chờ worker);
+completed hiện “Job đã hoàn thành”, lỗi một
+phần giữ thông báo xử lý tiếp/retry. Không thay đổi API, database hay SMTP.

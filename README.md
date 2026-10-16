@@ -40,6 +40,58 @@ Sau cập nhật module legacy, cài lại backend venv và restart worker khi k
 đang chạy. Trang giữ operation theo user qua F5; Dừng hoàn tất URL đang xử lý rồi
 dừng nhận URL tiếp theo, Tiếp tục chỉ nhận phần pending, Thử lại chỉ nhận URL lỗi.
 
+Precheck có thẻ số liệu lớn theo nhóm, thanh tiến độ và domain đang kiểm tra.
+Bảng **Danh sách sẵn sàng gửi** thêm từng URL ngay khi đã có email/bằng chứng hợp lệ,
+tiếp tục cập nhật trong lúc kiểm tra phần còn lại; không hiện các URL bị loại.
+Khi gửi, chính bảng này cập nhật trạng thái domain và kết quả theo từng tài khoản
+gửi (tên/email, số đã gửi/tổng người nhận, lỗi, chưa rõ). Domain chỉ **Đã gửi thành
+công** khi đủ mọi tài khoản và recipient/kênh; một tài khoản xong chưa hoàn tất cả
+domain. Retry/reload giữ trạng thái từ delivery backend, không suy đoán từ precheck.
+Màn hình dùng một bảng duy nhất cho cả precheck và gửi. Khi job gửi đã tạo, các
+thẻ precheck được thu vào **Kết quả precheck**; chỉ giữ nhóm thống kê email, tiến
+độ batch và điều khiển gửi. Mỗi account chỉ hiển thị email một lần, dòng dưới là
+trạng thái/số đã gửi và lỗi/chưa rõ nếu khác 0. Không có expander Chi tiết gửi
+hoặc bảng gửi thứ hai; attempt/error/Message-ID vẫn giữ ở backend để đối soát.
+Theo dõi gửi dùng thanh thông tin gọn: trạng thái batch, số domain đã xử lý,
+thống kê email, countdown và progress cùng hàng khi đủ chỗ, tự xuống hàng trên
+màn hình nhỏ. Countdown vẫn cập nhật mỗi giây theo mốc backend.
+Có domain còn cần gửi mới hiện cấu hình batch; không có thì thông báo rõ.
+Khi bắt đầu gửi, cấu hình được thay bằng tiến độ **Đang chạy batch X/Y**, số domain
+đã xử lý và thanh tiến độ. Chờ giữa batch có đồng hồ **HH:MM:SS** theo mốc backend,
+về 0 chờ worker xác nhận; gửi xong hiện **Job đã hoàn thành**.
+Lượt có lỗi/UNKNOWN hiện thông báo cần xử lý tiếp, không báo hoàn thành thành công.
+Các khối nhập/cấu hình dùng điểm nhấn cyan–blue; hoàn thành xanh lá, cần xử lý vàng.
+
+Mỗi user chỉ có một batch Domain Worker đang precheck/chờ xác nhận/chờ gửi/đang gửi.
+Trong khi gửi có **Tạm dừng job**, **Tiếp tục job** và **Ngừng hẳn job**.
+Tạm dừng hoàn tất domain đang gửi rồi checkpoint, giữ chỗ lượt hiện tại và chỉ gửi
+phần chưa gửi khi tiếp tục. Nếu đang nghỉ giữa batch thì tạm dừng ngay. Ngừng hẳn
+cũng chờ domain hiện tại hoàn tất nhưng kết thúc lượt, không cho resume/retry/start
+lại từ precheck đó; có thể tạo precheck mới để xử lý phần còn thiếu, giữ chống trùng.
+Kết quả từng email và mục chưa gửi luôn giữ lại; trạng thái tạm dừng phục hồi qua F5.
+Tạm dừng/ngừng hẳn không chặn đọc tổng kết gửi: số đã gửi, còn thiếu và job ID
+vẫn tải bình thường; chỉ thao tác tạo/gửi tiếp chịu kiểm tra trạng thái tương ứng.
+Trong thời gian đó, ô nhập, chọn tài khoản và tạo danh sách mới bị khóa; nhiều tab
+cũng chịu cùng khóa backend. Trang đọc `/domain-worker/workspace` để khôi phục batch
+hiện tại theo ID, không dựa riêng vào sessionStorage. Kết quả không biến mất khi nhập
+danh sách khác hoặc lỗi polling; lịch sử 50 lượt gần nhất có nút **Xem kết quả**.
+Nếu precheck xong nhưng không muốn gửi, chọn **Kết thúc lượt này** để mở form mới;
+thao tác giữ nguyên kết quả/ảnh/lịch sử, không gửi và không xóa dữ liệu.
+
+Trước khi tạo job, server chuẩn hóa full URL, loại URL trùng và đối chiếu toàn bộ
+delivery đã biết trong ngày theo owner/domain/account/kênh/người nhận. Chỉ domain
+đã hoàn tất mọi delivery thuộc các tài khoản chọn mới bị loại; thất bại hoặc thiếu
+một kênh/tài khoản vẫn được giữ. UI hiện số đầu vào, còn precheck, trùng, đã gửi và
+chưa rõ; xem từng lý do trong danh sách loại. Nếu tất cả bị loại, trả kết quả trực
+tiếp mà không tạo job rỗng. Không thay quy tắc ngày đã có hoặc xóa lịch sử hôm trước.
+
+Kết quả **không có email** cũng được tái dùng trong ngày theo user + domain từ
+database: A/B đã check không email, C/D đã gửi đủ, nhập lại A/B/C/D/E/F thì loại
+A/B với lý do **Không có email — đã kiểm tra hôm nay**, C/D **Đã gửi thành công**;
+chỉ E/F vào job precheck. Áp dụng cả full URL khác path cùng domain. Không dùng
+kết quả lỗi/chưa rõ hoặc kết quả có recipient mâu thuẫn làm cache không email;
+không bỏ qua các route gửi đã biết còn thiếu/lỗi. Sang ngày mới kiểm tra lại.
+
 Precheck lookup email và HTTP cloaking song song theo từng URL, không dùng cache
 email. Không có email hợp lệ → loại; cloaking/coverage gap → queue cần duyệt;
 domain thường capture Browser Evidence khi flag hiện có được bật, chỉ ảnh hợp lệ
@@ -55,7 +107,7 @@ Review chọn đúng case và upload 1–3 PNG/JPEG, thumbnail hiện ngay; áp 
 inline trong Domain Worker. Cloaking Review web hiện hiển thị queue riêng, chưa có
 approval/send cloaking. Domain thường đủ bằng chứng đã có gửi SMTP batch trên web.
 
-Trong lúc precheck chỉ hiện số đếm đủ điều kiện/cloaking/thiếu ảnh/không email/đã gửi.
+Trong lúc precheck có số đếm riêng và bảng URL đủ điều kiện cập nhật dần.
 Sau khi hoàn tất, **Cấu hình gửi worker** lọc lại delivery trong ngày, cho xem danh sách
 domain còn cần gửi, nhập **Số domain mỗi batch** (mặc định 5), **Nghỉ giữa hai batch
 (phút)** (mặc định 5), xác nhận rồi **Bắt đầu gửi batch**. Không có bước xem draft hoặc
@@ -71,6 +123,17 @@ dừng cần `domain_worker.stop`, thử lại cần `domain_worker.retry`. Khô
 Dừng hoàn tất domain đang gửi rồi giữ domain pending; Tiếp tục giữ thời gian nghỉ/cấu hình
 batch (reset lịch chờ khi explicit resume). Thử lại chỉ xử lý delivery lỗi chắc chắn,
 giữ các thư đã gửi; `unknown` không tự retry. F5 chỉ đọc lại tiến độ.
+
+Kết quả gửi có số lần thử, mã lỗi đã làm sạch, giai đoạn gửi và Message-ID cho từng
+email. **Thử lại các mục lỗi** chỉ xếp lại delivery lỗi chắc chắn/chưa được gửi,
+kể cả phần lỗi nằm cùng domain với một delivery `unknown`; giữ nguyên `sent` và
+`unknown`. Request retry đồng thời được gộp vào job đang chạy. Retry xác minh lại
+ảnh/manifest và tạo lại plan nếu cần bằng dữ liệu precheck hiện có, không tự tra
+cứu/chụp lại toàn batch. Nếu evidence hỏng hoặc recipient đã đổi thì yêu cầu precheck
+mới. Lỗi kết nối trước SMTP DATA chỉ reconnect tối đa một lần; kết quả bất định sau
+DATA không tự retry. Dùng Message-ID đối soát log máy chủ mail, không coi Sent copy
+là bằng chứng người nhận đã nhận. Worker mất lease sẽ được phục hồi về trạng thái
+biết chắc hoặc `unknown`; batch không khóa user vĩnh viễn và pending có thể tiếp tục.
 
 Trạng thái **SMTP đã chấp nhận** nghĩa là máy chủ SMTP nhận thư để chuyển tiếp;
 không xác nhận thư đã vào hộp thư người nhận. Sau checkpoint SMTP thành công, worker

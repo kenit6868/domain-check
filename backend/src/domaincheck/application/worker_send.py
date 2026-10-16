@@ -2,16 +2,16 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from domaincheck.application.deliveries import DeliveryService, DeliveryRecoveryRepository
 from domaincheck.application.domain_worker import DomainWorkerService
 from domaincheck.application.domain_worker_preview import DomainWorkerPreviewService
 from domaincheck.application.jobs import JobConflict, JobItemInput, JobService
+from domaincheck.application.worker_batches import guard_batch
 from domaincheck.application.mail_settings import MailSettingsService
 from domaincheck.application.previews import PreviewService
 from domaincheck.core.mail.connectivity import SmtpConnectionSpec
@@ -130,9 +130,15 @@ class WorkerSendService:
             raise JobConflict('Confirm sending this batch')
         if not 1 <= batch_size <= 100 or not 0 <= interval_seconds <= 86400:
             raise ValueError('Invalid batch configuration')
-        lock = int.from_bytes(hashlib.sha256(f'{self.owner}:domain_worker_send'.encode()).digest()[:8], 'big', signed=True)
-        await self.session.execute(select(func.pg_advisory_xact_lock(lock)))
+        await guard_batch(self.session, self.owner, self.now, self.timezone, allowed_source=source_id)
         operation = await self.source(source_id)
+        previous = await self.session.scalar(select(Job).where(Job.owner_user_id == self.owner,
+            Job.job_type == 'domain_worker_send', Job.result_metadata['source_job_id'].astext == str(source_id))
+            .order_by(Job.created_at.desc(), Job.id.desc()).limit(1))
+        if previous and previous.result_metadata.get('control_mode') == 'cancel':
+            raise JobConflict('This sending job was permanently stopped; create a new precheck to send the remaining items')
+        if previous and previous.state == 'stopped' and previous.result_metadata.get('control_mode') == 'pause':
+            raise JobConflict('Resume the paused sending job')
         active = await self.session.scalar(select(Job).where(Job.owner_user_id == self.owner,
             Job.job_type == 'domain_worker_send', Job.state.in_(['queued', 'running', 'stopping'])).with_for_update())
         if active and active.state == 'queued' and active.business_day != business_day(self.now, active.timezone):
@@ -178,6 +184,7 @@ class WorkerSendService:
         snapshot.job.result_metadata = {'source_job_id': str(source_id), 'batch_size': batch_size,
             'interval_seconds': interval_seconds, 'batch_processed': 0, 'next_run_at': None,
             'actor_authz_version': (await self.session.get(User, self.actor)).authz_version}
+        operation.job.result_metadata = {**operation.job.result_metadata, 'workflow_open': False}
         await self.session.flush()
         return await self.get(snapshot.job.id)
 
@@ -191,10 +198,13 @@ class WorkerSendService:
         delivery_ids = list({UUID(value) for item in snapshot.items for value in item.result_metadata.get('delivery_ids', [])})
         by_id = {row.id: row for row in await self.session.scalars(select(Delivery).where(
             Delivery.owner_user_id == self.owner, Delivery.id.in_(delivery_ids)))}
-        copy_states = {}
+        copy_states, attempts, counts = {}, {}, {}
         for attempt in await self.session.scalars(select(DeliveryAttempt).where(DeliveryAttempt.owner_user_id == self.owner,
-            DeliveryAttempt.delivery_id.in_(delivery_ids), DeliveryAttempt.state == 'sent').order_by(DeliveryAttempt.attempt_number.desc())):
-            copy_states.setdefault(attempt.delivery_id, attempt.sanitized_result.get('sent_copy_status', 'not_recorded'))
+            DeliveryAttempt.delivery_id.in_(delivery_ids)).order_by(DeliveryAttempt.attempt_number.desc())):
+            attempts.setdefault(attempt.delivery_id, attempt)
+            counts[attempt.delivery_id] = counts.get(attempt.delivery_id, 0) + 1
+            if attempt.state == 'sent':
+                copy_states.setdefault(attempt.delivery_id, attempt.sanitized_result.get('sent_copy_status', 'not_recorded'))
         rows = []
         for item in snapshot.items:
             check = checks.get(UUID(item.result_metadata['check_id']))
@@ -203,42 +213,95 @@ class WorkerSendService:
                 'reason_code': item.result_metadata.get('reason_code'),
                 'deliveries': [{'id': str(row.id), 'recipient': row.recipient, 'sender_account_id': str(row.sender_account_id),
                                 'channel': row.channel, 'state': row.state,
-                                'sent_copy_status': copy_states.get(row.id, 'not_recorded')} for row in deliveries]})
+                                'sent_copy_status': copy_states.get(row.id, 'not_recorded'),
+                                'attempt_count': counts.get(row.id, 0), 'message_id': row.message_id,
+                                'last_error_code': (attempts[row.id].sanitized_result.get('reason_code') if row.id in attempts else item.result_metadata.get('reason_code')),
+                                'smtp_stage': attempts[row.id].smtp_stage if row.id in attempts else None} for row in deliveries]})
         return {'id': str(snapshot.job.id), 'state': snapshot.job.state, 'business_day': str(snapshot.job.business_day),
+            'control_mode': snapshot.job.result_metadata.get('control_mode'),
             'batch_size': snapshot.job.result_metadata['batch_size'],
             'interval_seconds': snapshot.job.result_metadata['interval_seconds'],
             'next_run_at': snapshot.job.result_metadata.get('next_run_at'), 'items': rows}
 
     async def control(self, job_id, action):
-        lock = int.from_bytes(hashlib.sha256(f'{self.owner}:domain_worker_send'.encode()).digest()[:8], 'big', signed=True)
-        await self.session.execute(select(func.pg_advisory_xact_lock(lock)))
+        original, tracked = self.store, _TrackedStore(self.store)
+        self.store = tracked
+        try:
+            return await self._control(job_id, action)
+        except Exception:
+            for artifact in tracked.created:
+                original.delete(storage_key=artifact.storage_key)
+            raise
+        finally:
+            self.store = original
+
+    async def _control(self, job_id, action):
+        initial = await self.jobs().get_snapshot(job_id)
+        await guard_batch(self.session, self.owner, self.now, self.timezone,
+                          allowed_source=initial.job.result_metadata.get('source_job_id'))
         snapshot = await self.jobs().get_snapshot(job_id, for_update=True)
+        await self.session.refresh(snapshot.job)
         if snapshot.job.job_type != 'domain_worker_send':
             raise JobConflict('Not a Domain Worker send job')
-        if action == 'stop':
+        if action in {'stop', 'pause', 'cancel'}:
+            if snapshot.job.state == 'completed':
+                return await self.get(job_id)
+            if snapshot.job.result_metadata.get('control_mode') == 'cancel':
+                return await self.get(job_id)
+            mode = 'cancel' if action == 'cancel' else 'pause'
+            snapshot.job.result_metadata = {**snapshot.job.result_metadata, 'control_mode': mode, 'next_run_at': None}
             await self.jobs().request_stop(job_id)
+            if mode == 'cancel' and snapshot.job.state in {'partial', 'failed'}:
+                snapshot.job.state = 'stopped'
+                snapshot.job.version += 1
         else:
+            if snapshot.job.result_metadata.get('control_mode') == 'cancel':
+                raise JobConflict('This sending job was permanently stopped')
             active = await self.session.scalar(select(Job.id).where(Job.owner_user_id == self.owner,
                 Job.job_type == 'domain_worker_send', Job.id != job_id, Job.state.in_(['queued', 'running', 'stopping'])).limit(1))
             if active:
                 raise JobConflict('Stop or finish the current sending batch first')
+            if snapshot.job.state in {'queued', 'running', 'stopping'}:
+                return await self.get(job_id)
             if snapshot.job.business_day != business_day(self.now, snapshot.job.timezone):
                 raise JobConflict('Run a new precheck for today')
             if action == 'resume':
                 await self.jobs().resume(job_id)
             else:
-                if snapshot.job.state in {'queued', 'running', 'stopping'}:
-                    raise JobConflict('Wait until sending stops')
-                failed = [item for item in snapshot.items if item.state == 'failed']
-                for item in failed:
-                    for value in item.result_metadata.get('delivery_ids', []):
-                        row = await self.deliveries().get(UUID(value))
-                        if row.state == 'failed':
-                            await self.deliveries().retry_failed(row.id, expected_version=row.version, now=self.now)
+                failed = []
+                for item in snapshot.items:
+                    if item.state not in {'failed', 'unknown'}:
+                        continue
+                    rows = [await self.deliveries().get(UUID(value)) for value in item.result_metadata.get('delivery_ids', [])]
+                    if not any(row.state in {'failed', 'pending'} for row in rows):
+                        continue
+                    await self._refresh_retry_plan(snapshot.job, item, rows)
+                    item.state = 'failed'  # Only item scheduling; UNKNOWN delivery rows stay immutable.
+                    failed.append(item)
                 await self.jobs().retry_failed(job_id, {item.id for item in failed})
-            snapshot.job.result_metadata = {**snapshot.job.result_metadata, 'next_run_at': None, 'batch_processed': 0,
+            snapshot.job.result_metadata = {**snapshot.job.result_metadata, 'control_mode': None, 'next_run_at': None, 'batch_processed': 0,
                 'actor_authz_version': (await self.session.get(User, self.actor)).authz_version}
         return await self.get(job_id)
+
+    async def _refresh_retry_plan(self, job, item, rows):
+        check_id = UUID(item.result_metadata['check_id'])
+        preview = DomainWorkerPreviewService(self.session, self.store, owner=self.owner, actor=self.actor,
+            timezone=job.timezone, request_id=self.request_id, now=self.now)
+        # No network recheck. Validate existing evidence and refresh only the exact plan.
+        exact = await preview.create(check_id, [UUID(value) for value in job.account_scope], lifetime=timedelta(hours=24))
+        expected = {(str(row.sender_account_id), row.recipient, row.channel, row.draft_identity) for row in rows}
+        actual = {(row['sender_account_id'], row['recipient'], row['channel'], row['draft_identity']) for row in exact['deliveries']}
+        if expected != actual:
+            raise JobConflict('Recipients changed; run a new precheck before sending')
+        plans = PreviewService(self.session, self.store, owner_user_id=self.owner, actor_user_id=self.actor, request_id=self.request_id)
+        await plans.approve(exact['id'], expected_revision=exact['revision'], confirmed=True, now=self.now)
+        check = await OwnedRepository(self.session, Check, self.owner).get(check_id)
+        materialized = await self.deliveries().materialize(preview_id=exact['id'], expected_revision=exact['revision'],
+            workflow='domain_worker', identities=[DeliveryBusinessIdentity(index, daily_identity(check.business_day, check.domain))
+                for index in range(len(exact['deliveries']))], now=self.now)
+        for row in materialized:
+            if row.state == 'failed':
+                await self.deliveries().retry_failed(row.id, expected_version=row.version, now=self.now)
 
 
 class DomainSendWorker:

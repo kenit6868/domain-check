@@ -1,5 +1,31 @@
 # CLAUDE.md
 
+2026-10-16 — Domain Worker batch lifecycle/UX consistency. New worker_batches.py
+uses one PostgreSQL transaction advisory lock per owner for create/start/resume/retry,
+covering precheck and send queues together (other users/features are independent).
+workspace GET restores active source/send IDs, latest 50 owned history rows, and
+conservatively recovers expired leases: accepted checkpoints remain SENT, outstanding
+SMTP intents become UNKNOWN; known unattempted work stays retryable. Queued previous-day
+work closes under the existing day policy, not a new history TTL. Current-day newly
+created prechecks retain workflow_open until send starts or explicit close; awaiting
+confirmation blocks another precheck. Close keeps checks/artifacts/deliveries intact.
+Precheck creation filters normalized duplicate URLs and fully sent domain plans from
+all known current-day normal Check routes plus account-scoped Delivery keys before
+enrichment/capture. Every known route/account must be SENT; partial/missing accounts
+remain eligible and all-uncertain plans are shown for reconciliation. All-filtered
+submissions return 200/id=null/no_job with exclusion counts, create no empty job.
+QuickReportWorker finalization now merges result metadata instead of destroying the
+precheck input_summary/workflow marker. Full paths remain distinct observations; mail
+business dedupe stays domain/account/channel/recipient/day, excluding content IDs.
+Send retry serializes with precheck/start, is idempotent while queued/running, uses
+existing verified evidence and regenerates exact plans under explicit retry consent.
+It verifies recipient scope unchanged, preserves ledger IDs/Message-ID/SENT/UNKNOWN,
+and schedules only failed/known unattempted deliveries even inside an UNKNOWN item.
+Owned DTO exposes attempt counts, last sanitized reason/stage, Message-ID. Frontend
+workspace polling pins active batch over stale storage/URL selection, locks parent
+form immediately on send/retry, keeps cached progress on poll errors, and displays
+history read-only across days. No schema migration, permission or dependency changes.
+
 2026-10-16 — Restore missing legacy DOM evidence narrative in Domain Worker email.
 Two migration omissions were found: core/evidence.capture_manifest stripped
 control/navigation/page-signals, and prepare_deliveries used an abbreviated custom
@@ -1339,3 +1365,56 @@ false mặc định, chỉ delegate sau exact host:port allowlist + DNS public; 
 mail riêng vẫn cần. Legacy full Check Domain worker chưa dùng egress proxy này.
 
 SMTP/IMAP connectivity: public DNS validation uses the operating-system resolver (the same resolver as mail sockets), with a three-second guard deadline. Exact host:port allowlisting and rejection of any non-public result remain required. DNS failures return `dns_failed`, separately from endpoint/address policy rejection; tests authenticate only and never send/read mail.
+
+# Domain Worker UX — 2026-10-16
+
+Sửa 409 send-summary khi pause: control_mode guard chỉ ở WorkerSendService._start,
+không đặt trong summary. GET summary phải đọc được paused/cancelled job cùng source
+và ledger mà không đổi trạng thái. Start paused yêu cầu resume, start cancelled bị
+chặn như trước; không có recovery/gửi SMTP từ thao tác đọc này.
+
+SendBatchPanel sử dụng flex-wrap strip cho batch/progress/email metrics/countdown,
+WorkerMetric và BatchCountdown có compact variant; precheck vẫn dùng metric mặc
+định. Không đổi timer lifecycle, polling, SMTP hay control states. Bỏ dòng lịch
+batch tiếp theo lặp lại; giờ dự kiến nằm trong title countdown.
+
+PrecheckProgress nhận controls node (SendBatchPanel) để render trong cùng vùng,
+một bảng ready/delivery duy nhất. Khi có sendJobId, không mount metric/progress
+precheck, chỉ có details tổng kết nhỏ; panel giữ metrics email/batch/actions,
+không có bảng riêng. Per-account cell gọn 1–2 dòng: email duy nhất và badge/counts,
+không label+email lặp, không expander chi tiết; attempts/error/stage/Message-ID
+vẫn giữ trong API/ledger, không bị xóa vì thay đổi hiển thị.
+Parent đọc cache send-summary bằng observer disabled (không tạo request phụ) để
+nhận ID khi summary tìm được job trước polling workspace, tránh hiển thị hai nhóm.
+
+Send control dùng stop_requested/state stopping→stopped hiện có, thêm JSON
+control_mode pause/cancel (không migration). POST /pause (alias /stop legacy) giữ
+chỗ owner tại workspace phase paused, /resume xóa mode/wait; /cancel kết thúc
+không đảo ngược và server chặn resume/retry/start lại cùng source. In-flight domain
+được hoàn tất bằng cooperative checkpoint; pending items/delivery không đổi sang
+sent/cancelled giả. Cancel mode không được downgrade bởi request pause đồng thời.
+FE hiển thị trạng thái stopped theo mode; phần chưa gửi trong bảng có nhãn riêng.
+
+PrecheckProgress dùng chung React Query key domain-worker-send/owner/jobId với
+SendBatchPanel để cập nhật ngay bảng ready qua start/retry/poll/reload. Match exact
+requested_url rồi sender_account_id/channel/recipient; missing delivery là pending.
+Domain SENT chỉ khi mọi recipient của mọi account_scope đều SENT; UNKNOWN/FAILED
+giữ riêng. Cột account nhóm dọc cố định, không tạo cột động; tên/email từ owned
+accounts, tài khoản không còn trong list hiển thị ID thay vì đoán. KPI sent domain
+cũng dùng điều kiện đủ này; lower delivery details ghi rõ Gửi từ.
+
+`worker_batches.filter_sent_inputs` tái dùng Check no-email trước khi tạo job:
+owner + business_day + domain, latest terminal Check phải succeeded/excluded_no_email
+và không có valid recipients, không có ready route đã biết còn cần gửi. Delivery
+SENT/UNKNOWN guard giữ ưu tiên. input_summary.no_email_count + excluded reason
+no_email; FE default 0 để đọc metadata cũ. Không migration/Redis key/TTL mới.
+
+Precheck dùng WorkerProgress: metric cards, URL đang running và bảng ready tăng dần;
+chỉ succeeded + ready + recipients + evidence_set_id được thêm vào bảng. SendBatchPanel
+chỉ mở configuration khi còn pending delivery và chưa có send job. Khi job đã tạo,
+hiển thị progress thay form; progress X/Y tính theo domain JobItem và batch_size,
+không theo số email. Chỉ queued với next_run_at còn ở tương lai mới là nghỉ giữa
+batch. completed có banner thành công; partial/failed giữ cảnh báo và retry.
+Các màu trạng thái hỗ trợ nhãn chữ/progress native, cả light/dark. BatchCountdown
+lấy next_run_at từ backend, tick 1 giây và cleanup khi unmount; zero chỉ chờ worker,
+không start job hoặc đánh dấu chạy/thành công phía client. Reload tính lại từ deadline.

@@ -25,7 +25,9 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
   draft email tham khảo; CLI `--job-type domain_worker_precheck` hoặc
   `run_domain_worker_precheck.bat`. `application/domain_worker_preview.py` tạo exact
   email preview cho ready theo account/recipient, private immutable artifacts,
-  logo/images/manifest và version/hash bindings. Chưa có web approval/send.
+  logo/images/manifest và version/hash bindings. `application/worker_send.py` chạy
+  SMTP batch normal; `application/worker_batches.py` giữ lifecycle/owner lock,
+  lọc lịch sử trước precheck và workspace recovery/history API. Cloaking chưa send web.
   `application/worker_review.py` và React `ReviewQueuePage.tsx` phục vụ queue owned
   trong ngày; evidence review nhận ảnh thủ công và đưa source checks về ready.
 - `lead_triage.py`, `pages/15_Lead_Triage.py`: tách ghi chú hạ tầng được dán,
@@ -270,6 +272,83 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-10-16 — Thu gọn account cell: chỉ email một lần, badge/sent counts cùng
+  dòng, ẩn zero errors/unknown và bỏ Chi tiết gửi/khung card. Giữ nguyên metadata
+  delivery/API/ledger và trạng thái từng account, không đổi nghiệp vụ SMTP.
+  FE 85/85 với regression label=email không lặp, per-account partial/retry/reload;
+  lint/typecheck/build/compileall đạt, không gửi mail thật.
+
+- 2026-10-16 — Sửa send-summary 409 sau pause: chuyển control-mode guard khỏi
+  summary sang _start. Pause/cancel đọc tổng kết/ledger bình thường, giữ chặn
+  start sai trạng thái. Regression đọc summary không đổi mode/counts và kiểm tra
+  read-only source lỗi thực tế đạt; không gửi mail hoặc sửa runtime/job hiện tại.
+  Backend PostgreSQL cô lập 211 đạt/2 skip; focused pause/cancel summary + chặn
+  start đạt. Legacy 419 giữ baseline 4 failure/7 error; compileall và API health
+  đạt. Không migration/config mới.
+
+- 2026-10-16 — Thu gọn Theo dõi gửi email thành flex-wrap strip chung batch,
+  domain progress, email counters và countdown compact; giảm heading/padding,
+  bỏ lịch batch tiếp theo lặp dòng. Không đổi nghiệp vụ/job/timer lifecycle.
+  FE 85/85, focused 22/22 với countdown compact; lint/typecheck/build/compileall
+  đạt. Không thay backend/database hoặc gửi mail thật.
+
+- 2026-10-16 — Gộp UI precheck/send trong một vùng và một bảng domain; khi gửi
+  thu KPI precheck vào details, chỉ nhóm thống kê email/batch. Chi tiết lỗi, số lần
+  thử và Message-ID nằm trong account cell; bỏ bảng SMTP thứ hai. Observer cache
+  send-summary giúp đồng bộ ID trước workspace polling, không thêm request/API.
+  FE 85/85; regression một table/ẩn KPI precheck khi gửi, per-account retry,
+  details lỗi/Message-ID, pause/reload và lịch sử đạt. lint/typecheck/build/
+  compileall đạt. Không sửa backend/database/SMTP trong thay đổi UI này.
+
+- 2026-10-16 — Gửi batch tách Tạm dừng/Tiếp tục/Ngừng hẳn qua control_mode JSON,
+  reuse cooperative stop checkpoint, pause giữ owner workspace và khôi phục F5;
+  cancel chặn resume/retry/start source đó, giữ ledger/pending/history. /pause alias
+  /stop, /cancel cùng permission stop+CSRF; không schema/config mới, không gửi thật.
+  FE 85/85; backend PostgreSQL cô lập 211 đạt/2 skip, gồm pause/resume/checkpoint
+  in-flight cancel và chặn restart. lint/typecheck/build/compileall đạt; legacy
+  419 giữ baseline 4 failure/7 error. API health 200.
+
+- 2026-10-16 — Bảng ready cập nhật delivery theo job query dùng chung; trạng thái
+  domain + khối kết quả từng account (tên/email, đã gửi/tổng, lỗi/chưa rõ), KPI sent
+  chỉ tăng khi mọi account/recipient/channel SENT. Start/retry/reload giữ nguồn DB;
+  missing delivery không được suy ra sent. Chi tiết delivery có Gửi từ rõ ràng.
+  Không đổi API/database/SMTP. FE 84/84, gồm hai account/hai recipient, partial→retry
+  complete/KPI/reload; lint/typecheck/build/compileall đạt, không gửi mail thật.
+
+- 2026-10-16 — Lọc no-email từ Check DB trước precheck theo owner/ngày/domain;
+  no_email_count/reason riêng, metadata cũ mặc định 0. A/B no-email + C/D sent
+  được loại trước probe, chỉ E/F tạo job. Không cache lỗi/chưa rõ/mâu thuẫn,
+  không bỏ phần route gửi còn thiếu; all-filtered không tạo job, giữ ngày hiện có.
+  FE 83/83, backend PostgreSQL cô lập 209 đạt/2 skip; regression latest terminal
+  theo updated_at, khác owner/ngày/path, all-filtered và chỉ probe E/F đạt.
+  lint/typecheck/build/compileall đạt; legacy 419 giữ baseline 4 failure/7 error.
+  Không migration/config mới hoặc gửi mail thật trong kiểm thử.
+
+- 2026-10-16 — Domain Worker cập nhật bảng ready tăng dần trong precheck, thẻ KPI
+  riêng/cỡ lớn, highlight URL running; gửi có metric email/domain đang gửi và
+  countdown HH:MM:SS từ next_run_at, zero chờ worker xác nhận. Giữ xác nhận gửi,
+  owner lock/ledger; không đổi API/database/SMTP. FE 82/82 và regression incremental
+  polling/countdown/reload/zero; lint/typecheck/build/compileall đạt.
+
+- 2026-10-16 — UX Domain Worker chỉ tổng kết precheck, bỏ bảng/danh sách URL;
+  chỉ cấu hình khi còn mục cần gửi, start chuyển sang theo dõi batch X/Y theo
+  domain JobItem. Banner completed/partial, progress native, màu cyan–blue/xanh
+  lá/vàng có nhãn chữ và dark mode. Không đổi backend/SMTP/database.
+  FE 80/80, lint/typecheck/build và compileall đạt; kiểm thử empty outcome,
+  running batch 1/10 và completed banner, không gửi mail/check URL thật.
+
+- 2026-10-16 — Rà soát batch precheck→SMTP: chung owner lock cho create/start/resume/
+  retry, workspace API phục hồi active IDs/history; chờ xác nhận giữ lượt tới send/
+  explicit close. Form không thay batch đang chạy, lịch sử đọc lại được. Lọc URL
+  chuẩn hóa/trùng/đã gửi đủ mọi route-account trước probe; all-filtered không tạo
+  job. Retry giữ SENT/UNKNOWN/Message-ID, refresh exact plan từ evidence còn hợp lệ,
+  chỉ xử lý failed/unattempted; UI có attempts/lỗi/Message-ID. Finalize merge metadata,
+  recovery theo lease/intent không khóa vĩnh viễn. Không migration/cấu hình mới;
+  giữ policy theo ngày hiện có, không xóa lịch sử/runtime hoặc gửi mail thật để test.
+  FE 78/78; backend PostgreSQL cô lập 207 đạt/2 skip, gồm wheel 3/3;
+  lint/typecheck/build/compileall/pip check đạt. Legacy 419 giữ baseline
+  4 failure/7 error. Reload worker khi không có precheck/send đang chạy.
 
 - 2026-10-16 — Khôi phục đầy đủ narrative Browser Evidence legacy cho email worker:
   projection giữ control/link DOM, navigation nguồn/đích/redirect và form signals
