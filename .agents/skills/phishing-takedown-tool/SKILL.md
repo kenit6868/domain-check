@@ -12,6 +12,62 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
 
 ## Invariant cần giữ
 
+- Canonical compatibility source nằm trong `backend/compat/`; file root chỉ là
+  wrapper giữ runtime legacy. Sửa lõi tại backend/compat và kiểm tra cả legacy
+  unittest lẫn wheel cô lập ngoài repo; không đưa source root trở lại backend build.
+  Logo luôn có default bundled WIN, custom upload thuộc owner; reset quay về default
+  chứ không bỏ logo. Exact SMTP preview phải materialize/bind cả logo mặc định thành
+  owned inline artifact trước fingerprint; không chỉ khóa HTML CID. DW ready preview
+  đã làm việc này mà không sửa UserSettings. Preview normal khóa cả manifest JSON,
+  check version/result hash, manifest hash và exact From/plain/HTML; GET phải revalidate.
+  Mail connectivity status là read-only, không mở socket; chỉ explicit test mới
+  login SMTP/IMAP qua exact endpoint/public DNS policy, không gửi/đọc thư.
+
+- Logo chữ ký web là owned `mail_settings:logo`, tách khỏi evidence/count ảnh.
+  Load phải verify hash/size và kind/owner; HTML dùng CID `logo-{artifact_id}`,
+  ảnh 64×64 trước Regards như legacy, plain body giữ nguyên. Không truyền local
+  path/config.ini vào FE hoặc email, không inject HTML draft chưa escape vào UI.
+  Exact preview/send sau này phải bind inline artifact và profile version hiện có.
+
+- Domain Worker web có precheck và normal SMTP batch: worker `domain_worker_precheck`, schema 4,
+  owned Check/Job và ReviewCase/CaseSource; không ghi runtime legacy. HTTP cloaking
+  và contacts song song, no-email không tạo case; capture thường validated mới ready.
+  Playwright cloaking còn pending ở web review, không suy ra approval từ HTTP.
+  Luồng UI phải theo legacy: chọn account trước nhập URL/precheck, giữ account_scope
+  của job và source queue qua F5; không chọn lại theo từng dòng hoặc biến precheck
+  thành wizard draft/preview. Main list chỉ ready có email + evidence; review có page
+  riêng, no-email không vào queue. Evidence Review upload hợp lệ resolve mọi source
+  check, giữ account của từng job. Artifact root phải độc lập CWD API/worker; không
+  bypass hash khi đường dẫn lưu bị cấu hình lệch.
+  Advisory email dùng pure formatter cũ (Registrar/Registry/Hosting), không webform;
+  không persist body, không coi mẫu này là exact SMTP preview/account approval.
+  Gửi batch normal dùng `domain_worker.start` + CSRF + xác nhận; server build/approve
+  immutable plan nội bộ, không wizard preview. Worker `domain_worker_send`/`all`,
+  mặc định 5 domain/300s, delay next_run_at bền vững, stop hết domain hiện tại.
+  Dedupe owner/ngày/domain/account/channel/recipient; no-email/cloaking/thiếu ảnh
+  không gửi. Precheck bỏ capture nếu normal đã gửi đủ; DB giữ metadata/ledger, bytes
+  lớn ở private artifacts. Sang ngày không dùng batch/ledger cũ cho gửi mới. Intent
+  commit trước SMTP, checkpoint từng thư; disconnect sau DATA thành UNKNOWN, không
+  retry mù; failed retry giữ SENT. SMTP allowlist/TLS/60s, transient pre-DATA retry một lần.
+  Giữ bước Sent của legacy: sau commit SMTP accepted dùng `_imap_save_sent()` lưu
+  cùng MIME qua owned allowlisted IMAP, Gmail server-managed. `sent_copy_status`
+  riêng ở attempt, lỗi copy không retry SMTP. Helper kiểm APPEND OK, timeout/TLS,
+  folder SPECIAL-USE/quoted và tra Message-ID trước APPEND. Phục hồi Sent chỉ dùng
+  approved immutable original payload/hash/Message-ID, không render profile mới.
+  Email evidence phải dùng shared legacy formatter đầy đủ, không tự viết block
+  generic thay thế. Capture projection giữ nhãn/href/control, source/final/navigation/
+  redirects và aggregate form signals đã redact; bỏ raw HTML/field values/path.
+  Legacy validate file và web validate owned artifact trước khi gọi pure formatter
+  chung. DOM thiếu metadata cũ phải capture lại, không đoán URL hoặc nói đã click.
+  UI chỉ hiển thị Đã gửi/Hoàn tất gửi; Sent lưu tự động, chỉ cảnh báo lỗi thực tế.
+  Luồng exact preview tương thích có `domain_worker.preview`: chỉ ready/current day/item
+  succeeded, server resolve recipients và 1–3 ảnh + manifest, account-owned signature,
+  revision/expiry 30 phút. Body chỉ persist trong private immutable artifact, không DB/
+  audit. Chỉ xác nhận start batch mới phê duyệt gửi thường; create preview riêng
+  không phê duyệt gửi. Cloaking approve/send web vẫn chưa triển khai.
+  Dừng hợp tác giữ URL đang chạy đến checkpoint; heartbeat stopping không hủy probe,
+  pending giữ để resume, lease chết thành unknown. Queue terminal không bị reset.
+
 - Quick Report Netcraft dùng ledger owner/provider/ngày/full URL hash và exact
   immutable preview có revision/expiry/profile version. Commit SENDING intent
   trước HTTP; lease hết hạn thành UNKNOWN, không tự retry. Chỉ FAILED được
@@ -25,6 +81,16 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   Quick Report worker là process riêng; startup kiểm tra dependency/legacy import
   trước claim job, giữ heartbeat khi adapter chạy lâu. FE không được mô tả
   pending/queued là đang probe; polling GET không thay thế worker process.
+  Check Domain web chỉ nhận một target/full URL mỗi thao tác; job nội bộ có đúng
+  một item và DTO trả một check. Quick Report và Domain Worker mới nhận nhiều URL.
+  React Check Domain là trang tra cứu và hướng dẫn form báo cáo với nội dung copy;
+  không yêu cầu Browser Evidence để xem/sử dụng form, không tự gửi hoặc submit.
+  Web check vẫn xác định email registrar khi không tạo draft file; guidance chỉ
+  hiện mẫu email khi có recipient hợp lệ và không thuộc registrar chỉ nhận webform;
+  loại địa chỉ WHOIS privacy, giữ biến thể email theo domain + UTC day từ legacy.
+  Registrar chỉ nhận webform vẫn dùng biến thể webform riêng trong bộ nhớ.
+  Registry guidance phải dùng `registry_contact` của kết quả check; webform và
+  email dùng formatter riêng, cùng có hai kênh thì hiện hai draft khác nhau.
 
 - Trong web multiuser, mọi target/check/job/case/preview/delivery/evidence/cache
   phải scope bằng `owner_user_id` lấy từ session server-side; `actor_user_id` và
@@ -68,6 +134,16 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   dùng filename/path client. Validate toàn batch ảnh (decode, MIME/signature, byte,
   dimension, hash) trước commit; file immutable và download phải kiểm lại owner,
   permission feature cùng size/SHA-256. Không phục vụ artifact bằng static route.
+  Browser Evidence web capture chạy trong process/job riêng, staging tạm rồi mới ghi
+  evidence set owned; terminal/manifest lỗi không tạo evidence. Capture mặc định
+  tắt; upload thủ công độc lập. Theo yêu cầu hiện hành, capture web dùng trực tiếp
+  `capture_normal_report_evidence()` với HTTP/DNS mặc định, DOM rồi passive fallback;
+  không thêm DNS resolver/pool, http_probe hoặc network_guard riêng ở adapter/worker.
+  Browser proxy chỉ truyền khi cấu hình explicit; adapter chỉ chuyển ảnh/manifest
+  hợp lệ thành owned artifact. Network isolation thuộc deploy worker. Khi sửa
+  lỗi capture runtime phải kiểm đúng URL đã báo lỗi nếu đã được operator yêu cầu,
+  không chỉ dựa vào smoke fixture để khẳng định luồng thực tế đã hoạt động.
+  Mail connectivity test cần flag riêng, exact host:port allowlist và firewall.
 - Telegram web login dùng OIDC Authorization Code + PKCE, state/nonce one-time và
   app session opaque HttpOnly. User mới pending; không cấp admin theo username hay
   người login đầu tiên. FE chỉ dùng permission cho UX, backend vẫn enforce action.
@@ -77,10 +153,11 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   trả configured/issuer/redirect URI, không client ID/secret/raw provider error.
 - Bootstrap admin chỉ bằng thao tác local explicit theo issuer + OIDC subject ổn
   định. Thay status/role phải revoke session qua `authz_version`, ghi audit allowlist
-  và dùng transaction khóa invariant admin hoạt động cuối cùng. Role `admin` luôn
-  có toàn bộ permission catalog, không sửa qua API và không bỏ qua owner isolation.
-  Role `user` mới seed toàn permission trừ `users.*`/`roles.*`; admin được sửa permission nhưng
-  không sửa identity/xóa system role. Sync RBAC thường giữ nguyên lựa chọn permission user;
+  và dùng transaction khóa invariant admin hoạt động cuối cùng. Theo yêu cầu hiện hành,
+  role `admin` sửa được permission/tên/mô tả qua UI/API như user; seed full chỉ khi tạo
+  lần đầu. Role `user` mới seed toàn permission trừ `users.*`/`roles.*`; khóa role giữ
+  nguyên và không xóa system role. Sync RBAC giữ quyền/tên/mô tả đã chọn cho cả hai;
+  role save tự upsert code đã đăng ký nhưng thiếu trong DB trước khi thay bindings.
   `--reset-user-permissions` thay bằng bộ mặc định và revoke phiên thành viên.
   Actor chỉ có quyền gán role (kể cả `user`) không được cấp permission vượt
   effective permission nếu thiếu quyền quản trị role đầy đủ.
@@ -451,6 +528,12 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
   có ảnh.
 
 ## Tài liệu và kiểm tra
+
+- Khi sửa module legacy được backend đóng gói bằng Hatch force-include, cài lại
+  package trong backend venv trước khi kiểm tra API đang chạy; editable install
+  vẫn có bản sao site-packages. Reload process sau khi cài, không restart worker
+  đang có job. Chạy regression `test_compatibility_packaging` ngoài repo cwd để
+  bắt formatter cũ; tải lại guidance từ check đã lưu, không probe lại URL.
 
 - Đọc `AGENTS.md` trước; chỉ mở `CLAUDE.md` khi cần invariant/hành vi cũ,
   `README.md` khi thay đổi cách dùng và playbook khi thay đổi quy trình.

@@ -81,15 +81,21 @@ describe('admin pages', () => {
     restore()
   })
 
-  it('allows editing user permissions while keeping the full admin role locked', async () => {
+  it('allows editing admin permissions including newly registered permission codes', async () => {
+    let updated: unknown
     const restore = installApiMock((config) => {
       const url = config.url ?? ''
+      if (url.endsWith('/roles/r-admin') && config.method === 'patch') {
+        updated = JSON.parse(String(config.data))
+        return { id: 'r-admin' }
+      }
       if (url.endsWith('/me')) return {
         id: 'u1', display_name: 'Administrator', telegram_username: 'admin', status: 'active',
         timezone: 'Asia/Bangkok', permissions: ['roles.view', 'roles.manage'],
       }
       if (url.endsWith('/permissions')) return [
         { code: 'quick_report.view', description: 'View Quick Report', safe_for_default_user: true },
+        { code: 'domain_worker.preview', description: 'Create exact email previews', safe_for_default_user: true },
       ]
       if (url.endsWith('/roles')) return [
         { id: 'r-admin', key: 'admin', name: 'Administrator', description: 'Full application permissions', system: true, permissions: ['quick_report.view'], version: 1 },
@@ -100,11 +106,14 @@ describe('admin pages', () => {
     renderAdmin('/admin/roles')
     const editButtons = await screen.findAllByRole('button', { name: 'Sửa quyền' })
     const [adminEdit, userEdit] = editButtons
-    expect(adminEdit).toBeDisabled()
+    expect(adminEdit).toBeEnabled()
     expect(userEdit).toBeEnabled()
-    await userEvent.click(userEdit as HTMLElement)
-    expect(await screen.findByText(/Mọi tài khoản được kích hoạt/)).toBeInTheDocument()
-    expect(screen.getByRole('checkbox', { name: /quick_report\.view/ })).not.toBeChecked()
+    await userEvent.click(adminEdit as HTMLElement)
+    expect(screen.getByRole('checkbox', { name: /quick_report\.view/ })).toBeChecked()
+    expect(screen.getByLabelText('Tên role')).toBeEnabled()
+    await userEvent.click(screen.getByRole('checkbox', { name: /domain_worker\.preview/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Lưu role' }))
+    expect(updated).toMatchObject({ id: 'r-admin', permissions: ['quick_report.view', 'domain_worker.preview'] })
     restore()
   })
 
@@ -138,6 +147,8 @@ describe('admin pages', () => {
       let body: unknown
       if (url.endsWith('/me')) {
         body = { id: 'u1', display_name: 'Tester', telegram_username: null, status: 'active', timezone: 'Asia/Bangkok', permissions: ['mail_accounts.view_own', 'mail_accounts.test_own'] }
+      } else if (url.endsWith('/settings/mail-connectivity')) {
+        body = { enabled: true, accounts: [{ id: 'm1', smtp_allowed: true, imap_allowed: false, proxy_allowed: true }] }
       } else if (url.endsWith('/mail-accounts/m1/test-smtp')) {
         body = { status: 'success', protocol: 'smtp', transport: 'starttls', code: 'authenticated', message: 'Connection and authentication succeeded', elapsed_ms: 12 }
       } else if (url.includes('/mail-accounts')) {

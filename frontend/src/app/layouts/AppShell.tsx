@@ -2,7 +2,7 @@
 import { ThemeToggle } from '../../components/shared/ThemeToggle'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Suspense } from 'react'
-import { ChevronRight, FileSearch, LayoutDashboard, Layers3, LogOut, Mail, ShieldCheck, UserCog, Users, Wifi } from 'lucide-react'
+import { ChevronRight, FileSearch, LayoutDashboard, Layers3, LogOut, Mail, SearchCheck, ShieldCheck, UserCog, Users, Wifi } from 'lucide-react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
 
 import { logoutCurrentUser } from '../../features/auth/api/authApi'
@@ -31,18 +31,18 @@ export function AppShell() {
   const permissions = me.data.permissions
   return (
     <div className="app-surface min-h-screen">
-      <aside className="sidebar-panel fixed inset-y-0 left-0 z-20 hidden w-72 p-5 lg:block">
-        <div className="shell-brand flex items-center gap-3 px-2 pb-6 pt-2"><span className="brand-mark"><ShieldCheck size={21} /></span><div><strong className="block text-sm">Domain Check Tool</strong><span className="font-mono text-[10px] uppercase tracking-[0.2em] workspace-kicker">Operator Console</span></div></div>
+      <aside className="sidebar-panel fixed inset-y-0 left-0 z-20 hidden w-60 p-3 lg:block">
+        <div className="shell-brand flex items-center gap-3 px-2 pb-3 pt-1"><span className="brand-mark"><ShieldCheck size={21} /></span><div><strong className="block text-sm">Domain Check Tool</strong><span className="font-mono text-[10px] uppercase tracking-[0.2em] workspace-kicker">Operator Console</span></div></div>
         <Navigation permissions={permissions} />
-        <div className="session-panel absolute inset-x-5 bottom-5 rounded-xl p-3"><span className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300"><Wifi size={14} /> Session secured</span><span className="mt-1 block truncate text-[11px] text-slate-500">@{me.data.telegram_username ?? me.data.display_name}</span></div>
+        <div className="session-panel absolute inset-x-3 bottom-3 rounded-xl p-3"><span className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300"><Wifi size={14} /> Session secured</span><span className="mt-1 block truncate text-[11px] text-slate-500">@{me.data.telegram_username ?? me.data.display_name}</span></div>
       </aside>
-      <div className="lg:pl-72">
-        <header className="app-topbar sticky top-0 z-10 flex min-h-18 flex-wrap items-center justify-between gap-3 px-5 py-3 backdrop-blur-xl sm:px-8">
+      <div className="lg:pl-60">
+        <header className="app-topbar sticky top-0 z-10 flex min-h-14 flex-wrap items-center justify-between gap-3 px-3 py-2 backdrop-blur-xl sm:px-4">
           <div className="flex min-w-0 items-center gap-3"><span className="workspace-icon hidden sm:flex"><Layers3 size={18} /></span><div><p className="workspace-title text-sm font-semibold">Khu vực</p><p className="mt-1 text-xs text-slate-500">{me.data.timezone}</p></div></div>
           <div className="flex items-center gap-3"><ThemeToggle /><div className="profile-pill hidden sm:flex"><span className="profile-avatar" aria-hidden="true">{me.data.display_name.trim().slice(0, 1).toUpperCase()}</span><span className="max-w-48 truncate text-xs font-medium">{me.data.display_name}</span></div><Button className="icon-button" aria-label="Đăng xuất" loading={logout.isPending} onClick={() => { logout.mutate() }}><LogOut size={18} /></Button></div>
         </header>
         <div className="mobile-navigation overflow-x-auto px-3 py-2 lg:hidden"><Navigation permissions={permissions} mobile /></div>
-        <main className="workspace-main mx-auto max-w-7xl p-5 sm:p-8"><Suspense fallback={<div className="data-panel p-8" role="status">Đang tải trang…</div>}><Outlet context={{ me: me.data }} /></Suspense></main>
+        <main className="workspace-main mx-auto max-w-[1600px] p-3 sm:p-4"><Suspense fallback={<div className="data-panel p-4" role="status">Đang tải trang…</div>}><Outlet context={{ me: me.data }} /></Suspense></main>
       </div>
     </div>
   )
@@ -51,12 +51,16 @@ export function AppShell() {
 
 function Navigation({ permissions, mobile = false }: { permissions: string[]; mobile?: boolean }) {
   const items = [
+    { permission: 'check_domain.view', to: '/domain-check', icon: <SearchCheck size={18} />, label: 'Check Domain' },
     { permission: 'quick_report.view', to: '/quick-report', icon: <FileSearch size={18} />, label: 'Quick Report' },
+    { permission: 'domain_worker.view', to: '/domain-worker', icon: <Layers3 size={18} />, label: 'Domain Worker' },
+    { permission: 'cloaking_review.view', to: '/cloaking-review', icon: <Layers3 size={18} />, label: 'Cloaking Review' },
+    { permission: 'domain_evidence_review.view', to: '/domain-evidence-review', icon: <Layers3 size={18} />, label: 'Domain Evidence Review' },
     { permission: 'mail_accounts.view_own', to: '/settings/mail', icon: <Mail size={18} />, label: 'Tài khoản gửi mail' },
     { permission: 'users.view', to: '/admin/users', icon: <Users size={18} />, label: 'Người dùng' },
     { permission: 'roles.view', to: '/admin/roles', icon: <UserCog size={18} />, label: 'Role & quyền' },
   ].filter((item) => permissions.includes(item.permission))
-  return <nav className={mobile ? 'flex min-w-max gap-2' : 'mt-6 space-y-1'} aria-label="Điều hướng chính">{!mobile && <p className="mb-3 px-3 font-mono text-[10px] uppercase tracking-[0.2em] nav-heading">Workspace</p>}<NavItem to="/" icon={<LayoutDashboard size={18} />} label="Dashboard" />{items.map((item) => <NavItem key={item.to} {...item} />)}</nav>
+  return <nav className={mobile ? 'flex min-w-max gap-2' : 'mt-3 space-y-1'} aria-label="Điều hướng chính">{!mobile && <p className="mb-3 px-3 font-mono text-[10px] uppercase tracking-[0.2em] nav-heading">Workspace</p>}<NavItem to="/" icon={<LayoutDashboard size={18} />} label="Dashboard" />{items.map((item) => <NavItem key={item.to} {...item} />)}</nav>
 }
 
 function NavItem({ to, icon, label }: { to: string; icon: React.ReactNode; label: string }) {

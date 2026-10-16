@@ -30,6 +30,9 @@ class PreparedDelivery:
     subject: str
     text_body: str
     html_body: str | None = None
+    sender_email: str | None = None
+    sender_name: str = ""
+    sender_label: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,8 +56,12 @@ def validate_prepared_deliveries(deliveries: list[PreparedDelivery]) -> None:
             raise ValueError("Preview channel is invalid")
         if not delivery.draft_identity or len(delivery.draft_identity) > 128:
             raise ValueError("Draft identity must contain 1 to 128 characters")
-        if not delivery.subject.strip() or len(delivery.subject) > 998:
+        if not delivery.subject.strip() or len(delivery.subject) > 998 or any(c in delivery.subject for c in '\r\n'):
             raise ValueError("Preview subject is invalid")
+        if delivery.sender_email is not None and (
+            not _EMAIL.fullmatch(delivery.sender_email) or any(c in delivery.sender_name for c in '\r\n')
+        ):
+            raise ValueError("Preview sender is invalid")
         if not delivery.text_body.strip():
             raise ValueError("Preview text body is required")
         key = (delivery.sender_account_id, recipient, delivery.draft_identity)

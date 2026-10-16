@@ -72,6 +72,7 @@ class PreviewService:
         deliveries: list[PreparedDelivery],
         attachment_artifact_ids: list[UUID] | None = None,
         inline_artifact_ids: list[UUID] | None = None,
+        resource_version: int | None = None,
         lifetime: timedelta = timedelta(minutes=30),
         now: datetime | None = None,
     ) -> ExactPreview:
@@ -82,7 +83,9 @@ class PreviewService:
             raise ValueError("Preview policy version is invalid")
         if not timedelta(minutes=1) <= lifetime <= timedelta(hours=24):
             raise ValueError("Preview lifetime must be between 1 minute and 24 hours")
-        await self._require_owned_resource(resource_type, resource_id)
+        resource = await self._require_owned_resource(resource_type, resource_id)
+        if resource_version is not None and resource.version != resource_version:
+            raise PreviewConflict("Preview resource changed")
         await self._lock_revision_scope(resource_type, resource_id)
 
         account_ids = list(dict.fromkeys(row.sender_account_id for row in deliveries))
@@ -118,10 +121,15 @@ class PreviewService:
                     "subject": row.subject,
                     "text_body": row.text_body,
                     "html_body": row.html_body,
+                    **({"sender_email": row.sender_email, "sender_name": row.sender_name,
+                        "sender_label": row.sender_label} if row.sender_email is not None else {}),
                 }
                 for row in deliveries
             ],
             "artifacts": bindings,
+            **({"resource_version": resource_version} if resource_version is not None else {}),
+            **({"resource_result_sha256": fingerprint_payload(resource.result)}
+               if resource_version is not None and resource_type == "check" else {}),
         }
         payload_bytes = canonical_payload_bytes(payload)
         fingerprint = fingerprint_payload(payload)
@@ -243,6 +251,13 @@ class PreviewService:
             raise PreviewConflict("Preview schema version is unsupported")
         if payload.get("resource") != {"type": plan.resource_type, "id": str(plan.resource_id)}:
             raise PreviewConflict("Preview resource binding is invalid")
+        if "resource_version" in payload:
+            resource = await self._require_owned_resource(plan.resource_type, plan.resource_id)
+            if resource.version != payload["resource_version"]:
+                raise PreviewConflict("Preview resource changed after preview")
+            if ("resource_result_sha256" in payload
+                    and fingerprint_payload(resource.result) != payload["resource_result_sha256"]):
+                raise PreviewConflict("Preview resource result changed after preview")
 
         await self._validate_account_versions(plan, payload, for_update=for_update)
         await self._validate_artifact_bindings(plan, payload)
@@ -354,6 +369,8 @@ class PreviewService:
                     "sha256": artifact.sha256,
                     "evidence_set_id": str(artifact.evidence_set_id) if artifact.evidence_set_id else None,
                     "evidence_version": evidence_version,
+                    **({"manifest_sha256": fingerprint_payload(evidence.manifest)}
+                       if disposition == "attachment" else {}),
                 })
         return result
 
@@ -411,6 +428,9 @@ class PreviewService:
                 ).get(UUID(binding["evidence_set_id"]))
                 if evidence is None or evidence.version != binding.get("evidence_version"):
                     raise PreviewConflict("Evidence changed after preview")
+                if ("manifest_sha256" in binding
+                        and fingerprint_payload(evidence.manifest) != binding["manifest_sha256"]):
+                    raise PreviewConflict("Evidence manifest changed after preview")
             try:
                 self._artifact_store.read_verified(
                     storage_key=artifact.storage_key,

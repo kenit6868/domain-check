@@ -15,9 +15,11 @@ from domaincheck.api.artifacts import router as artifacts_router
 from domaincheck.api.cache import router as cache_router
 from domaincheck.api.mail_settings import router as mail_settings_router
 from domaincheck.api.quick_reports import router as quick_reports_router
+from domaincheck.api.domain_checks import router as domain_checks_router
+from domaincheck.api.domain_worker import router as domain_worker_router
 from domaincheck.api.form_tasks import router as form_tasks_router
 from domaincheck.application.context import SystemClock
-from domaincheck.core.mail import StandardMailConnectionTester
+from domaincheck.core.mail import AllowlistedMailConnectionTester, StandardMailConnectionTester
 from domaincheck.infrastructure.auth.oidc import RedisOIDCStateStore, TelegramOIDCClient
 from domaincheck.infrastructure.artifacts import FilesystemArtifactStore
 from domaincheck.infrastructure.cache import ScopedRedisCache
@@ -68,7 +70,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.oidc = None
     app.state.secret_envelope = None
-    app.state.mail_connection_tester = StandardMailConnectionTester()
+    app.state.mail_connection_tester = AllowlistedMailConnectionTester(
+        StandardMailConnectionTester(), settings.mail_egress_endpoints)
     if settings.secret_master_key:
         app.state.secret_envelope = SecretEnvelope.from_base64_keys(
             {settings.secret_key_version: settings.secret_master_key.get_secret_value()},
@@ -124,6 +127,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(cache_router, prefix=settings.api_prefix)
     app.include_router(mail_settings_router, prefix=settings.api_prefix)
     app.include_router(quick_reports_router, prefix=settings.api_prefix)
+    app.include_router(domain_checks_router, prefix=settings.api_prefix)
+    app.include_router(domain_worker_router, prefix=settings.api_prefix)
     app.include_router(form_tasks_router, prefix=settings.api_prefix)
     return app
 

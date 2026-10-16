@@ -38,6 +38,7 @@ PERMISSION_CATALOG = (
     }),
     *_feature("domain_worker", {
         "view": ("View Domain Worker", True), "precheck": ("Run Domain Worker precheck", True),
+        "preview": ("Create exact Domain Worker email previews", True),
         "start": ("Start Domain Worker sending", False), "stop": ("Stop own Domain Worker job", False),
         "retry": ("Retry missing Domain Worker deliveries", False),
         "clear_cache": ("Clear own Domain Worker cache", True),

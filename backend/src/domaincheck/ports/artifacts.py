@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, Sequence
 from uuid import UUID
 
@@ -42,6 +43,9 @@ class StoredPrivateBlob:
 
 
 class ArtifactStore(Protocol):
+    @property
+    def root(self) -> Path: ...
+
     def store_evidence_images(
         self,
         *,
@@ -58,6 +62,10 @@ class ArtifactStore(Protocol):
         owner_user_id: UUID,
         preview_id: UUID,
         data: bytes,
+    ) -> StoredPrivateBlob: ...
+
+    def store_evidence_manifest(
+        self, *, owner_user_id: UUID, evidence_set_id: UUID, data: bytes,
     ) -> StoredPrivateBlob: ...
 
     def read_verified(

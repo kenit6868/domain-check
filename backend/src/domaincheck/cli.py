@@ -62,9 +62,8 @@ async def bootstrap_admin(subject: str | None) -> None:
             user.version += 1
             if await session.get(UserRole, (user.id, admin_role.id)) is None:
                 session.add(UserRole(user_id=user.id, role_id=admin_role.id, assigned_by_user_id=user.id))
-            # A bootstrap administrator already receives the entire catalog via
-            # the admin role; remove the default user role if an earlier version
-            # assigned both roles.
+            # Bootstrap assigns only admin, whose current permission matrix is
+            # operator editable. Remove an earlier default user assignment.
             default_assignment = await session.get(UserRole, (user.id, user_role.id))
             if default_assignment is not None:
                 await session.delete(default_assignment)

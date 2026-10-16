@@ -1,5 +1,68 @@
 # Vận hành foundation web
 
+Sau SMTP accepted, worker lưu bản sao Sent bằng helper legacy chung; Gmail tự lưu.
+IMAP dùng account owned và endpoint allowlist, timeout 30s; status copy tách khỏi
+SMTP. Nếu Sent lỗi, không retry SMTP của delivery `sent`. Phục hồi chỉ APPEND bản
+sao từ immutable original plan sau khi tra Message-ID trong Sent, không gửi report
+lại hoặc sửa sổ gửi thành chưa gửi. Không quét Inbox/body khác để phục hồi Sent.
+
+Domain Worker normal batch send: sau precheck hoàn tất, chọn domain/batch và phút
+nghỉ, xác nhận rồi Bắt đầu gửi batch. Worker `all` hoặc `domain_worker_send` phải chạy
+thường trực; `domain_worker_precheck` chỉ kiểm tra. Endpoint SMTP phải thuộc
+`DOMAINCHECK_MAIL_EGRESS_ENDPOINTS`; secret key giải mã tài khoản phải có ở worker.
+Không cần bật cờ connectivity-test để gửi: đó là cờ cho nút kiểm tra SMTP/IMAP riêng.
+Stop hoàn tất domain hiện tại, resume pending, retry chỉ failed. Unknown giữ để
+đối soát, không tự retry. Checkpoint/ledger DB tồn tại qua restart/Redis loss.
+Nghỉ batch lưu next_run_at; không sleep worker. Ngày mới phải precheck mới; batch
+hôm qua không được gửi tiếp. Dedup ngày/domain/account/kênh/email nhận, không phải
+bỏ email nhà cung cấp cho mọi domain. Không dọn DB/runtime/audit chỉ vì sang ngày.
+
+Domain Worker web chọn sender accounts trước precheck, giữ scope trong Job và queue
+sources. Main list chỉ nhận ready; mở `/cloaking-review` hoặc `/domain-evidence-review`
+cho nhóm cần xử lý riêng. Evidence Review upload 1–3 ảnh đưa các check nguồn về ready,
+không gửi mail; cloaking queue chưa có approve/send web. Precheck không có draft/preview
+từng dòng. Lượt cũ không có scope phải chọn account và precheck mới.
+`DOMAINCHECK_ARTIFACT_ROOT` tương đối được anchor tại root workspace/package, không
+phải CWD process. API/worker cần cùng path/volume. Khi phục hồi artifact lệch thư mục,
+chỉ copy đúng object key và bytes khớp size/SHA-256; không reset/bỏ integrity guard.
+
+Worker chỉ mở một lần, giữ polling để nhận các job tiếp theo; `.bat` không phải
+thao tác theo từng job. Deploy dùng API và worker service riêng cùng backend
+package, restart policy và private artifact volume chung. Compose hiện chỉ có
+DB/Redis, chưa deploy đầy đủ; xem `docs/deployment-topology.md`.
+
+Worker Browser Evidence cần Playwright trong đúng backend venv (đã khai báo trong
+pyproject) và Chromium: `.\backend\.venv\Scripts\python.exe -m playwright install chromium`.
+Khi capture bật, startup kiểm tra launch browser trắng trước khi claim, không mở URL.
+Chẩn đoán capture chỉ lưu mã whitelist, không lưu raw exception/credential/path.
+Nếu gặp thiếu runtime, cập nhật package/Chromium, restart worker khi idle và precheck
+lại URL lỗi; kết quả cũ vẫn được giữ để audit.
+Capture web dùng trực tiếp hàm chung legacy `capture_normal_report_evidence()`:
+HTTP/DNS mặc định, DOM destination rồi passive fallback. Không thêm resolver pool,
+http_probe hoặc network_guard riêng. Adapter chỉ validate output và lưu artifact.
+Logo mặc định WIN được đóng gói trong backend; nút áp dụng ở cấu hình mail tạo
+artifact thuộc owner, không đọc config.ini, không truyền local path vào draft.
+
+DW-01: `/domain-worker` precheck owned tối đa 100 full URL; gửi thường đã có batch riêng.
+Chạy `run_domain_worker_precheck.bat` từ root hoặc CLI với
+`--job-type domain_worker_precheck`; worker `all` phiên bản mới cũng nhận loại này.
+Không restart worker đang chạy job; cần cài lại backend venv khi cập nhật helper
+legacy. F5 chỉ GET job cũ, không enqueue lại. Dừng là cooperative, pending được giữ
+để resume; chỉ failed được retry, unknown không tự chạy lại.
+HTTP cloaking/lookup chạy song song; không email bị loại, cloaking còn chờ review
+và passive browser verification. Capture thường dùng flag hiện có và hàm legacy chung;
+chỉ artifact validated mới ready, nếu tắt/lỗi thì evidence_review. Không bật flag
+chỉ để kiểm thử. Không hiện draft/preview riêng ở precheck. Queue thiếu ảnh nhận
+upload, trở về ready rồi gửi trong batch; cloaking queue chưa approve/send web.
+
+Khi sửa module compatibility ở root (đặc biệt formatter trong `phishing_toolkit.py`),
+cài lại backend bằng `.\backend\.venv\Scripts\python.exe -m pip install --no-deps -e ./backend`
+rồi restart API/worker khi không có job đang chạy. Hatch force-include sao chép
+module vào site-packages cả trong editable install; reload mã `src` không tự cập
+nhật bản sao đó. Với lỗi report-guidance, chỉ tải lại mẫu từ kết quả đã lưu.
+Kiểm tra `python -m unittest tests.test_compatibility_packaging -v` bằng Python
+backend từ thư mục `backend` để phát hiện formatter bị cũ.
+
 ## Thành phần hiện có
 
 - FastAPI package tại `backend/`, health endpoint và auth primitives.
@@ -15,6 +78,45 @@ Quick Report có worker process thật trong package backend. Sau khi API và da
 `domaincheck-worker --poll-seconds 2` polling liên tục. Worker gọi network investigation;
 trong test chỉ dùng fake adapter. Không chạy process này với target thật trước NET-01/
 egress policy và phê duyệt vận hành.
+
+CD-01 nhận đúng một target/full URL và trả một check; job nội bộ có một item.
+React `/domain-check` giữ ID operation theo user trong sessionStorage để tải lại
+trạng thái, không tự chạy check mới. Evidence upload/capture dùng endpoint owned;
+capture cần flag và worker riêng nhưng không có trên trang React Check Domain.
+Trang này hiển thị form mẫu và nội dung để copy từ endpoint report-guidance;
+registrar có mẫu email ngẫu nhiên ổn định theo domain + ngày nếu tìm được địa chỉ
+nhận hợp lệ và registrar không thuộc nhóm chỉ nhận webform. Nhóm chỉ nhận webform
+dùng mẫu webform riêng. Thông số check hiện
+trực tiếp, mẫu dài có thể mở để copy; form chia bốn nhóm browser/CDN/registrar/
+registry. Không bắt buộc ảnh, không submit form hoặc gửi mail.
+Registry có webform và email thì hiện hai mẫu khác nhau theo contact đã check.
+CD-01 dùng cùng process worker với loại job `check_domain` (mặc định worker xử lý
+cả hai loại; `--job-type quick_report|check_domain` để giới hạn). API tạo job trả
+202, GET owned trả kết quả đã lọc; worker không dùng Redis cache cho full check.
+Env backend tùy chọn `DOMAINCHECK_VT_API_KEY`, `DOMAINCHECK_GSB_API_KEY`; submit
+VirusTotal cần cờ request explicit và permission riêng. Full check web bỏ ghi
+CSV/draft/evidence vào thư mục legacy. Chỉ kiểm thử bằng adapter mock khi chưa có
+egress policy cho URL nghi vấn; chưa có thao tác gửi web.
+
+EVID-01 bổ sung upload 1–3 ảnh PNG/JPEG trực tiếp vào private artifact store và
+capture Browser Evidence qua job riêng. Capture dùng thư mục staging tạm, chỉ
+chuyển ảnh đã qua manifest/hash validation vào evidence set owned; terminal page
+hoặc capture lỗi không tạo evidence. Mặc định flag
+`DOMAINCHECK_BROWSER_CAPTURE_ENABLED=false`; bật explicit cho worker riêng.
+Adapter dùng HTTP/browser mặc định của hàm legacy, không có DNS guard riêng.
+Direct capture không cần proxy; network isolation thuộc cấu hình deploy worker.
+Worker `--job-type browser_evidence`
+phải chạy ở process riêng, chỉ nhận job capture khi flag bật; worker mặc định
+không claim capture. Playwright Chromium phải có trong môi trường worker.
+Upload thủ công vẫn dùng được khi capture tắt. Không bật flag để thử URL thật
+trong môi trường dev chưa có chính sách egress.
+
+Theo yêu cầu tái sử dụng legacy, capture web đã bỏ override NET-01 DNS/probe/route
+guard trước đây. Có thể đặt `DOMAINCHECK_BROWSER_EGRESS_PROXY_URL` cho browser
+context khi cần; HTTP probe vẫn là mặc định của hàm chung. Mail connectivity test
+được khóa mặc định; để bật, cần firewall egress riêng và
+`DOMAINCHECK_MAIL_EGRESS_ENDPOINTS` exact host:port. Tester từ chối endpoint
+ngoài allowlist, IP không public và proxy mail không allowlisted.
 
 ## Web Form Assistant qua HTTPS
 
@@ -82,6 +184,22 @@ DB integration test chỉ chạy với `DOMAINCHECK_TEST_DATABASE_URL` trỏ t�
 test đã migrate. Không trỏ biến này vào runtime DB. Telegram tests dùng issuer và
 RSA fixture; không gọi live provider. Không chạy Streamlit tự động.
 
+Domain Worker exact preview dùng quyền mới `domain_worker.preview`. Khi cập nhật,
+chạy `domaincheck-admin sync-rbac` bằng backend venv rồi cấp quyền cho role user/custom
+nếu cần; sync giữ nguyên các lựa chọn role hiện có, không dùng reset-user-permissions
+chỉ để thêm quyền này. Reload API/FE theo quy trình deploy; không cần Alembic migration
+mới. Preview chỉ nhận check `ready` trong ngày và item đã checkpoint succeeded. Dữ liệu
+mail exact nằm trong private artifact volume, không trong audit/DB metadata; cần giữ
+volume dùng chung cùng images/logo. GET đọc lại luôn kiểm hash/versions/expiry; preview
+cũ không còn hợp lệ sau revision mới hoặc thay đổi hồ sơ/account/evidence. Không có
+SMTP/IMAP side effect hay approval/send endpoint ở bước này.
+
+Khi dùng `backend/.venv` để chạy uvicorn, mọi lệnh cài dependency và `pip check`
+phải dùng `backend/.venv/Scripts/python.exe`. Sau EVID-01, route multipart cần
+`python-multipart==0.0.32`; cài package backend lại trong venv cũ trước khi
+restart. Kiểm tra `python -c "from domaincheck.main import app"` bằng cùng
+interpreter để phát hiện lỗi import ngay.
+
 ## Cấu hình Telegram OIDC
 
 Copy `backend/.env.example` thành `backend/.env` rồi điền Client ID/Secret lấy từ
@@ -105,10 +223,11 @@ domaincheck-admin sync-rbac
 ```
 
 Lệnh này tạo/cập nhật permission catalog và hai system role `user`, `admin`; không
-kích hoạt user và không tự gán role cho danh tính nào. Role `admin` luôn được đồng
-bộ với toàn bộ permission trong catalog. Role `user` được tạo rỗng và những lần
-sync sau không ghi đè ma trận permission mà admin đã chọn. Đây là deploy step độc
-lập, không chờ tới lúc bootstrap admin mới tạo dữ liệu phân quyền.
+kích hoạt user và không tự gán role cho danh tính nào. Admin seed toàn catalog khi
+tạo lần đầu; user seed các quyền nghiệp vụ. Những lần sync sau giữ quyền, tên và
+mô tả đã chỉnh của cả hai role. Trang Role & quyền cho sửa cả admin; lưu role tự
+materialize code permission mới thiếu trong DB trong cùng transaction. Không cần
+reset role hoặc chạy sync riêng chỉ để lưu quyền mới từ catalog của code.
 
 Không có cơ chế “user đầu tiên là admin” và không dùng Telegram username. Sau khi
 danh tính đích đã login một lần và đang ở trạng thái pending, chạy lệnh cục bộ với

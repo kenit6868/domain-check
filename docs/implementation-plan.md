@@ -1,5 +1,90 @@
 # Kế hoạch triển khai web nhiều người dùng
 
+2026-10-16 — Theo yêu cầu operator, triển khai gửi batch cho normal ready domains:
+daily ledger summary, confirmed start, owned account scope, immutable plan/evidence,
+SMTP intent/checkpoint/UNKNOWN recovery, failed-only retry, cooperative stop/resume,
+persistent batch pacing and local-midnight reset. UI counts during precheck, final
+eligible list and batch settings. Large bytes stay private artifacts, DB stores
+metadata/ledger; Redis is not delivery truth. Worker type domain_worker_send/all.
+Normal sending is enabled independently of the pending cloaking approval/send
+migration; cloaking/evidence-incomplete cannot enter ordinary sending. This explicit
+scope supersedes the earlier release sequencing gate below, not its isolation gates.
+QA: FE 72/72, isolated PostgreSQL backend 195 passed/2 skipped, wheel 3/3;
+lint/typecheck/build/compileall/pip check passed. Browser fixture desktop/mobile
+verified counters, batch configuration, confirmed single POST and F5 restoration.
+Mock SMTP verified per-recipient partial retry, stable Message-ID, uncertain intent
+recovery, day reset and changed profile/evidence rejection. Legacy 415 retains
+baseline 4 failures/7 errors. Idle local workers reloaded; no live SMTP performed.
+
+2026-10-16 — Domain Worker flow correction: account selection trước precheck,
+durable scope xuyên suốt job/case/source; ready-only normal list, no-email excluded,
+dedicated cloaking/evidence routes. Remove per-row draft/exact preview UI (server
+compatibility remains bound to source account scope). Normal evidence manual upload
+validates all images then resolves source checks without account changes. Cloaking
+page currently reads queue only; approve/send/full migration remain pending.
+Artifact integrity root cause was relative storage path depending on process CWD;
+normalize paths and recover exact bytes from alternate known root, no hash bypass.
+QA: FE 70/70; backend isolated PostgreSQL 183 passed/2 skipped; wheel 3/3;
+lint/typecheck/build/compileall/pip check passed. Browser fixture desktop/mobile
+verified account scope, ready-only list and F5 without resubmission. Existing legacy
+415 tests retain baseline 4 failures/7 errors. Idle workers restarted, health 200.
+
+2026-10-16 — Chốt lại capture theo yêu cầu dùng logic legacy: web adapter gọi
+`capture_normal_report_evidence()` bằng mặc định HTTP/DNS, DOM source/destination
+rồi passive fallback. Bỏ override http_probe/network_guard, DNS pool và DNS helper
+capture riêng. Giữ adapter chuyển artifact owned + kiểm manifest/hash; cấu hình
+browser proxy là opt-in. Mốc này thay thế các ghi chú custom DNS/NET capture trước.
+Đã capture đúng URL thành công hai ảnh bằng defaults và reload worker idle. QA:
+FE 72/72; backend PostgreSQL riêng 178 đạt/1 skip, wheel 3/3; typecheck/lint/build/
+compileall/pip check đạt. Legacy 415 giữ baseline 4F/7E.
+
+2026-10-16 — Follow-up NET capture: URL thực tế vẫn lỗi sau khi cài Playwright vì
+dnspython timeout trong khi system DNS Windows hoạt động. Default browser resolver
+dùng getaddrinfo bounded 3 giây/pool 4, kiểm mọi public IPv4/IPv6 trước request;
+private/mixed, timeout và DNS fail vẫn chặn. Capture đúng URL đã thành công hai ảnh
+nguồn–đích; không coi smoke fixture trước đó là xác minh luồng thực tế.
+QA: FE 72/72; backend 181 đạt/1 skip trên PostgreSQL sạch, wheel 3/3; typecheck/
+lint/build/compileall/pip check đạt. Legacy 415 giữ baseline 4F/7E. Hai worker
+idle đã restart, API live healthy và stderr worker rỗng.
+
+2026-10-16 — Sửa vận hành Browser Evidence/RBAC: Playwright là backend dependency,
+startup capture worker kiểm launch Chromium trước claim, lỗi từng URL chỉ persist
+fixed code. Runtime thiếu Playwright đã được cài và smoke DOM 2 ảnh bằng loopback.
+Admin sửa được permission/tên/mô tả như user theo yêu cầu mới; sync không ghi đè
+lựa chọn của cả hai role. Lưu role tự upsert code permission đã đăng ký còn thiếu
+DB, loại lỗi catalog drift. Không tự recheck URL cũ, không gửi SMTP/IMAP/report.
+QA: FE 72/72; backend PostgreSQL sạch 179 đạt/1 skip, wheel packaging 3/3;
+typecheck/lint/build/compileall/pip check đạt. Legacy 415 giữ baseline 4F/7E.
+Chrome fixture xác nhận sửa/lưu quyền admin desktop/mobile; API live healthy,
+hai worker đã restart khi idle và log stderr rỗng.
+
+2026-10-16 — Domain Worker exact preview triển khai sau DW-01: ready-only owned API,
+permission `domain_worker.preview`, account selection, server-side recipient plan,
+shared legacy personalization/quality gate và immutable plain/HTML preview. Bind default
+logo thành owned inline artifact, 1–3 ảnh + JSON manifest, check/result/manifest hash,
+account/profile/evidence versions, revision và expiry 30 phút. React chọn account,
+xem từng delivery, thumbnail/hash và GET restore qua F5. Chưa triển khai approve/send,
+full enrichment hoặc Cloaking/Evidence Review web; không coi DW-02/03 hoàn tất.
+Kiểm thử: frontend 71/71, backend PostgreSQL sạch 174 đạt/2 skip (packaging 3/3),
+typecheck/lint/build/compileall/pip check đạt; legacy 415 giữ baseline 4F/7E.
+Chrome fixture kiểm desktop/mobile 390px và F5, không external side effect.
+
+DW-01 (2026-10-16): triển khai bước đầu Domain Worker web: POST/GET owned batch
+precheck, stop/resume/retry, readiness, read-only advisory draft; durable Check/Job/
+JobItem và ReviewCase/CaseSource hiện có, không migration. React bảng input order,
+GET restore qua F5, trạng thái no-email/cloaking/evidence/ready. CLI có loại job riêng.
+Draft email đối chiếu byte-for-byte với generator legacy sau full-URL normalization
+cho Registrar/Registry/Hosting. Không thay bằng webform hay tự gửi thật.
+Phần còn lại: xác minh/chọn ảnh Playwright cloaking trong web review, uploader
+review thường, full enrichment, approval/delivery ledger/SMTP. Account scope/signature
+override và exact preview cho ready đã được bổ sung ở mốc phía trên. Không coi DW-01
+là hoàn tất migration Domain Worker.
+
+UI density 2026-10-16: mở rộng thiết kế gọn của Quick Report sang AppShell,
+Dashboard, Check Domain, mail và quản trị; giảm header/sidebar/table/form/dialog.
+Check Domain dùng InvestigationDetails thay JSON mặc định; raw/profile giữ trong
+details. Guidance browser trên, CDN/Registrar/Registry dưới. Chỉ đổi presentation.
+
 > Cập nhật: 2026-10-15. Đây là tài liệu điều hành sống. PostgreSQL + Redis đã
 > được chốt; không mở lại lựa chọn database. Mọi external side effect trong quá
 > trình phát triển dùng mock/fixture/dry-run.
@@ -99,8 +184,8 @@ Gates bắt buộc:
    chưa đạt isolation A/B.
 2. Không mở external send nếu PREVIEW-01, DELIVERY-01, authorization negative
    tests và uncertain-attempt recovery chưa đạt.
-3. Không release Domain Worker auto-send nếu cả Cloaking Review và Domain Evidence
-   Review chưa hoạt động với direct-send/partial retry.
+3. Theo yêu cầu operator, cho phép gửi batch domain thường đã ready có evidence;
+   cloaking và thiếu ảnh vẫn bị chặn, không chờ hoàn tất direct-send cloaking web.
 4. Không cutover dữ liệu thật/deploy public/live Telegram/live SMTP/IMAP/provider
    khi chưa có yêu cầu riêng và rehearsal M6 xanh.
 
@@ -131,7 +216,7 @@ chứng trong mục 10.
 | AUTH-02 | Telegram production contract + diagnosable login page | OIDC client, auth API, frontend login | AUTH-01, FE-02 | HTTP Basic token exchange, config status, callback denial/error, no secret exposure | keep login disabled with actionable setup state | done |
 | RBAC-01 | Permission catalog/seeds/enforcement | domain/authz, API dependencies | DB-01, AUTH-01 | view/action separation, default deny | seed rollback | done |
 | RBAC-02 | Chuẩn hóa deploy-time RBAC seed và bootstrap đầu tiên | admin CLI, seed service, setup docs | RBAC-01, AUTH-02 | sync idempotent; roles tồn tại trước admin; bootstrap explicit theo stable subject | rerun sync; revoke bootstrap role assignment transactionally | done |
-| RBAC-03 | Admin toàn quyền; role user do admin cấu hình permission | permission catalog, seed/migration, admin service/API, React role editor | RBAC-02, ADMIN-01 | admin toàn catalog; user mới seed toàn nghiệp vụ trừ users/roles; sync giữ lựa chọn, reset explicit; activation gắn user; bootstrap chỉ admin; đổi role revoke session | reset explicit thay bộ permission user | done |
+| RBAC-03 | Admin/user sửa được permission và label | permission catalog, seed/migration, admin service/API, React role editor | RBAC-02, ADMIN-01 | admin seed full lần đầu; user seed nghiệp vụ trừ users/roles; sync giữ cả hai; save tự sửa catalog drift; activation gắn user; bootstrap chỉ admin; đổi role revoke session | reset explicit thay bộ permission user | done |
 | ADMIN-01 | User/role/session APIs + last-admin transaction | api/users/roles | RBAC-01 | concurrent last-admin, revoke/authz version | protected system roles | done |
 | MAIL-01 | Owned mail/profile/proxy settings API | api/mail, config compatibility | SEC-01, RBAC-01, CTX-01 | masked PATCH, account owner/FK, transport schema | soft-disable account | done |
 | MAIL-02 | SMTP/IMAP connection tests (explicit, mock) | core/mail/application | MAIL-01 | no auto-connect; timeout/TLS semantics | action disabled | done |
@@ -144,9 +229,9 @@ chứng trong mục 10.
 | EXT-01 | HTTPS capability task/device handshake | API form-tasks + extension | AUTH-01, RBAC-01, QR-01 | registration + one-time exchange, expiry/wrong owner/origin/provider/replay; token không vào provider URL | giữ local bridge compatibility; manual link/copy fallback | done |
 | EXT-02 | Eight adapters connected via owned form tasks | extension adapters/popup | EXT-01 | server routing, public contact fields, fill-only coordinator, fixtures | retain legacy local bridge; live markup may change | done |
 | UI-02 | Dark professional application shell and login experience | frontend app/layout/styles/foundation | FE-02, AUTH-02 | forced dark theme, desktop/sidebar/mobile nav, keyboard/390px/1024px, auth states | CSS-only rollback; no business policy in FE | done |
-| CD-01 | Full Check Domain adapter/API/DTO | api/domain_checks, core/investigation | ISO-01, JOB-01 | fixture parity per source; submit-VT permission | legacy `run_check` facade | todo |
-| EVID-01 | capture/upload/evidence DTO and worker isolation | core/evidence/workers | ART-01, CD-01 | SSRF/terminal/hash/full URL/mutation | disable capture | todo |
-| CD-02 | Check Domain React/evidence/drafts/send | frontend check-domain | CD-01, EVID-01, PREVIEW-01, DELIVERY-01 | same artifact single/all send, Wayback explicit | feature flag send | todo |
+| CD-01 | Full Check Domain adapter/API/DTO | api/domain_checks, core/investigation | ISO-01, JOB-01 | fixture parity per source; submit-VT permission | legacy `run_check` facade | done |
+| EVID-01 | capture/upload/evidence DTO and worker isolation | core/evidence/workers | ART-01, CD-01 | SSRF/terminal/hash/full URL/mutation | disable capture | partial: upload/worker done, capture gated pending NET-01 |
+| CD-02 | Check Domain React result/report guidance | frontend check-domain | CD-01 | one target, owned read, legacy pure formatter, no auto-send | no evidence dependency | partial: result and read-only form guidance done |
 | CF-01 | Durable Cookie Dashboard ledger/state machine | cloudflare application/repo | ISO-01, JOB-01, QR-01 | dedupe/order/UNKNOWN/ALREADY_SUBMITTED | stop session worker | todo |
 | CF-02 | RAM-only Cookie handoff + owner/job affinity | cloudflare session worker | CF-01, SEC-01 | restart loses cookie; logs/DB/Redis scan clean | require new session | todo |
 | CF-03 | Cloudflare React precheck/config/table/actions | frontend cloudflare-worker | CF-01, CF-02 | start/stop/resume/retry/session states | route feature flag | todo |
@@ -165,7 +250,7 @@ chứng trong mục 10.
 | LT-01 | Lead Triage v24 owned snapshot/API/shared review | core/leads/application | DW-01, CR-02, ER-01 | target/backend caveats, sent lock, parity | legacy page remains | todo |
 | LT-02 | Lead Triage React | frontend lead-triage | LT-01 | parse explicit/per-row/batch/exact preview | feature flag | todo |
 | NAV-01 | Remove four routes; keep hidden core flags | frontend router/navigation | QR-02..LT-02 | direct routes 404/forbidden; CLI smoke | restore routes only via flag | todo |
-| NET-01 | SSRF/egress/rebinding policy for HTTP/browser/mail | infrastructure/networking | PKG-01, EVID-01 | IPv4/6/private/redirect/DNS rebinding | fail closed policy error | todo |
+| NET-01 | Egress deployment and mail endpoint policy | infrastructure/networking | PKG-01, EVID-01 | mail exact allowlist/public IP; worker isolation | deployment policy | partial: capture uses shared legacy defaults by request; network isolation and full legacy check pending |
 | MIG-01 | Legacy inventory/dry-run/import/quarantine tool | backend migration CLI | DB-01, ART-01, DELIVERY-01 | synthetic idempotency/source precedence | dry-run default | todo |
 | MIG-02 | Rehearsal + rollback preserving delivery truth | docs/migration + tests | MIG-01 | apply twice, rollback, no SENT reset | no real source mutation | todo |
 | DOC-01 | README/CLAUDE/technical/API/operations/AGENTS/skill | docs/root files | each behavior task | docs match tested state | no claims ahead of code | todo |
@@ -499,3 +584,65 @@ callback success to / and callback errors to login. Pending gate and RBAC retain
 New responsive cyan/blue Telegram card with light/dark themes. Router and callback
 regressions cover anonymous deep links, dashboard permissions, pending, network
 outage and safe error codes. No live Telegram login, SMTP or report during tests.
+
+2026-10-16 CD-01: owned POST/GET Check Domain operations preserve full URL;
+durable `check_domain` worker runs shared `run_check` without legacy
+CSV/draft/evidence writes or Redis reuse. DTO whitelists investigation sources;
+VirusTotal submit is explicit with separate permission and backend key.
+Backend 71 passed/59 skipped (isolated PostgreSQL unavailable), focused 7 passed/
+1 skipped; legacy 415 retains 4 failures/7 errors baseline. Compileall and pip
+check passed. No real URL probe, mail, provider submit or Browser Evidence.
+
+2026-10-16 CD-01 single-target correction: POST accepts one `target` string,
+response projects one `check`, and service creates exactly one job item. Quick
+Report and Domain Worker remain multi-URL workflows. No live check or send.
+
+2026-10-16 EVID-01: owned manual upload (1–3 PNG/JPEG), evidence set DTO and
+existing integrity-checked artifact download. Browser capture is a separate
+durable job that validates legacy screenshots/manifest in isolated staging and
+stores only allowlisted metadata plus immutable artifact hashes. Initial host
+A/AAAA addresses are checked for public IPs; redirect/DNS rebinding still require
+NET-01 egress policy, so capture flag remains off. Upload remains available.
+Backend 75 passed/60 skipped (isolated PostgreSQL unavailable), legacy 415 retained 4
+failures/7 errors baseline; compileall/pip check passed. No real URL probe.
+
+2026-10-16 NET-01 app boundary: per-hop HTTP probe with optional proxy,
+Playwright route guard checks every outbound request, public A/AAAA rechecked
+per URL, private IPv4/IPv6 and unsafe ports denied. Capture requires an explicit
+enable flag and stays disabled by default. Direct mode needs network isolation against
+DNS rebinding; an optional proxy must pin destination IP at connect.
+Mail connectivity test is disabled by default; when enabled, exact host:port
+allowlist and public DNS checks apply, with external firewall still required.
+Full legacy Check Domain worker egress and deployed network isolation validation
+remain open. Backend 83 passed/60 skipped; legacy 415 kept 4 failures/7 errors.
+
+2026-10-16 Browser capture direct mode: removed mandatory proxy configuration
+from capture API and dedicated worker; retains public URL checks per HTTP hop and
+Playwright request. Optional proxy remains supported. No live suspicious URL was
+opened. App DNS checks cannot close the connect-time rebinding window.
+
+2026-10-16 CD-02 correction: React `/domain-check` mirrors legacy one-target
+input and per-source result, stores owned operation ID per user for reload, and
+shows read-only report form guidance built from legacy pure formatters. Removed
+capture/upload controls from this page after clarifying that evidence is optional
+and no report send is in scope. Browser capture backend remains a separate optional
+endpoint; it is headless on the server and does not open local Chrome. No live
+target check, capture, SMTP or provider submission. FE 59/59, backend 87 passed/
+60 skipped; typecheck/lint/build/compileall passed. Formatter smoke generated
+seven guidance entries without network access.
+
+2026-10-16 CD-02 registrar/UI correction: separated registrar recipient lookup
+from optional legacy draft file generation so web checks keep recipient metadata.
+Read-only guidance adds an email draft only for a valid registrar recipient,
+including To/Subject, when no registrar-only webform takes priority. The email
+uses the legacy domain + UTC day variant pool; webforms keep their own variant
+pool. React presents results
+directly in smaller type and groups guidance into browser, CDN, Registrar and
+Registry; long draft text expands on demand. No SMTP or provider submission.
+Focused backend guidance 10 passed/1 skipped; real formatter smoke passed;
+legacy full suite remained at 415 tests with the known 4 failures/7 errors.
+
+2026-10-16 CD-02 routing correction: registry report guidance now uses the
+checked `registry_contact`, with separate legacy webform and email formatters.
+Both channels are shown when both contact methods exist; registrar email and
+webform likewise keep their distinct legacy variant pools. No external send.

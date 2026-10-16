@@ -4,7 +4,7 @@ from dataclasses import asdict
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,77 @@ from domaincheck.core.mail import ConnectionTestResult
 
 
 router = APIRouter(tags=["mail settings"])
+
+
+@router.get('/settings/profile/logo')
+async def get_signature_logo(request: Request,
+    actor=Depends(require_permission('mail_accounts.view_own')),
+    session: AsyncSession = Depends(get_db_session)):
+    from domaincheck.application.signature_logo import load_profile_logo
+    from domaincheck.infrastructure.db.models import UserSettings
+    from domaincheck.ports.artifacts import ArtifactIntegrityError
+    try:
+        logo = await load_profile_logo(session, request.app.state.artifact_store, actor.user_id,
+            await session.get(UserSettings, actor.user_id))
+    except (ArtifactIntegrityError, FileNotFoundError) as exc:
+        raise HTTPException(409, 'Signature logo failed integrity validation') from exc
+    return Response(logo.data, media_type=logo.mime_type, headers={'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "sandbox; default-src 'none'"})
+
+
+@router.put('/settings/profile/logo')
+async def upload_signature_logo(request: Request, file: UploadFile = File(...),
+    actor=Depends(require_permission('mail_accounts.manage_own', csrf=True))):
+    from domaincheck.application.signature_logo import save_profile_logo
+    from domaincheck.ports.artifacts import ArtifactValidationError, ImageUpload
+    limit = min(request.app.state.settings.artifact_max_file_bytes, 2 * 1024 * 1024)
+    data = await file.read(limit + 1)
+    if len(data) > limit or file.content_type not in {'image/png', 'image/jpeg'}:
+        raise HTTPException(422, 'Use one PNG/JPEG logo, maximum 2 MB')
+    try:
+        artifact_id = await save_profile_logo(request.app.state.database.session_factory,
+            request.app.state.artifact_store, actor.user_id,
+            ImageUpload('signature-logo.png' if file.content_type == 'image/png' else 'signature-logo.jpg', file.content_type, data),
+            getattr(request.state, 'request_id', 'signature-logo'))
+    except ArtifactValidationError as exc:
+        raise HTTPException(422, 'Logo must be a valid PNG/JPEG image within the image limits') from exc
+    return {'logo_artifact_id': artifact_id}
+
+
+@router.delete('/settings/profile/logo', status_code=204)
+async def reset_signature_logo(request: Request,
+    actor=Depends(require_permission('mail_accounts.manage_own', csrf=True))):
+    from domaincheck.application.signature_logo import reset_profile_logo
+    await reset_profile_logo(request.app.state.database.session_factory, actor.user_id,
+        getattr(request.state, 'request_id', 'signature-logo'))
+    return Response(status_code=204)
+
+
+@router.get('/settings/mail-connectivity')
+async def mail_connectivity_status(request: Request,
+    actor=Depends(require_permission('mail_accounts.view_own')),
+    session: AsyncSession = Depends(get_db_session)):
+    endpoints = {item.strip().casefold() for item in request.app.state.settings.mail_egress_endpoints}
+    accounts = await _service(request, session, actor).list_accounts()
+    return {'enabled': request.app.state.settings.mail_connectivity_enabled, 'accounts': [
+        {'id': account.id,
+         'smtp_allowed': f'{account.smtp_host}:{account.smtp_port}'.casefold() in endpoints,
+         'imap_allowed': f'{account.imap_config.get("host", "")}:{account.imap_config.get("port", 993)}'.casefold() in endpoints,
+         'proxy_allowed': not account.proxy_config.get('host') or f'{account.proxy_config.get("host")}:{account.proxy_config.get("port")}'.casefold() in endpoints}
+        for account in accounts]}
+
+
+@router.post("/settings/profile/logo/default")
+async def apply_default_logo(request: Request,
+    actor: AuthenticatedUser = Depends(require_permission("mail_accounts.manage_own", csrf=True))):
+    from domaincheck.application.signature_logo import import_bundled_logo
+    from domaincheck.ports.artifacts import ArtifactIntegrityError
+    try:
+        artifact_id = await import_bundled_logo(request.app.state.database.session_factory,
+            request.app.state.artifact_store, actor.user_id, getattr(request.state, 'request_id', 'signature-logo'))
+    except (ArtifactIntegrityError, FileNotFoundError) as exc:
+        raise HTTPException(409, "Signature logo is unavailable or failed integrity validation") from exc
+    return {"logo_artifact_id": artifact_id}
 
 
 class ImapInput(BaseModel):
@@ -260,6 +331,8 @@ async def test_smtp_connection(
     actor: AuthenticatedUser = Depends(require_permission("mail_accounts.test_own", csrf=True)),
     session: AsyncSession = Depends(get_db_session),
 ) -> ConnectionTestResponse:
+    if not request.app.state.settings.mail_connectivity_enabled:
+        raise HTTPException(503, "Chức năng kiểm tra kết nối mail chưa được quản trị viên bật trên server.")
     try:
         result = await _service(request, session, actor).test_smtp_connection(
             account_id, request.app.state.mail_connection_tester
@@ -275,6 +348,8 @@ async def test_imap_connection(
     actor: AuthenticatedUser = Depends(require_permission("mail_accounts.test_own", csrf=True)),
     session: AsyncSession = Depends(get_db_session),
 ) -> ConnectionTestResponse:
+    if not request.app.state.settings.mail_connectivity_enabled:
+        raise HTTPException(503, "Chức năng kiểm tra kết nối mail chưa được quản trị viên bật trên server.")
     try:
         result = await _service(request, session, actor).test_imap_connection(
             account_id, request.app.state.mail_connection_tester

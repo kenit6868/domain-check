@@ -881,45 +881,10 @@ def _precheck_report_recipients(domain: str) -> list[dict]:
         except Exception:
             origin_scan = {}
 
-    recipients = []
-    registrar = who.get("registrar") if isinstance(who, dict) else None
-    emails = who.get("emails") if isinstance(who, dict) else None
-    if isinstance(emails, str):
-        emails = [emails]
-    emails = [
-        email for email in (emails or [])
-        if email and not any(private in email.lower() for private in pt.WHOIS_PRIVACY_DOMAINS)
-    ]
-    if not registrar:
-        registrar = rdap.get("registrar")
-    registrar_uses_webform = bool(
-        registrar and any(key in registrar.lower() for key in pt.WEB_FORM_REGISTRARS)
-    )
-    if not registrar_uses_webform:
-        registrar_email = ", ".join(emails) if emails else rdap.get("abuse_email")
-        if not registrar_email and registrar:
-            registrar_email = pt.lookup_registrar_abuse_email(registrar)
-        if registrar_email:
-            recipients.append({"channel": "registrar", "email": registrar_email})
-
-    if registry.get("source") == "static_table" and registry.get("abuse_email"):
-        recipients.append({"channel": "registry", "email": registry["abuse_email"]})
-
     primary_ip = cert.get("ip") if isinstance(cert, dict) else None
     candidate_ips = sorted({ip for ip in origin_scan.values() if ip and ip != primary_ip})
-    if candidate_ips:
-        hosting = pt.get_ip_whois(candidate_ips[0])
-        if not pt.is_cloudflare_proxy_contact(hosting) and hosting.get("abuse_email"):
-            recipients.append({"channel": "hosting", "email": hosting["abuse_email"]})
-
-    unique = []
-    seen = set()
-    for recipient in recipients:
-        key = str(recipient.get("email") or "").strip().lower()
-        if key and key not in seen:
-            seen.add(key)
-            unique.append(recipient)
-    return unique
+    hosting = pt.get_ip_whois(candidate_ips[0]) if candidate_ips else {}
+    return pt.resolve_worker_report_recipients(who, rdap, registry, hosting)
 
 
 def _cloaking_coverage_gap(cloaking: dict) -> bool:

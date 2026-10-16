@@ -5,7 +5,7 @@ import { useState, type PropsWithChildren } from 'react'
 export function AppDialog({ title, children, onClose, busy = false, maxWidth = '640px' }: PropsWithChildren<{ title: string; onClose: () => void; busy?: boolean; maxWidth?: string }>) {
   const [returnFocus] = useState(() => document.activeElement)
   return <Dialog.Root open onOpenChange={(open) => { if (!open && !busy) onClose() }}>
-    <Dialog.Content maxWidth={maxWidth} className="app-dialog" aria-describedby={undefined}
+    <Dialog.Content maxWidth={maxWidth} size="2" className="app-dialog" aria-describedby={undefined}
       onInteractOutside={(event) => { event.preventDefault() }}
       onEscapeKeyDown={(event) => { if (busy) event.preventDefault() }}
       onCloseAutoFocus={(event) => { event.preventDefault(); if (returnFocus instanceof HTMLElement) returnFocus.focus() }}>

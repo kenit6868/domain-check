@@ -4,7 +4,7 @@ import hashlib
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import exists, or_, select, update
+from sqlalchemy import DateTime, cast, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domaincheck.domain.jobs import ITEM_FINAL_STATES, JOB_TERMINAL_STATES, validate_code, validate_result_metadata
@@ -94,6 +94,9 @@ class JobRepository:
         ]
         if job_types:
             conditions.append(Job.job_type.in_(job_types))
+        conditions.append(or_(Job.job_type != 'domain_worker_send',
+            Job.result_metadata['next_run_at'].astext.is_(None),
+            cast(Job.result_metadata['next_run_at'].astext, DateTime(timezone=True)) <= observed))
         job = await self._session.scalar(
             select(Job)
             .where(*conditions)
@@ -119,6 +122,7 @@ class JobRepository:
         expected_version: int,
         lease_seconds: int = 60,
         now: datetime | None = None,
+        allow_stopping: bool = False,
     ) -> Job | None:
         if not worker_token:
             raise ValueError("worker_token is required")
@@ -129,8 +133,8 @@ class JobRepository:
             update(Job)
             .where(
                 Job.id == job_id,
-                Job.state == "running",
-                Job.stop_requested.is_(False),
+                Job.state.in_(("running", "stopping")) if allow_stopping else Job.state == "running",
+                or_(Job.stop_requested.is_(False), Job.state == "stopping") if allow_stopping else Job.stop_requested.is_(False),
                 Job.lease_token == worker_token,
                 Job.version == expected_version,
                 Job.lease_expires_at >= observed,
@@ -363,6 +367,7 @@ class JobRepository:
         *,
         now: datetime | None = None,
         limit: int = 100,
+        job_types: frozenset[str] | None = None,
     ) -> list[Job]:
         """Finish cooperative stops whose worker lease expired.
 
@@ -379,6 +384,7 @@ class JobRepository:
                 Job.state == "stopping",
                 Job.stop_requested.is_(True),
                 or_(Job.lease_expires_at.is_(None), Job.lease_expires_at < observed),
+                Job.job_type.in_(job_types) if job_types else True,
             )
             .order_by(Job.updated_at, Job.id)
             .with_for_update(skip_locked=True)

@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -43,9 +43,22 @@ class Settings(BaseSettings):
     oidc_state_ttl_seconds: int = 300
     form_task_ttl_seconds: int = Field(default=300, ge=60, le=900)
     netcraft_submit_enabled: bool = False
+    vt_api_key: SecretStr | None = None
+    gsb_api_key: SecretStr | None = None
+    browser_capture_enabled: bool = False
+    browser_egress_proxy_url: SecretStr | None = None
+    mail_connectivity_enabled: bool = False
+    mail_egress_endpoints: tuple[str, ...] = ()
     secret_master_key: SecretStr | None = None
     secret_key_version: int = 1
     bootstrap_telegram_subject: str | None = None
+
+    @field_validator("artifact_root", mode="after")
+    @classmethod
+    def stable_artifact_root(cls, value: Path) -> Path:
+        # Relative deployment paths are rooted at the workspace/package parent,
+        # independently of API/worker working directories.
+        return value.expanduser().resolve() if value.is_absolute() else (BACKEND_ROOT.parent / value).resolve()
 
     def validate_for_production(self) -> None:
         missing = []

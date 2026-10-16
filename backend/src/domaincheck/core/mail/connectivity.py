@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import imaplib
+import ipaddress
+from queue import Queue, Empty
+from threading import Thread
 import smtplib
 import socket
 import ssl
@@ -56,6 +59,74 @@ class ConnectionTestResult:
 class MailConnectionTester(Protocol):
     def test_smtp(self, spec: SmtpConnectionSpec) -> ConnectionTestResult: ...
     def test_imap(self, spec: ImapConnectionSpec) -> ConnectionTestResult: ...
+
+
+class AllowlistedMailConnectionTester:
+    """Require an exact public host:port before delegating a live connection test."""
+    def __init__(self, delegate: MailConnectionTester, endpoints: tuple[str, ...]) -> None:
+        self.delegate = delegate
+        self.endpoints = frozenset(item.strip().casefold() for item in endpoints if item.strip())
+
+    def _check(self, host: str, port: int) -> None:
+        from domaincheck.core.networking import EgressDenied, validate_public_host
+        if f"{host.casefold()}:{port}" not in self.endpoints:
+            raise EgressDenied("egress_endpoint_denied")
+        # Use the OS resolver, as SMTP/IMAP sockets do. Independent DNS queries
+        # can fail on Windows/VPN networks even when system resolution works.
+        results = Queue(maxsize=1)
+
+        def resolve():
+            try:
+                results.put(socket.getaddrinfo(host, port, type=socket.SOCK_STREAM))
+            except OSError as exc:
+                results.put(exc)
+
+        Thread(target=resolve, daemon=True).start()
+        try:
+            answer = results.get(timeout=3.0)
+        except Empty:
+            raise EgressDenied("egress_dns_failed") from None
+        if isinstance(answer, OSError):
+            raise EgressDenied("egress_dns_failed") from None
+        addresses = {item[4][0] for item in answer}
+        if not addresses:
+            raise EgressDenied("egress_dns_failed")
+        validate_public_host(host, resolver=lambda _host, kind, **_kw: [
+            value for value in addresses
+            if ipaddress.ip_address(value).version == (4 if kind == "A" else 6)
+        ])
+
+    @staticmethod
+    def _denied(protocol, transport, started, exc):
+        reason = str(exc)
+        if reason == "egress_dns_failed":
+            code, message = "dns_failed", "Không phân giải được DNS của máy chủ mail."
+        elif reason == "egress_endpoint_denied":
+            code, message = "egress_denied", "Máy chủ/cổng chưa được quản trị viên cho phép."
+        else:
+            code, message = "egress_denied", "Máy chủ mail trỏ đến địa chỉ không public."
+        return ConnectionTestResult("failed", protocol, transport, code, message,
+                                    max(0, round((monotonic() - started) * 1000)))
+
+    def test_smtp(self, spec: SmtpConnectionSpec) -> ConnectionTestResult:
+        from domaincheck.core.networking import EgressDenied
+        started = monotonic()
+        try:
+            self._check(spec.host, spec.port)
+            if spec.proxy is not None:
+                self._check(spec.proxy.host, spec.proxy.port)
+        except EgressDenied as exc:
+            return self._denied("smtp", spec.transport, started, exc)
+        return self.delegate.test_smtp(spec)
+
+    def test_imap(self, spec: ImapConnectionSpec) -> ConnectionTestResult:
+        from domaincheck.core.networking import EgressDenied
+        started = monotonic()
+        try:
+            self._check(spec.host, spec.port)
+        except EgressDenied as exc:
+            return self._denied("imap", "implicit_tls", started, exc)
+        return self.delegate.test_imap(spec)
 
 
 class StandardMailConnectionTester:

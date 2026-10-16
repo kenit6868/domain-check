@@ -6,7 +6,7 @@ import unittest
 from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from domaincheck.api.dependencies import require_permission
 from domaincheck.application.admin import AdminConflict, AdminService
@@ -76,7 +76,7 @@ class AdminDatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(audit.metadata_allowlist, {"from": "pending", "to": "active"})
             await transaction.rollback()
 
-    async def test_user_role_permissions_are_editable_but_admin_role_is_catalog_managed(self):
+    async def test_user_and_admin_permissions_and_labels_are_editable(self):
         async with self.database.session_factory() as session:
             transaction = await session.begin()
             actor, admin_role = await self._seed_admin(session, f"role-admin-{uuid4()}")
@@ -101,14 +101,34 @@ class AdminDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 await service.assign_user_roles(
                     target.id, {user_role.id}, frozenset({"users.assign_roles"})
                 )
-            with self.assertRaises(AdminConflict):
-                await service.update_role(
-                    admin_role.id,
-                    name=admin_role.name,
-                    description=admin_role.description,
-                    permission_codes=set(),
-                    actor_permissions=ADMIN_PERMISSION_CODES,
-                )
+            await service.update_role(admin_role.id, name="Custom administrator", description="Selected access",
+                permission_codes={"roles.view", "roles.manage", "domain_worker.preview"},
+                actor_permissions=ADMIN_PERMISSION_CODES)
+            codes = await service.permissions_for_roles([admin_role.id])
+            self.assertEqual(set(codes[admin_role.id]), {"roles.view", "roles.manage", "domain_worker.preview"})
+            await sync_permission_catalog(session)
+            codes = await service.permissions_for_roles([admin_role.id])
+            self.assertEqual(set(codes[admin_role.id]), {"roles.view", "roles.manage", "domain_worker.preview"})
+            self.assertEqual(admin_role.name, "Custom administrator")
+            self.assertEqual(admin_role.description, "Selected access")
+            await transaction.rollback()
+
+    async def test_role_save_materializes_a_new_code_missing_from_database_catalog(self):
+        async with self.database.session_factory() as session:
+            transaction = await session.begin()
+            actor, _ = await self._seed_admin(session, f"catalog-admin-{uuid4()}")
+            permission = await session.scalar(select(Permission).where(Permission.code == 'domain_worker.preview'))
+            await session.execute(delete(RolePermission).where(RolePermission.permission_id == permission.id))
+            await session.delete(permission); await session.flush()
+            role = await session.scalar(select(Role).where(Role.key == 'user'))
+            service = AdminService(session, actor_user_id=actor.id, request_id='catalog-repair')
+            await service.update_role(role.id, name=None, description=None,
+                permission_codes={'domain_worker.preview'}, actor_permissions=ADMIN_PERMISSION_CODES)
+            self.assertEqual((await service.permissions_for_roles([role.id]))[role.id], ['domain_worker.preview'])
+            self.assertIsNotNone(await session.scalar(select(Permission.id).where(Permission.code == 'domain_worker.preview')))
+            with self.assertRaises(ValueError):
+                await service.update_role(role.id, name=None, description=None,
+                    permission_codes={'unregistered.action'}, actor_permissions=ADMIN_PERMISSION_CODES)
             await transaction.rollback()
 
     async def test_last_active_admin_cannot_be_disabled_or_unassigned(self):

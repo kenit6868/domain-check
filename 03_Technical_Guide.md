@@ -2,6 +2,78 @@
 
 ## Cấu hình web tách package
 
+Worker draft normal phải dùng shared formatter evidence legacy, không block viết
+riêng rút gọn. Projection capture giữ control label/href, navigation nguồn/đích,
+redirect, page title và aggregate form signals; không giữ raw HTML/giá trị input.
+Sau kiểm tra owned ảnh/manifest/hash, render khối Observed Phishing Behavior đầy
+đủ cho DOM và mô tả đúng phạm vi passive/manual. Metadata DOM cũ bị thiếu cần
+precheck mới trước gửi, không đoán dữ kiện. UI chỉ Đã gửi/Hoàn tất gửi, IMAP lưu
+Sent tự động như legacy và chỉ báo khi lỗi, không có nhãn triển khai bản sao thường trực.
+
+Domain Worker: `sent` trong ledger nghĩa là SMTP đã chấp nhận thư để chuyển tiếp,
+không phải xác minh inbox. Sau checkpoint này, worker lưu Sent qua hàm chung
+legacy `_imap_save_sent()`, tách `sent_copy_status` trong metadata attempt. Gmail
+server-managed không APPEND. IMAP owned/allowlisted/TLS/timeout 30s; tra Message-ID
+trong đúng Sent (readonly) trước APPEND để tránh lưu trùng. Lỗi Sent không retry
+SMTP. Phục hồi bản sao cũ chỉ dùng approved immutable payload/artifact hashes,
+Message-ID và ngày gửi gốc; không lấy body/profile hiện tại và không SMTP. Bản web
+ban đầu bỏ sót helper Sent, không phải bản cũ không có chức năng này.
+
+Logo mail luôn có mặc định WIN. Cấu hình mail cho upload PNG/JPEG <=2 MB và reset
+về default, không có bước bật logo. Kiểm tra kết nối SMTP/IMAP cần server flag
+`DOMAINCHECK_MAIL_CONNECTIVITY_ENABLED=true` và exact `DOMAINCHECK_MAIL_EGRESS_ENDPOINTS`;
+UI hiện trạng thái/khóa nút trước khi thử. Không gửi thư hay đọc mailbox trong test.
+Backend cài Playwright qua dependency package; browser binary cần cài bằng đúng
+`backend/.venv/Scripts/python.exe -m playwright install chromium`. Capture bật nhưng
+thiếu runtime/browser sẽ dừng startup worker với hướng dẫn cài, trước khi claim job.
+Lỗi từng URL chỉ lưu mã cố định; UI phân biệt thiếu browser, timeout, không tải được
+trang, request bị chặn và artifact không hợp lệ. Sau khi sửa môi trường, precheck lại
+URL bị lỗi để tạo kết quả mới; không tự đổi trạng thái kết quả cũ.
+Browser Evidence web gọi chung `capture_normal_report_evidence()` của bản cũ với
+mặc định HTTP/DNS, DOM destination và passive fallback. Adapter không override
+http_probe/network_guard; chỉ nhận ảnh, kiểm manifest/hash và lưu owned artifact.
+Mục đích, ví dụ bốn biến browser/mail ở `docs/deployment-topology.md`.
+Lõi compatibility web hiện ở `backend/compat`, scripts worker ở backend; root
+wrappers giữ legacy cho tới cutover. Không di chuyển secret/runtime để dọn source.
+
+Worker backend chạy thường trực, không cần mở `.bat` cho từng job; deployment
+dùng service API/worker riêng cùng version và artifact volume chung. Topology và
+phần còn lại trước khi bỏ root compatibility ở `docs/deployment-topology.md`.
+Logo chữ ký áp dụng từ cấu hình mail, lưu owned artifact có hash/version; ảnh
+64×64 nhúng CID trong HTML, không phải Browser Evidence hoặc file attachment chứng cứ.
+
+Domain Worker web: vào `/domain-worker`, chọn tài khoản gửi trước, nhập tối đa 100 domain/full URL rồi
+precheck; chạy worker riêng bằng `run_domain_worker_precheck.bat`. F5 khôi phục
+job đã lưu. Dừng chờ URL hiện tại hoàn tất; resume pending và retry failed là
+thao tác explicit. No-email bị loại, HTTP cloaking/coverage gap vào queue owned
+để review và xác minh browser ở bước sau; domain thường capture theo flag hiện
+có, tắt/lỗi vào evidence_review, ảnh validated mới ready. Khi chạy chỉ hiện số đếm;
+sau precheck mới hiện cấu hình batch và danh sách còn cần gửi đã đối chiếu ledger ngày.
+Gửi thường: `backend/run_worker.bat --job-type domain_worker_send` hoặc worker `all`.
+Mặc định 5 domain/batch, nghỉ 300 giây; API start có permission/CSRF/xác nhận,
+giữ scope account từ precheck. Server render/khóa nội dung, logo và evidence trước
+khi enqueue; không đưa draft/preview từng dòng vào UI. Transaction SMTP intent
+commit trước network, checkpoint từng thư, Message-ID giữ qua retry. UNKNOWN không
+tự retry; dừng hợp tác hoàn tất domain hiện tại, pending giữ để resume. Lịch nghỉ
+lưu Job.result_metadata.next_run_at, worker không sleep chặn các job khác.
+Delivery key giữ parity legacy: owner/day/domain/account/channel/recipient; không dùng
+preview ID hoặc path để vượt dedupe. Hết ngày dừng job cũ, precheck mới không dùng
+ledger/cache hôm qua. DB giữ metadata; body/PNG/JPEG/manifest exact nằm private store.
+SMTP chỉ đến endpoint allowlist/public DNS, timeout 60 giây; chỉ retry một lỗi tạm
+trước send_message, mất kết nối sau DATA thành UNKNOWN. Cloaking vẫn cách ly và
+chưa có approve/send web. Không bật capture hoặc probe URL
+thật chỉ để thử giao diện; kiểm thử bằng fixture và database test riêng.
+
+Tài khoản được giữ trong Job.account_scope và source history của queue; không chọn
+lại ở từng dòng sau precheck. Màn hình chính chỉ nhận ready có email + evidence,
+cloaking và thiếu ảnh đi các trang queue riêng. Domain Evidence Review nhận 1–3 ảnh,
+preview thumbnail ngay và resolve các check nguồn về ready sau validation. Cloaking
+web hiện chỉ đọc queue, chưa có duyệt/gửi. Đã bỏ Xem draft/Preview chính xác khỏi UI
+precheck. API preview tương thích yêu cầu scope trùng với batch, không gửi thật.
+Artifact root tương đối được chuẩn hóa theo root workspace/package cho cả API và
+worker, không theo CWD. Khi lỗi integrity, kiểm thư mục và hash trước khi phục hồi
+file đúng bytes; không bỏ validation. Lượt cũ thiếu account scope cần precheck mới.
+
 FastAPI chỉ đọc `backend/.env`, tạo từ `backend/.env.example`; không đọc `.env`
 ở repository root và không đọc `config.ini` legacy. `compose.yaml` ở root chỉ là
 lớp điều phối PostgreSQL/Redis và truyền `backend/.env` cho container database.
@@ -11,10 +83,10 @@ Frontend chỉ được dùng biến public `VITE_*` trong `frontend/.env` khi c
 Thứ tự khởi tạo web dev/production là Alembic `upgrade head` →
 `domaincheck-admin sync-rbac` → chạy API → Telegram login tạo user `pending` →
 bootstrap admin đầu tiên bằng OIDC subject. Bootstrap chỉ cấp role `admin`, role
-này luôn có toàn bộ permission catalog nhưng không bỏ qua owner isolation. Khi
+này được seed toàn bộ permission khi tạo lần đầu, sau đó sửa được tại UI. Khi
 kích hoạt tài khoản thường, hệ thống gán role `user`; permission của role này do
 admin chỉnh trong trang **Role & quyền**. Seed role mới gán toàn bộ permission
-trừ `users.*` và `roles.*` (51 quyền hiện tại), gồm cả gửi/đọc mail và worker.
+trừ `users.*` và `roles.*`, gồm cả gửi/đọc mail và worker.
 
 ## Giai đoạn chuyển đổi web
 
@@ -45,12 +117,13 @@ Cloudflare vẫn chỉ được giữ RAM trong session worker và chưa có rou
 User mới từ Telegram ở trạng thái `pending`. Quản trị viên bootstrap bằng OIDC
 subject ổn định qua CLI cục bộ, sau đó dùng trang **Người dùng** để kích hoạt/khóa,
 gán role hoặc revoke session; dùng trang **Role & quyền** để cấu hình permission
-cho role `user` và các role tùy biến. Role `admin` được catalog quản lý nên không
-thể giảm/sửa quyền từ UI.
+cho cả role `admin`, `user` và các role tùy biến. Sửa được permission, tên và mô tả;
+khóa role vẫn giữ nguyên. Lưu role tự thêm code permission mới vào database trước
+khi gán, tránh lỗi `Permission catalog is not synchronized`.
 Migration `0003_explicit_role_permissions` xóa một lần quyền `user` do seed cũ
 cấp sẵn. Với DB hiện có, chạy `domaincheck-admin sync-rbac --reset-user-permissions`
 để thay bằng bộ mặc định mới; không cần migration schema. Những lần chạy
-`sync-rbac` thường tiếp theo giữ nguyên lựa chọn này. Đổi quyền role thu hồi phiên của
+`sync-rbac` thường tiếp theo giữ quyền/tên/mô tả của cả admin và user. Đổi quyền role thu hồi phiên của
 mọi thành viên; yêu cầu họ đăng nhập lại sau khi lưu.
 Backend kiểm tra permission và CSRF độc lập với việc FE ẩn nút. Không thể vô hiệu
 hóa hoặc gỡ role của admin hoạt động cuối cùng, kể cả hai request chạy đồng thời.
@@ -1129,3 +1202,5 @@ Frontend login uses current-user query plus health/provider readiness, never sta
 OIDC automatically. No dependency/config/migration changes. Source foundation page
 renamed DashboardPage; auth preview used isolated anonymous fixtures with external
 actions disabled, avoiding logout or Telegram calls during visual verification.
+
+SMTP/IMAP connectivity: public DNS validation uses the operating-system resolver (the same resolver as mail sockets), with a three-second guard deadline. Exact host:port allowlisting and rejection of any non-public result remain required. DNS failures return `dns_failed`, separately from endpoint/address policy rejection; tests authenticate only and never send/read mail.

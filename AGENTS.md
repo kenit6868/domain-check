@@ -8,6 +8,11 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
 
 ## Bản đồ dự án
 
+- `backend/compat/`: source canonical của `phishing_toolkit.py`,
+  `cloaking_detector.py`, `browser_evidence.py`, `quick_report_actions.py`.
+  Các file cùng tên ở root chỉ còn wrapper tương thích legacy. Khi sửa lõi,
+  sửa tại backend/compat và chạy cả legacy/backend test; chưa xóa root runtime.
+
 - `phishing_toolkit.py`: lõi nghiệp vụ và CLI (`check`, `related`,
   `brandscan`, `send`); thực hiện enrichment domain, draft report, evidence và
   helper SMTP.
@@ -15,6 +20,14 @@ xử lý batch, gửi SMTP và theo dõi phản hồi nhà cung cấp qua IMAP.
   Streamlit.
 - `domain_worker.py`: precheck email/cloaking và worker batch nền có resume cho
   domain thường; job lưu tại `data/worker_jobs/`.
+- `backend/src/domaincheck/{core/worker_precheck,application/domain_worker,api/domain_worker}.py`,
+  `frontend/src/features/domain-worker/`: DW-01 web precheck owned, queue PostgreSQL,
+  draft email tham khảo; CLI `--job-type domain_worker_precheck` hoặc
+  `run_domain_worker_precheck.bat`. `application/domain_worker_preview.py` tạo exact
+  email preview cho ready theo account/recipient, private immutable artifacts,
+  logo/images/manifest và version/hash bindings. Chưa có web approval/send.
+  `application/worker_review.py` và React `ReviewQueuePage.tsx` phục vụ queue owned
+  trong ngày; evidence review nhận ảnh thủ công và đưa source checks về ready.
 - `lead_triage.py`, `pages/15_Lead_Triage.py`: tách ghi chú hạ tầng được dán,
   đối chiếu DNS/IP, dùng precheck/pipeline/report Domain Worker, thêm backend
   context, capture DOM chung Phản hồi NCC và gửi report đã duyệt qua SMTP;
@@ -65,6 +78,12 @@ python -m pip check
 
 Không tự khởi động Streamlit nếu người dùng chưa yêu cầu. Build Windows dùng
 `build_app.bat` và `PhishingTool.spec`.
+
+Web backend cài Playwright qua `backend/pyproject.toml`; khi bật capture, cài Chromium
+bằng `.\backend\.venv\Scripts\python.exe -m playwright install chromium`. Worker dùng
+đúng backend venv và kiểm tra launch browser trắng trước khi claim job. Admin và user
+đều sửa được permission/tên/mô tả trong UI/API; role save tự bổ sung code permission
+đã đăng ký nhưng thiếu trong DB. Sync thường giữ các lựa chọn này cho cả hai role.
 
 ## An toàn và quyền hạn
 
@@ -251,6 +270,215 @@ Một tính năng mới, thay đổi hành vi hoặc bug fix chỉ được coi 
 6. Đã cập nhật tài liệu và phần “Trạng thái thay đổi gần đây” bên dưới.
 
 ## Trạng thái thay đổi gần đây
+
+- 2026-10-16 — Khôi phục đầy đủ narrative Browser Evidence legacy cho email worker:
+  projection giữ control/link DOM, navigation nguồn/đích/redirect và form signals
+  tổng hợp đã redact; render qua formatter chung sau validate owned ảnh/hash.
+  Plain/HTML có đủ mô tả, href, bước tái hiện và phạm vi capture trước chữ ký; không
+  dùng block generic viết riêng. DOM cũ mất metadata phải precheck lại nếu cần gửi,
+  không đoán dữ kiện hay sửa email đã gửi. UI chỉ Đã gửi/Hoàn tất gửi, bỏ nhãn lưu
+  bản sao thành công; IMAP lưu Sent tự động như cũ, chỉ báo khi có lỗi thực tế.
+  Sửa MIME composer giữ đúng HTML part cho logo CID, không gắn logo vào manifest;
+  hai ảnh DOM + JSON giữ ba attachment riêng. Kiểm thử đầu-cuối đối chiếu nguyên
+  khối nội dung mẫu trong plain/HTML và cấu trúc MIME, không gửi/check URL thật.
+  FE 73/73, backend PostgreSQL riêng 198 đạt/2 skip, wheel 3/3; legacy 419 giữ
+  baseline 4 failure/7 error. Lint/typecheck/build/compileall/pip check đạt; backend
+  editable đã đồng bộ formatter mới, worker idle nạp lại, API health 200.
+
+- 2026-10-16 — Sửa thiếu bước lưu Sent khi migrate SMTP: legacy có `_imap_save_sent`
+  sau SMTP, bản web đã bỏ sót; đính chính nhận định trước. Worker gọi chung helper
+  sau checkpoint SMTP accepted, status copy riêng, lỗi IMAP không retry SMTP. Helper
+  sửa parse quoted/SPECIAL-USE folder, kiểm APPEND OK, timeout/TLS và dedupe Message-ID.
+  IMAP dùng account owned/allowlist; phục hồi chỉ bản sao từ approved immutable plan,
+  giữ Message-ID/ngày gốc, không gửi lại SMTP. UI hiện kết quả lưu Sent từng email.
+  FE 73/73, backend PostgreSQL riêng 196 đạt/2 skip, wheel 3/3; legacy 419 giữ
+  baseline 4 failure/7 error (4 test Sent mới đạt). Lint/typecheck/build/compileall/
+  pip check đạt. Cài lại backend editable để đồng bộ helper ngoài repo cwd;
+  worker nạp lại sau khi idle. Phục hồi bản sao Sent cho các lượt đang đối soát,
+  không SMTP resend; status copy lưu riêng trên từng attempt.
+
+- 2026-10-16 — Đối soát batch báo hoàn tất nhưng không thấy Sent: ledger có hai
+  SMTP accepted, sender không có IMAP APPEND Sent. UI đổi nhãn thành SMTP đã chấp
+  nhận/Hoàn tất xử lý batch, đếm outcome duy nhất và giải thích chưa xác minh inbox/
+  bản sao Sent. Không IMAP hoặc gửi lại, không sửa ledger đã gửi. Cập nhật tài liệu.
+  FE 73/73, lint/typecheck/build/compileall đạt; chỉ đổi UI, không đổi SMTP/backend.
+
+- 2026-10-16 — Triển khai Domain Worker gửi batch normal theo yêu cầu: precheck chỉ
+  hiện số đếm, hoàn tất mới có danh sách còn cần gửi/cấu hình 5 domain/5 phút mặc định.
+  Account scope giữ từ precheck; Start có permission/CSRF/xác nhận, server khóa plan/
+  logo/ảnh trước enqueue, không draft/preview từng dòng. Worker domain_worker_send/all
+  lưu lịch nghỉ, intent trước SMTP/checkpoint từng thư; retry failed giữ sent, unknown
+  không tự retry. Dedupe owner/ngày/domain/account/channel/recipient như legacy, bỏ
+  capture nếu đã gửi đủ; ngày mới không dùng batch/ledger hôm qua. DB giữ metadata/
+  tiến độ/sổ gửi, ảnh/body private store. Cloaking vẫn cách ly, chưa approve/send web.
+  FE 72/72, backend PostgreSQL riêng 195 đạt/2 skip, wheel 3/3; lint/typecheck/build/
+  compileall/pip check đạt. Chrome fixture desktop/mobile kiểm counts→batch→F5 không
+  POST lại; SMTP mock kiểm retry partial/Message-ID/UNKNOWN/day reset. Legacy 415
+  giữ baseline 4 failure/7 error. Worker idle đã reload; không gửi thư thật.
+
+- 2026-10-16 — Đối chiếu lại Domain Worker legacy: chọn account trước precheck,
+  giữ Job.account_scope và account nguồn trong queue; bỏ Xem draft/Preview từng dòng.
+  Danh sách thường chỉ nhận ready có email + evidence; no-email loại, cloaking/
+  thiếu ảnh sang page riêng. Evidence Review nhận 1–3 ảnh + thumbnail, validate rồi
+  đưa các check nguồn về ready; cloaking web mới có queue đọc, chưa approve/send.
+  Sửa artifact root tương đối lệch CWD API/worker; phục hồi 7 file đúng hash vào
+  thư mục chung, toàn bộ 9 artifact hiện có hợp lệ. Không gửi/check URL thật.
+  FE 70/70, backend PostgreSQL riêng 183 đạt/2 skip, wheel 3/3; lint/typecheck/
+  build/compileall/pip check đạt. Chrome fixture desktop/mobile xác nhận account
+  scope, ready-only và F5 không POST lại. Hai worker idle đã reload; API health 200.
+  Legacy 415 giữ baseline 4 failure/7 error.
+
+- 2026-10-16 — Theo yêu cầu dùng lại logic cũ, capture web gọi trực tiếp hàm chung
+  capture_normal_report_evidence với mặc định HTTP/DNS, DOM rồi passive fallback;
+  bỏ override http_probe/network_guard, DNS pool mới và helper DNS capture không dùng.
+  Adapter chỉ kiểm output ảnh/manifest/hash và chuyển sang owned artifacts. Ghi chú
+  này thay thế cơ chế DNS/NET capture riêng của các mốc ngay trước đó.
+  Capture đúng URL đã thành công hai ảnh bằng defaults; worker idle đã reload.
+  FE 72/72; backend PostgreSQL riêng 178 đạt/1 skip, wheel 3/3; typecheck/lint/
+  build/compileall/pip check đạt. Legacy 415 giữ baseline 4 failure/7 error.
+
+- 2026-10-16 — Sửa tiếp capture web sau khi tái hiện trên URL vừa báo lỗi: DNS
+  dnspython timeout nhưng resolver Windows trả IP public. Browser egress chuyển
+  mặc định sang system DNS bounded 3 giây/pool 4, vẫn kiểm mọi IPv4/IPv6 và mỗi
+  redirect/subresource; thêm mã egress_dns_failed. Đã capture đúng URL thành công
+  hai ảnh DOM nguồn–đích, không gửi report. Kết quả precheck cũ giữ để audit.
+  FE 72/72; backend PostgreSQL riêng 181 đạt/1 skip, wheel 3/3; typecheck/lint/
+  build/compileall/pip check đạt. Legacy 415 giữ baseline 4 failure/7 error.
+
+- 2026-10-16 — Sửa capture web thất bại do backend venv thiếu Playwright: khai báo
+  dependency, cài môi trường hiện tại, kiểm tra Chromium và chụp DOM nguồn–đích
+  bằng fixture loopback. Worker startup kiểm browser trước claim, lỗi capture có mã
+  whitelist để UI giải thích. Mở sửa quyền/tên/mô tả admin theo yêu cầu; role save
+  tự materialize permission mới thiếu DB, sync giữ lựa chọn admin/user. Đã đồng bộ
+  catalog runtime và restart hai worker idle; không sửa kết quả precheck cũ hoặc
+  tự mở lại URL nghi vấn. FE 72/72; backend PostgreSQL riêng 179 đạt/1 skip,
+  packaging wheel 3/3; typecheck/lint/build/compileall/pip check đạt. Legacy 415
+  giữ baseline 4 failure/7 error. Chrome kiểm form sửa admin desktop/mobile.
+
+- 2026-10-16 — Domain Worker web thêm exact email preview cho ready đã checkpoint:
+  chọn account owned, server resolve recipient, personalize bằng lõi cũ; khóa
+  From/Subject/plain/HTML, logo inline, 1–3 ảnh + manifest JSON. Default logo được
+  materialize thành owned artifact, không sửa profile; kiểm check/result/manifest
+  hash, account/profile/evidence versions, revision và expiry 30 phút. F5 GET
+  restore, quyền riêng domain_worker.preview + CSRF; chưa có approval/send SMTP.
+  FE 71/71; backend PostgreSQL sạch 174 đạt/2 skip, gồm packaging 3/3; typecheck/
+  lint/build/compileall/pip check đạt. Legacy 415 giữ baseline 4 failure/7 error.
+  Chrome fixture kiểm desktop/mobile/F5; không check URL, SMTP/IMAP hoặc gửi thật.
+
+- 2026-10-16 — Logo mail mặc định bắt buộc, upload/thay PNG/JPEG <=2 MB và reset
+  ngay settings/mail; profile riêng/hash/version/audit, default không cần activation.
+  Settings hiển thị mail connectivity policy trước thao tác, khóa endpoint chưa cho
+  phép; bật local tests cho ba endpoint mail hiện có, không bỏ public DNS/TLS guard.
+  Chuyển canonical toolkit/cloaking/browser/quick actions vào backend/compat,
+  root wrappers giữ legacy; wheel không lấy source ngoài BE, worker helper ở BE.
+  Tài liệu giải thích bốn biến browser/mail và mục tiêu cuối chỉ BE/FE, chưa xóa
+  các workflow legacy còn chờ migration; không đụng config.ini/runtime hiện có.
+  FE 67/67; backend PostgreSQL riêng 164 đạt/2 skip; wheel cô lập 3/3 gồm logo
+  mặc định và MIME; typecheck/lint/build/compileall/pip check đạt. Legacy 415 giữ
+  baseline 4 failure/7 error. Chrome xác nhận default logo/uploader và các nút
+  thử kết nối được mở đúng policy; không SMTP/IMAP login hoặc gửi thật.
+
+- 2026-10-16 — Áp dụng logo WIN cho hồ sơ mail web bằng owned immutable artifact,
+  asset nằm trong backend package, không đọc config.ini. Draft DW có logo trước
+  Regards và HTML CID; MIME composer portable được đối chiếu HTML/bytes với legacy.
+  Tài liệu hóa worker chạy thường trực, .bat chỉ shortcut local, topology deploy
+  và điều kiện chuyển hết compatibility vào BE trước khi dọn source root.
+  Đã áp dụng logo cho hồ sơ được yêu cầu qua UI; JPEG backend trùng SHA-256 ảnh
+  nguồn. FE 66/66, backend PostgreSQL riêng 162 đạt/2 skip, packaging 3/3;
+  lint/typecheck/build/compileall/pip check đạt. Legacy giữ 4 failure/7 error.
+
+- 2026-10-16 — DW-01: Domain Worker web precheck batch owned, HTTP cloaking/lookup
+  song song, no-email/evidence/cloaking queue, capture thường có flag và ready gate;
+  giữ operation/F5, stop/resume/retry failed, unknown không tự chạy lại. Draft
+  tham khảo email Registrar/Registry/Hosting đối chiếu formatter/file legacy,
+  pure shared routing/hosting renderer, không SMTP/IMAP/submit thật. Còn bước
+  web review/Playwright cloaking và exact account preview/send. Sửa shared clock,
+  cooperative stop và flush EvidenceSet trước Artifact sau kiểm thử PostgreSQL.
+  FE 65/65; backend PostgreSQL riêng 159 đạt/2 skip; packaging 3/3 gồm wheel;
+  typecheck/lint/build/compileall/pip check đạt. Legacy 415 giữ baseline
+  4 failure/7 error. Chrome xác nhận menu/trang mới, không chạy URL/gửi thật.
+
+- 2026-10-16 — Bỏ override width/padding content riêng Quick Report để dùng
+  cùng AppShell và breakpoint với các page khác; không đổi nội dung hay nghiệp vụ.
+
+- 2026-10-16 — Đồng bộ UI web gọn trên layout chung, Dashboard, admin, mail
+  và Check Domain: sidebar 240px/header 56px, bảng/form/dialog giảm padding.
+  Thông số Check Domain chuyển sang nhãn/giá trị theo bốn nhóm responsive,
+  giữ profile/raw JSON trong details. Guidance bố cục gần Quick Report.
+  Không đổi pipeline, không check/gửi thật; kiểm tra FE và visual QA local.
+  FE 61/61, lint/typecheck/build/compileall đạt. Chrome kiểm tra Check Domain
+  desktop sáng/tối và mobile 390px, cùng Dashboard/Quick Report/admin/mail.
+
+- 2026-10-16 — Sửa vận hành lỗi Check Domain “Không tải được mẫu báo cáo”:
+  backend editable nạp bản compatibility site-packages cũ thiếu formatter email.
+  Cài lại đúng backend venv, reload API và xác nhận mẫu hiện trên kết quả cũ,
+  không check/gửi lại. Bổ sung regression subprocess ngoài repo cwd và wheel
+  cho browser/CDN/Registrar email/Registry webform+email; tài liệu hóa reinstall.
+  Backend 89 đạt/60 skip, packaging 3/3 (gồm wheel cô lập), compileall/pip check
+  đạt; legacy 415 giữ baseline 4 failure/7 error. Chrome xác nhận 8 mẫu hiện lại.
+
+- 2026-10-16 — Sửa draft Check Domain theo đúng kênh nhận: Registry dùng
+  `registry_contact` đã check, webform lấy formatter webform và email lấy biến
+  thể email Registry cũ; nếu có cả hai thì hiện hai mẫu riêng. Registrar giữ
+  mẫu email và webform riêng theo routing cũ. Không ghi draft file/gửi thật.
+
+- 2026-10-16 — Check Domain web bổ sung mẫu email registrar khi tìm được địa chỉ
+  hợp lệ: tách chọn recipient khỏi nhánh ghi draft legacy, lọc WHOIS privacy,
+  hiện To/Subject và biến thể email cũ theo domain + ngày trong bộ nhớ. Registrar
+  chỉ nhận webform dùng mẫu webform riêng, không hiện mẫu email. UI hiện thông số trực
+  tiếp với chữ gọn, nhóm mẫu thành cảnh báo trình duyệt, CDN, Registrar và
+  Registry; nội dung dài mở khi cần copy. Không gửi SMTP/submit form. Kiểm tra
+  guidance 10 đạt/1 skip, smoke formatter thật đạt, compileall đạt; legacy 415
+  giữ baseline 4 failure/7 error.
+
+- 2026-10-16 — Sửa Check Domain web theo mục đích tra cứu một domain: bỏ nút
+  capture/upload gây hiểu nhầm (capture backend headless, cần worker riêng và
+  flag mặc định tắt), bỏ câu coi ảnh là bắt buộc. Thêm endpoint read-only owned
+  report-guidance, dùng formatter/routing legacy để hiện form và nội dung copy;
+  không tạo draft file hoặc gửi thật. Test mock + formatter thật không gọi mạng;
+  FE 59/59, backend 87 đạt/60 skip, typecheck/lint/build/compileall đạt.
+
+- 2026-10-16 — CD-02 React phần kiểm tra/evidence: đọc đối chiếu
+  `pages/1_Check_Domain.py`, thêm trang một URL, giữ operation theo user qua F5,
+  hiện kết quả đầy đủ theo nguồn, upload 1–3 ảnh với thumbnail, capture job riêng
+  và xem artifact owned. Chưa có draft/preview/send API nên chưa hiện gửi; không
+  check URL hoặc gửi thật. FE 60/60, typecheck/lint/build; backend 86 đạt/60
+  skip, compileall đạt. DB integration cần PostgreSQL test cô lập.
+
+- 2026-10-16 — Sửa Check Domain web về đúng một domain/full URL mỗi thao tác:
+  POST nhận `target`, response trả một `check`, job nội bộ chỉ có một item.
+  Quick Report và Domain Worker vẫn là luồng nhiều URL; không check/gửi thật.
+
+- 2026-10-16 — Browser Evidence web cho phép capture trực tiếp như legacy khi
+  bật flag và chạy worker riêng; proxy egress là tùy chọn. Giữ kiểm tra public
+  URL cho từng HTTP redirect và browser request. Direct mode cần cô lập mạng
+  worker để giảm rủi ro DNS rebinding tại thời điểm kết nối; không mở URL thật.
+
+- 2026-10-16 — NET-01 app boundary: HTTP probe redirect từng hop qua proxy,
+  Playwright route guard mọi request, chặn private IPv4/IPv6/DNS/port; capture
+  lúc đầu yêu cầu proxy egress, sau đó đã bỏ ràng buộc này; flag vẫn mặc định tắt.
+  Mail connectivity test mặc định tắt,
+  chỉ nhận exact host:port allowlist + public DNS khi bật. External proxy/firewall
+  và legacy full-check egress còn mở; backend 83 đạt/60 skip, legacy 415 giữ
+  baseline 4 failure/7 error, compileall/pip check đạt. Không gọi mạng thật.
+
+- 2026-10-16 — Sửa lỗi backend không khởi động sau EVID-01: `backend/.venv`
+  chưa được cài lại nên thiếu `python-multipart` dù dependency đã khai báo.
+  Cài lại package vào đúng venv; xác nhận uvicorn `--app-dir src --reload`
+  startup và `GET /api/v1/health/live` trả 200. Không đổi nghiệp vụ.
+
+- 2026-10-16 — EVID-01: Check Domain web có upload 1–3 ảnh PNG/JPEG, owned
+  evidence set/manifest/hash và download qua artifact route hiện có; capture
+  Browser Evidence vào job riêng, flag mặc định tắt cho tới khi có egress policy.
+  Backend 75 đạt/60 skip (PostgreSQL test cô lập chưa có); legacy 415 giữ baseline
+  4 failure/7 error; compileall/pip check đạt. Không mở URL nghi vấn thật.
+
+- 2026-10-16 — CD-01: backend web có owned Check Domain create/read API, worker
+  full investigation dùng lõi `run_check`, DTO whitelist và quyền submit VT riêng.
+  Web không ghi CSV/draft/manifest legacy, không gửi report; React/evidence/send
+  thuộc CD-02/EVID-01. Backend 71 đạt/59 skip (chưa có PostgreSQL test cô lập),
+  legacy 415 giữ baseline 4 failure/7 error; compileall/pip check. Chỉ fixture/mock,
+  không probe URL thật.
 
 - 2026-10-16 — Tách /login Telegram riêng; / thành dashboard protected theo
   permission. 401 route nội bộ về /login, đăng nhập thành công về /, logout về
@@ -1726,3 +1954,5 @@ trong test.
 - Kiểm chứng đợt UI ba cột: FE 34/34, typecheck/lint/build; backend 118 đạt,
   1 skip theo môi trường trên PostgreSQL test sạch; compileall đạt. Browser sáng/
   tối và viewport 390px không tràn ngang. CLAUDE.md không đọc/cập nhật theo chỉ dẫn.
+
+- 2026-10-16: Fixed false SMTP/IMAP egress denial on Windows using system DNS with a 3-second deadline; preserved exact endpoint/public IP checks and separated DNS errors. Backend: 100 passed/67 skipped, focused mail/network: 14 passed. No live mail login/send/read.

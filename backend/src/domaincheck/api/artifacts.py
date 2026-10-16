@@ -36,7 +36,7 @@ async def download_artifact(
     except (ArtifactIntegrityError, FileNotFoundError):
         raise HTTPException(status.HTTP_409_CONFLICT, "Artifact is unavailable or failed integrity validation")
 
-    extension = ".png" if artifact.mime_type == "image/png" else ".jpg" if artifact.mime_type == "image/jpeg" else ".bin"
+    extension = {"image/png": ".png", "image/jpeg": ".jpg", "application/json": ".json"}.get(artifact.mime_type, ".bin")
     return Response(
         content=content,
         media_type=artifact.mime_type,

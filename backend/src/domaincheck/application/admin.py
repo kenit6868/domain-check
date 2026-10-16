@@ -7,7 +7,8 @@ from uuid import UUID
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from domaincheck.domain.authz import validate_permission_codes
+from domaincheck.domain.authz import PERMISSIONS_BY_CODE, validate_permission_codes
+from sqlalchemy.dialects.postgresql import insert
 from domaincheck.infrastructure.db.models import (
     AuditEvent,
     AuthIdentity,
@@ -186,13 +187,6 @@ class AdminService:
         role = await self._session.scalar(select(Role).where(Role.id == role_id).with_for_update())
         if role is None:
             raise AdminNotFound("Role not found")
-        if role.key == "admin":
-            raise AdminConflict("The administrator role is managed by the permission catalog")
-        if role.system:
-            if name is not None and name.strip() != role.name:
-                raise AdminConflict("System role identity cannot be modified")
-            if description is not None and description.strip() != role.description:
-                raise AdminConflict("System role identity cannot be modified")
         if permission_codes is not None:
             validate_permission_codes(permission_codes)
             await self._replace_role_permissions(role, permission_codes)
@@ -282,9 +276,15 @@ class AdminService:
             raise AdminConflict("Cannot grant permissions the actor does not hold")
 
     async def _replace_role_permissions(self, role: Role, codes: set[str]) -> None:
+        validate_permission_codes(codes)
+        # The UI catalog comes from code. Materialize new registered codes in the
+        # same transaction instead of requiring an operator to run a CLI sync.
+        if codes:
+            await self._session.execute(insert(Permission).values([
+                {"code": code, "description": PERMISSIONS_BY_CODE[code].description}
+                for code in sorted(codes)
+            ]).on_conflict_do_nothing(index_elements=[Permission.code]))
         permissions = list(await self._session.scalars(select(Permission).where(Permission.code.in_(codes)))) if codes else []
-        if len(permissions) != len(codes):
-            raise ValueError("Permission catalog is not synchronized")
         await self._session.execute(delete(RolePermission).where(RolePermission.role_id == role.id))
         self._session.add_all(RolePermission(role_id=role.id, permission_id=item.id) for item in permissions)
 

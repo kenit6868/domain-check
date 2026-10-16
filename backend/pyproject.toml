@@ -13,7 +13,9 @@ dependencies = [
   "cryptography==50.0.2",
   "fastapi==0.143.1",
   "pillow==12.3.0",
+  "playwright==1.62.0",
   "pydantic-settings==2.16.0",
+  "python-multipart==0.0.32",
   "pyjwt[crypto]==2.15.1",
   "PySocks==1.7.1",
   "redis==7.3.0",
@@ -37,14 +39,14 @@ test = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/domaincheck"]
-dev-mode-dirs = ["src", ".."]
+dev-mode-dirs = ["src", "compat"]
 
 # Explicit compatibility modules, without config.ini or runtime data.
 [tool.hatch.build.targets.wheel.force-include]
-"../phishing_toolkit.py" = "phishing_toolkit.py"
-"../cloaking_detector.py" = "cloaking_detector.py"
-"../browser_evidence.py" = "browser_evidence.py"
-"../quick_report_actions.py" = "quick_report_actions.py"
+"compat/phishing_toolkit.py" = "phishing_toolkit.py"
+"compat/cloaking_detector.py" = "cloaking_detector.py"
+"compat/browser_evidence.py" = "browser_evidence.py"
+"compat/quick_report_actions.py" = "quick_report_actions.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

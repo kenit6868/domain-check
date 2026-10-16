@@ -99,6 +99,7 @@ _metadata_pkgs = [
 metadata_datas = [d for d in (_distinfo_data(p) for p in _metadata_pkgs) if d is not None]
 
 hidden_imports = [
+    "domaincheck.core.email_content",
     "streamlit", "streamlit.web", "streamlit.web.cli", "streamlit.runtime",
     "streamlit.runtime.scriptrunner", "streamlit.runtime.caching",
     "streamlit.components.v1", "streamlit.elements",
@@ -111,6 +112,11 @@ hidden_imports = [
 ]
 
 app_datas = [
+    ("backend/compat/phishing_toolkit.py", "backend/compat"),
+    ("backend/compat/cloaking_detector.py", "backend/compat"),
+    ("backend/compat/browser_evidence.py", "backend/compat"),
+    ("backend/compat/quick_report_actions.py", "backend/compat"),
+    ("backend/src/domaincheck/assets/email/logo-win.jpg", "domaincheck/assets/email"),
     ("streamlit_app.py",    "."),
     ("streamlit_home.py",   "."),
     ("phishing_toolkit.py", "."),
@@ -140,7 +146,7 @@ app_datas = [
 
 a = Analysis(
     ["launcher.py"],
-    pathex=["."],
+    pathex=[".", "backend/src"],
     binaries=[],
     datas=streamlit_datas + altair_datas + whois_datas + dns_datas + certifi_datas + playwright_datas + playwright_browser_datas + metadata_datas + app_datas,
     hiddenimports=hidden_imports,

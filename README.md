@@ -1,5 +1,124 @@
 ﻿# Domain Check Tool — Phát hiện & báo cáo domain phishing
 
+Quick Report dùng cùng chiều rộng tối đa và padding content của AppShell,
+không có override riêng theo trang.
+
+Logo chữ ký luôn có mặc định WIN, không cần kích hoạt. Tại cấu hình mail chọn
+**Thay logo** để upload PNG/JPEG tối đa 2 MB, thumbnail hiện ngay; ảnh thay thế
+thuộc riêng hồ sơ. **Khôi phục logo mặc định** vẫn giữ logo trong mail. Draft
+hiện logo 64×64 trước Regards; HTML nhúng CID inline, plain text giữ nguyên.
+Đây không phải ảnh evidence và không được tính vào số ảnh bằng chứng. Không cần
+`config.ini` hay file logo ở root khi chạy package backend đã cài.
+
+Các module lõi web dùng đã nằm trong `backend/compat/`, wheel lấy trực tiếp từ
+đây; bốn file cùng tên ở root chỉ còn wrapper để giữ Streamlit cũ hoạt động.
+Backend có thể cài độc lập bằng `python -m pip install -e ".[test]"` từ `backend/`.
+Package backend đã khai báo Playwright. Khi bật Browser Evidence, cài Chromium bằng
+`.\backend\.venv\Scripts\python.exe -m playwright install chromium` và dùng đúng
+venv này để chạy worker. Worker kiểm tra khởi động browser trước khi nhận job.
+Browser Evidence web dùng lại `capture_normal_report_evidence()` như bản cũ:
+chụp DOM nguồn–đích rồi fallback passive, dùng HTTP/DNS mặc định của hàm chung.
+Adapter web chỉ chuyển ảnh/manifest hợp lệ sang artifact, không thêm DNS/probe/guard riêng.
+Shortcut worker canonical là `backend/run_worker.bat` (mặc định nhận mọi loại job).
+
+Nút thử SMTP/IMAP chỉ kết nối TLS và đăng nhập, không gửi hoặc đọc thư. Server
+phải bật `DOMAINCHECK_MAIL_CONNECTIVITY_ENABLED=true` và khai báo exact host:port
+trong `DOMAINCHECK_MAIL_EGRESS_ENDPOINTS` (JSON array); hostname phải trỏ public.
+UI đọc trạng thái trước và khóa nút nếu chức năng/endpoint chưa được cho phép.
+Giải thích bốn biến mail/browser ở [deployment-topology.md](docs/deployment-topology.md).
+
+Worker mở một lần rồi xử lý nhiều job, không chạy `.bat` từng lượt. Khi deploy,
+worker là service thường trực thuộc backend, API/FE là các process phục vụ riêng.
+Xem [topology và lộ trình bỏ root compatibility](docs/deployment-topology.md).
+
+**Domain Worker web — precheck và gửi batch:** mở `/domain-worker`, chọn tài khoản email dùng để
+lọc/gửi trước (mặc định chọn các tài khoản đang bật), rồi nhập mỗi dòng một domain hoặc
+full URL (tối đa 100) rồi chọn **Precheck danh sách**. Process riêng xử lý job:
+`run_domain_worker_precheck.bat` hoặc
+`.\backend\.venv\Scripts\python.exe -m domaincheck.workers.cli --job-type domain_worker_precheck`.
+Sau cập nhật module legacy, cài lại backend venv và restart worker khi không có job
+đang chạy. Trang giữ operation theo user qua F5; Dừng hoàn tất URL đang xử lý rồi
+dừng nhận URL tiếp theo, Tiếp tục chỉ nhận phần pending, Thử lại chỉ nhận URL lỗi.
+
+Precheck lookup email và HTTP cloaking song song theo từng URL, không dùng cache
+email. Không có email hợp lệ → loại; cloaking/coverage gap → queue cần duyệt;
+domain thường capture Browser Evidence khi flag hiện có được bật, chỉ ảnh hợp lệ
+mới thành `ready`. Khi capture tắt/lỗi → queue evidence, không tự gửi. Queue lưu
+PostgreSQL theo owner + ngày + full URL, giữ các tài khoản đã chọn cùng lượt precheck.
+Xác minh Playwright cloaking còn chờ bước review, không coi HTTP là kết luận approve.
+
+Danh sách thường chỉ nhận URL có email hợp lệ và ảnh/manifest hợp lệ. Cloaking đi
+`/cloaking-review`; domain thường thiếu ảnh đi `/domain-evidence-review`; không email
+bị loại. Dùng các link queue trên Domain Worker để chuyển trang. Domain Evidence
+Review chọn đúng case và upload 1–3 PNG/JPEG, thumbnail hiện ngay; áp dụng ảnh hợp lệ
+đưa các lượt nguồn về `ready`, giữ nguyên tài khoản của từng lượt. Không upload ảnh
+inline trong Domain Worker. Cloaking Review web hiện hiển thị queue riêng, chưa có
+approval/send cloaking. Domain thường đủ bằng chứng đã có gửi SMTP batch trên web.
+
+Trong lúc precheck chỉ hiện số đếm đủ điều kiện/cloaking/thiếu ảnh/không email/đã gửi.
+Sau khi hoàn tất, **Cấu hình gửi worker** lọc lại delivery trong ngày, cho xem danh sách
+domain còn cần gửi, nhập **Số domain mỗi batch** (mặc định 5), **Nghỉ giữa hai batch
+(phút)** (mặc định 5), xác nhận rồi **Bắt đầu gửi batch**. Không có bước xem draft hoặc
+preview từng dòng. Worker dùng đúng formatter/chữ ký cũ, ảnh/manifest và logo đã khóa
+hash phía server. Tài khoản giữ nguyên từ precheck; đổi cấu hình mail/ảnh sau khi bắt
+đầu sẽ chặn các delivery chưa gửi cho tới khi tạo lượt gửi phù hợp.
+
+Chạy worker gửi thường trực bằng `backend/run_worker.bat --job-type domain_worker_send`
+hoặc `--job-type all`; worker precheck riêng không nhận job gửi. SMTP dùng tài khoản
+owned đã cấu hình mật khẩu, endpoint nằm trong `DOMAINCHECK_MAIL_EGRESS_ENDPOINTS`,
+TLS theo account (port 465 luôn implicit TLS). Nút bắt đầu cần quyền `domain_worker.start`;
+dừng cần `domain_worker.stop`, thử lại cần `domain_worker.retry`. Không tự gửi khi precheck.
+Dừng hoàn tất domain đang gửi rồi giữ domain pending; Tiếp tục giữ thời gian nghỉ/cấu hình
+batch (reset lịch chờ khi explicit resume). Thử lại chỉ xử lý delivery lỗi chắc chắn,
+giữ các thư đã gửi; `unknown` không tự retry. F5 chỉ đọc lại tiến độ.
+
+Trạng thái **SMTP đã chấp nhận** nghĩa là máy chủ SMTP nhận thư để chuyển tiếp;
+không xác nhận thư đã vào hộp thư người nhận. Sau checkpoint SMTP thành công, worker
+dùng lại `_imap_save_sent()` của legacy để lưu cùng thư vào Sent/Đã gửi qua IMAP;
+Gmail giữ cơ chế máy chủ tự lưu. IMAP dùng cấu hình/secret owned của tài khoản,
+fallback SMTP host/username/password khi chưa khai báo riêng và cùng username.
+Endpoint IMAP cũng phải có trong allowlist. UI chỉ hiện **Đã gửi/Hoàn tất gửi**;
+bước lưu thư vào Đã gửi chạy tự động, chỉ báo riêng nếu có lỗi. Lỗi IMAP không đổi
+SMTP `sent` hoặc gửi lại SMTP. Helper tra
+Message-ID trong Sent trước APPEND, tôn trọng thư mục `\\Sent`, tên có khoảng trắng,
+timeout 30 giây và kiểm tra server trả OK. **Hoàn tất gửi** không có nghĩa
+đã xác minh mailbox người nhận. Bản web trước đó đã bỏ sót bước Sent của legacy;
+ghi chú cũ cho rằng legacy không lưu Sent là nhận định thiếu đối chiếu.
+
+Email normal dùng đúng `format_email_evidence_manifest()` chung của legacy. Capture
+DOM giữ nhãn control, href đích, URL nguồn/đích cuối, redirect và chỉ báo form tổng
+hợp để tự chèn đầy đủ khối **Observed Phishing Behavior and Supporting Evidence**
+vào plain text và HTML trước chữ ký: mô tả control, link, cách mở đích trong tab cô
+lập/referrer, bước tái hiện và phạm vi không nhập credential/submit. Capture thụ động
+và ảnh thủ công dùng đúng mô tả tương ứng; không thay toàn bộ bằng đoạn chung chung.
+Kết quả DOM cũ đã bị lược mất metadata phải precheck lại nếu còn cần gửi; không tự
+đoán lại link hoặc sửa/gửi lại email đã gửi. Ảnh và manifest/hash đã duyệt vẫn là
+nguồn bằng chứng, không đọc lại trang web lúc tạo email.
+
+DB giữ metadata danh sách/job, account scope và sổ gửi để chống gửi trùng khi mất cache
+hoặc restart; ảnh, logo và nội dung email bất biến nằm trong private artifact store,
+không chứa bytes ảnh/body trong DB. Chống trùng theo **owner + ngày địa phương + domain
++ tài khoản + kênh + email nhận**, không theo email nhận đơn lẻ hoặc ID batch. Lượt
+precheck tiếp theo bỏ delivery đã gửi hôm nay; domain đã gửi đủ không cần capture lại.
+Sang ngày mới UI bỏ kết quả cũ, batch hôm qua không tự gửi tiếp, ledger hôm qua không
+chặn lượt hôm nay. Không tự xóa lịch sử/audit hoặc runtime; cache không là sổ gửi.
+
+Đã bỏ các nút **Xem draft/Preview chính xác** khỏi precheck. Các API preview nội bộ
+còn giữ tương thích cho bước gửi, chỉ nhận đúng scope tài khoản đã chọn từ precheck.
+F5 chỉ đọc lại batch, không check/gửi mới. Batch cũ chưa có account scope cần precheck
+lại sau khi chọn tài khoản; không tự suy ra lựa chọn từ cấu hình hiện tại.
+
+Đường dẫn artifact tương đối được tính từ root workspace/package, độc lập thư mục
+chạy API/worker. Cả hai phải dùng cùng artifact root; đây là yêu cầu cho logo, evidence
+và preview. Không xử lý lỗi integrity bằng cách bỏ kiểm hash hoặc thay logo âm thầm.
+
+Giao diện web dùng layout gọn thống nhất trên Dashboard, Check Domain, Quick
+Report, tài khoản mail và quản trị: sidebar 240px, header 56px, bảng/form/dialog
+giảm padding. Thông số Check Domain trình bày nhãn/giá trị theo bốn nhóm;
+mở **Chi tiết profile & tín hiệu** hoặc **Dữ liệu kỹ thuật đầy đủ** khi cần.
+Mẫu cộng đồng cùng hàng trên desktop, dưới là CDN/Registrar/Registry;
+màn hình nhỏ tự xuống cột.
+
 Đặc tả chuyển sang React/Vite/Tailwind và Python API nhiều người dùng nằm trong
 [PROMPT_TACH_FE_BE_REACT.md](PROMPT_TACH_FE_BE_REACT.md). Đây là phương án triển khai
 đề xuất; đã chốt PostgreSQL + Redis, kèm mô hình lưu URL/check/job/delivery và
@@ -20,8 +139,53 @@ TypeScript strict, Vite 8 và Tailwind 4; source chia theo `app`, `components`,
 normalization; TanStack Query keys luôn mang scope feature/user/resource. UI có
 login/pending shell, Quick Report, trang quản lý user/role và **Tài khoản gửi mail**
 gọi API thật. Secret SMTP/IMAP/proxy được mã hóa theo owner và API chỉ trả cờ đã
-có secret. Quick Report chỉ kiểm tra và hiển thị DTO; chưa dùng web mới để gửi hoặc
-submit report.
+có secret. Check Domain đã có API/worker điều tra đầy đủ và giao diện React
+kiểm tra một URL, xem thông số cùng form mẫu có nội dung để đọc/copy. Trang
+Check Domain web không yêu cầu ảnh và không tự gửi báo cáo.
+
+Backend Check Domain: `POST /api/v1/domain-checks/checks` nhận đúng một `target`
+(full URL hoặc domain) và `submit_vt` mặc định `false`; `GET
+/api/v1/domain-checks/checks/{operation_id}` đọc trạng thái/kết quả của domain đó theo owner.
+Worker mặc định xử lý cả Quick Report và Check Domain; dùng `--job-type
+check_domain` để chỉ xử lý Check Domain. Kết quả được lọc trước khi lưu/trả API;
+luồng này không tạo draft, evidence, log CSV hoặc gửi report. Submit VirusTotal
+cần quyền `check_domain.submit_vt` và `DOMAINCHECK_VT_API_KEY` trong backend env.
+`DOMAINCHECK_GSB_API_KEY` chỉ dùng cho tra cứu Safe Browsing; không đọc
+`config.ini`.
+
+Browser Evidence web: sau khi check hoàn tất, `POST
+/api/v1/domain-checks/checks/{check_id}/evidence/upload` nhận multipart field
+`files` gồm 1–3 ảnh PNG/JPEG. `GET /api/v1/domain-checks/checks/{check_id}/evidence`
+trả các evidence set và artifact ID; ảnh chỉ tải qua `GET /api/v1/artifacts/{id}`
+có kiểm tra owner, quyền và SHA-256. Capture tự động là thao tác riêng `POST
+/api/v1/domain-checks/checks/{check_id}/evidence/capture`, trả job ID để đọc tại
+`GET /api/v1/domain-checks/captures/{job_id}`. Capture mặc định tắt; chỉ bật
+`DOMAINCHECK_BROWSER_CAPTURE_ENABLED=true`, rồi chạy worker riêng
+`domaincheck-worker --job-type browser_evidence`. Worker mặc định không claim capture.
+Endpoint evidence riêng vẫn tồn tại, nhưng trang React Check Domain không dùng
+capture/upload vì mục đích trang là tra cứu và hướng dẫn báo cáo.
+
+Sau khi check thành công, `GET /api/v1/domain-checks/checks/{check_id}/report-guidance`
+trả form Google, Microsoft, Chống Lừa Đảo, Cốc Cốc, Netcraft và các form CDN/
+registrar/registry phù hợp; với registrar nhận email, trang hiện mẫu email có
+người nhận và tiêu đề, chọn biến thể theo domain + ngày như bản cũ. Registrar
+chỉ nhận webform vẫn dùng mẫu webform riêng. Giao diện chia bốn nhóm: cảnh báo trình duyệt,
+CDN, Registrar, Registry. Thông số check hiện trực tiếp với chữ gọn hơn; nội dung
+mẫu mở khi cần xem/copy. Nội dung dùng formatter legacy, chỉ đọc kết quả
+đã lưu và hồ sơ owner; không tạo file draft, submit form hay gửi mail.
+Registry lấy contact từ kết quả check: webform và email (nếu cùng có) hiển thị
+hai mẫu riêng, mỗi mẫu có nội dung đúng kênh nhận.
+
+Capture mặc định kết nối trực tiếp như bản cũ; không cần proxy. Worker kiểm tra
+host public cho từng redirect HTTP và từng request Playwright. Có thể cấu hình
+`DOMAINCHECK_BROWSER_EGRESS_PROXY_URL` nếu môi trường vận hành có proxy lọc;
+proxy cần chặn IP nội bộ tại lúc kết nối. Kiểm tra DNS ở ứng dụng không loại bỏ
+hoàn toàn rủi ro DNS rebinding, nên nên chạy capture worker trong môi trường
+có chặn outbound tới mạng nội bộ. Không đặt credential proxy vào URL frontend.
+Kiểm tra SMTP/IMAP thật mặc định tắt; khi có firewall egress riêng cho mail,
+đặt `DOMAINCHECK_MAIL_CONNECTIVITY_ENABLED=true` và allowlist chính xác
+`DOMAINCHECK_MAIL_EGRESS_ENDPOINTS` dạng JSON, ví dụ
+`["smtp.example.com:465","imap.example.com:993"]`.
 
 Thiết lập môi trường phát triển (không dùng credential thật):
 
@@ -40,6 +204,16 @@ Set-Location frontend
 npm install
 npm run dev
 ```
+
+Nếu chạy API bằng `backend/.venv`, cài dependency bằng chính Python của venv
+sau khi cập nhật mã (chạy từ thư mục repo):
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m pip install -e ".\backend[test]"
+```
+
+Route upload dùng `python-multipart`;
+thiếu package này sẽ làm FastAPI lỗi ngay lúc import, trước khi server mở cổng.
 
 Không đặt Telegram secret, master key, SMTP/IMAP password hoặc Cookie Cloudflare
 vào biến `VITE_*`. Migration dữ liệu legacy/runtime thật chưa được chạy.
@@ -106,6 +280,10 @@ nên API/worker đã cài package không phụ thuộc thư mục đang đứng 
 cập nhật bản này, chạy `python -m pip install -e ./backend` từ root bằng Python
 của backend venv, rồi restart API/worker. Wheel không chứa `config.ini`, `.env`
 hoặc dữ liệu runtime.
+Nếu Check Domain báo “Không tải được mẫu báo cáo” sau khi cập nhật formatter,
+hãy cài lại package bằng `.\backend\.venv\Scripts\python.exe -m pip install --no-deps -e ./backend`,
+restart API rồi bấm **Thử lại**. Bản compatibility trong site-packages có thể
+cũ dù đang cài editable; không cần kiểm tra lại URL.
 Frontend polling GET mỗi 2 giây chỉ hỏi trạng thái, không thực hiện check mới.
 `queued`/`pending` là chưa được worker xử lý, khác `running` đang check URL.
 
@@ -173,14 +351,17 @@ Trang login hiển thị readiness và khóa nút nếu backend chưa có cấu 
 Token exchange dùng Authorization Basic theo Telegram OIDC; login đầu tiên tạo user
 `pending`, chưa tự cấp admin hoặc quyền nghiệp vụ.
 
-RBAC không tự cấp quyền nghiệp vụ theo tên role. `admin` là system role toàn quyền
-trong permission catalog nhưng vẫn chịu owner isolation. Khi admin kích hoạt một
+RBAC không tự cấp quyền nghiệp vụ theo tên role. `admin` được seed toàn quyền khi tạo
+lần đầu; sau đó sửa được quyền, tên và mô tả tại **Role & quyền**, như `user`
+và role tùy chỉnh. Khi admin kích hoạt một
 tài khoản thường, hệ thống gán role `user`; seed mới cấp toàn bộ quyền nghiệp vụ,
-trừ `users.*` và `roles.*` (hiện 51/56 quyền). Admin có thể điều chỉnh tại
+trừ `users.*` và `roles.*`. Admin có thể điều chỉnh tại
 **Role & quyền**. Bộ mặc định bao gồm gửi mail, đọc IMAP và chạy worker; các bước
 preview/approve và owner isolation vẫn được thực thi.
 
-`sync-rbac` chạy lại vẫn giữ permission admin đã chọn cho role `user`. Sau khi
+Lưu role tự bổ sung permission đã được code đăng ký nhưng còn thiếu trong database;
+không cần chạy CLI chỉ để sửa lỗi catalog chưa đồng bộ. `sync-rbac` giữ quyền, tên
+và mô tả đã chọn cho cả `admin` lẫn `user`. Sau khi
 đổi quyền role, các phiên của thành viên bị thu hồi; người dùng đăng nhập lại.
 Để áp dụng lại bộ mặc định trên DB đã có role `user`, chạy
 `domaincheck-admin sync-rbac --reset-user-permissions`; lệnh thay toàn bộ quyền
@@ -1087,3 +1268,5 @@ lượt hiện tại nằm phía sau; số # không còn dựa vào vị trí xu
 
 Callback đăng ký trong BotFather vẫn là `/api/v1/auth/telegram/callback`; không
 đổi sang `/login`. Không cần đổi Client ID/Secret hoặc cấu hình extension.
+
+SMTP/IMAP connectivity: public DNS validation uses the operating-system resolver (the same resolver as mail sockets), with a three-second guard deadline. Exact host:port allowlisting and rejection of any non-public result remain required. DNS failures return `dns_failed`, separately from endpoint/address policy rejection; tests authenticate only and never send/read mail.

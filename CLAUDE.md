@@ -1,5 +1,191 @@
 # CLAUDE.md
 
+2026-10-16 — Restore missing legacy DOM evidence narrative in Domain Worker email.
+Two migration omissions were found: core/evidence.capture_manifest stripped
+control/navigation/page-signals, and prepare_deliveries used an abbreviated custom
+block. Projection now keeps bounded redacted narrative inputs (no raw DOM HTML,
+local paths or field values), source/final URLs, redirects, timestamps and titles.
+Legacy format_email_evidence_block delegates after file validation to the shared
+pure format_email_evidence_manifest; web calls it after owned image/hash/manifest
+validation. Plain and escaped HTML preserve the full observed behavior and steps
+before the account signature, using the same observed evidence throughout SMTP/Sent.
+Historical truncated DOM metadata cannot support a complete narrative; block plan
+creation and require a fresh precheck, never invent destination details or rewrite
+accepted immutable plans. Passive/manual descriptions remain factual and separate.
+React shows ordinary Sent/completed labels; archive success is internal, only real
+Sent-write failures produce a warning. Automatic IMAP Sent persistence stays enabled.
+End-to-end MIME regression also caught inline logo binding to the last attachment
+instead of the HTML alternative. Composer now retains the HTML-part reference so
+source PNG, destination PNG and manifest stay three independent attachments and
+the CID logo is related to HTML. No modification or resend of accepted messages.
+
+2026-10-16 — Correction: legacy _send_via_account DOES call _imap_save_sent after
+SMTP success. The web migration omitted it; the preceding explanation was incomplete.
+SentCopyService now commits SMTP success first, then archives same MIME bytes using
+the shared legacy helper through an owned allowlisted adapter. IMAP auth uses explicit
+IMAP credentials or SMTP fallback for the same username. Gmail stays server-managed.
+Sent copy failure never retries SMTP. DeliveryAttempt.sanitized_result stores a
+separate sent_copy_status, exposed in owned job DTO/React. Archive-only repair loads
+the approved immutable original payload and verifies hashes without requiring today's
+profile/revision; preserves original Message-ID/date and never SMTP sends.
+Shared helper now has verified TLS/30s timeout, parses quoted/SPECIAL-USE Sent folder
+names, checks LIST/select/search/APPEND status, closes in finally and deduplicates by
+Message-ID before APPEND when provided. Existing legacy caller stays compatible.
+
+2026-10-16 — Investigated operator's completed batch with missing Sent copy:
+live ledger has two SENT attempts at send_message/accepted on a custom SMTP server.
+No IMAP access or resend performed. Sender currently has no IMAP APPEND Sent step;
+SMTP acceptance does not prove recipient delivery or Sent folder persistence.
+React now labels SENT as SMTP accepted, completed as batch processing complete,
+and shows unique delivery outcome counts plus Sent-copy semantics. Durable ledger
+states remain unchanged; do not reset accepted mail or retry due to missing Sent.
+
+2026-10-16 — Domain Worker normal SMTP batching implemented by explicit operator
+request. application/worker_send.py owns daily summary/start/control/read, and a
+one-domain-per-claim durable worker (domain_worker_send, also included in all).
+Precheck shows counters, then pending-domain list and batch/interval settings;
+no per-row preview UI. Start confirms the account-scoped recipient plan, builds
+immutable 24-hour exact artifacts and approvals internally, and materializes
+DeliveryService ledger rows. Day checks prohibit sending yesterday's plans.
+Owner advisory lock serializes start/resume/retry. Queued previous-day jobs are
+closed before a new day's start; delays persist as next_run_at and SQL claim gate.
+Legacy dedupe is owner/local-day/domain/account/channel/recipient, independent of
+path, content hash and preview ID. Precheck skips capture if all normal deliveries
+already sent; sender rechecks ledger and versions. Intent commits before SMTP,
+per-delivery checkpoint persists after; stable Message-ID, failed-only explicit
+retry, expired/disconnected-DATA intents UNKNOWN. Stops finish current domain.
+core/mail/sending.py composes exact plain/HTML/CID/evidence MIME and uses shared
+SMTP/proxy connection classes; allowlisted public endpoint, verified TLS, 60s timeout,
+one transient retry only before send_message. No SMTP/IMAP performed during tests.
+Batch preparation failure cleans newly written artifacts. DB stores metadata and
+ledger, large image/body bytes stay in private store. Cloaking approval/send remains
+pending, isolated from normal sending. No runtime history/legacy log deletion.
+
+2026-10-16 — Domain Worker flow correction after legacy comparison: select sender
+accounts before entering targets/precheck, persist Job.account_scope, and propagate
+the scope to ReviewCase.required_account_ids / CaseSource metadata. Normal list only
+shows ready items (valid recipients plus stored Browser Evidence); no-email excluded,
+cloaking/evidence review move to dedicated React routes. Removed advisory/exact preview
+widgets from precheck, retaining server preview compatibility bound to original scope.
+Owned current-day queues are read from DB; normal manual 1–3 image upload validates the
+whole batch and restores all source checks to ready without changing account scopes.
+Cloaking queue remains read-only pending full browser/approval/send migration.
+Integrity bug: relative DOMAINCHECK_ARTIFACT_ROOT resolved differently in API/worker
+CWD. Settings now anchors relative paths to BACKEND_ROOT.parent; existing files from
+the mistaken backend/backend root were copied into the shared store only after matching
+durable size/hash. 7 repaired, all 9 existing artifacts verified; no secrets/body changes.
+
+2026-10-16 — Current capture contract (supersedes earlier custom DNS/NET notes):
+reuse `browser_evidence.capture_normal_report_evidence()` with its default HTTP/DNS,
+DOM destination and passive fallback, exactly as legacy callers do. Web adapter no
+longer injects http_probe/network_guard or validates DNS before capture. Removed
+the added DNS thread pool and unused assert_public_target helper. Optional browser
+proxy is forwarded only when explicitly configured. Adapter still validates output
+paths, manifest/hash, sanitizes metadata and persists owner-scoped artifacts.
+
+2026-10-16 — Follow-up capture failure reproduced on the latest reported URL:
+dnspython timed out against the workstation's configured DNS servers while Windows
+getaddrinfo returned public addresses. PublicEgressPolicy now defaults to bounded
+system resolution (AF_UNSPEC, all returned IPv4/IPv6 checked, 3 seconds, shared pool
+of four workers). Injected resolver behavior remains available for deterministic
+tests. Every redirect/subresource is still revalidated; private/mixed answers fail.
+DNS failure now survives as the fixed `egress_dns_failed` capture diagnostic. Actual
+capture of the reported URL succeeded with two DOM source/destination images after
+this change. This supplements the earlier dependency-only fix.
+
+2026-10-16 — Capture/RBAC correction: backend now declares Playwright 1.62.0;
+capture-enabled workers verify a blank Chromium launch before creating DB clients or
+claiming jobs. Install browsers with the same backend venv. Capture exceptions/legacy
+errors project to fixed `evidence_failure_code` values, never raw details in job DTOs.
+Local runtime was missing Playwright despite its enabled flag; installed it and tested
+real two-image DOM capture against a loopback fixture, then restarted idle workers.
+Admin role is now editable (permission/name/description), as requested. Role keys and
+system delete rules remain stable. Permission replacement materializes missing registered
+codes transactionally, avoiding catalog drift errors. Seed initializes full admin only
+once; later sync retains admin/user selections and labels. Existing session revocation,
+audit and owner isolation apply. This supersedes older catalog-managed-admin notes.
+
+2026-10-16 — Domain Worker exact email preview: `application/domain_worker_preview.py`
+adapts current-day completed `ready` checks to PreviewService, with the existing pure
+legacy formatter/personalization and delivery quality gate. Account selection is the
+only create input; recipients, content and artifacts are server resolved. Permission
+`domain_worker.preview`, POST + CSRF, owned GET options/reload; no SMTP/approval routes.
+Bind check version/result hash and evidence manifest hash as well as existing versions
+and byte fingerprints. One immutable JSON manifest joins 1–3 images as attachments.
+Bundled default logo is materialized as an owned `mail_settings:logo` inline artifact
+without changing UserSettings; custom logo retains its owned artifact. Plain/HTML and
+From display identity are frozen in the private preview payload, never DB/audit bodies.
+React restores only IDs from user/check scoped sessionStorage, revalidates on open and
+every 30 seconds, and hides stale content on validation failure. HTML is displayed as
+escaped source; visual body/logo use JSX. Lifetime 30 minutes, latest revision only.
+Deploy sync-rbac adds the catalog/admin binding; existing user role choices are kept.
+
+2026-10-16 correction: logo mặc định bắt buộc, `core/email_content.py` là helper
+pure (không import package mail connectivity khi compose MIME). Không có logo
+profile → bundled WIN, custom corrupt → fail closed; upload explicit có thể sửa
+custom lỗi. PUT/GET/DELETE `/settings/profile/logo` validate PNG/JPEG <=2 MB,
+owned artifact/profile version/audit; reset không xóa artifact đang được preview.
+Root legacy composer cũng dùng default logo khi thiếu path cấu hình.
+
+Canonical compatibility code chuyển vào `backend/compat`, root chỉ exec wrapper
+giữ __file__/runtime legacy; wheel force-include nội bộ backend và dev-mode-dirs
+`src,compat`, không còn phụ thuộc source root. PyInstaller spec mang đúng canonical
+files + logo/helper; chưa build exe, không đóng gói config.ini thật.
+
+GET `/settings/mail-connectivity` chỉ trả enabled và booleans policy trên accounts
+owned, không mở socket/DNS/đọc mailbox. UI fail closed khi chưa tải status; disable
+endpoint chưa allow. Local bật mail tests cho đúng ba endpoint đang cấu hình;
+giữ exact allowlist/public DNS/TLS guard, không gọi SMTP/IMAP thật để QA.
+
+Signature logo web: asset JPEG đóng gói trong backend, import explicit bằng POST
+`/settings/profile/logo/default` với manage-own + CSRF. Validate bằng image store,
+persist artifact kind `mail_settings:logo` không evidence set, scope owner; profile
+logo/version và audit cập nhật cùng transaction. Reapply cùng bytes idempotent.
+Draft DW load owned artifact, verify hash/size, trả data URL + stable CID artifact
+và HTML body escaped. React dựng text/image bằng JSX, không inject raw HTML.
+`core/mail/content.py` tạo MIME plain + HTML related logo theo cách legacy 64×64
+trước Regards/Kind Regards, fallback cuối body; không SMTP hoặc config.ini.
+Inline logo dùng cùng CID `logo-{artifact_id}` với PreviewService hiện có.
+Kiểm thử đồng thời cũng siết heartbeat bằng owner-scoped row lock ngắn trước
+optimistic update để thao tác stop không làm mất heartbeat do đua version.
+
+DW-01 web: `core/worker_precheck.py`, `application/domain_worker.py`,
+`api/domain_worker.py`, React `features/domain-worker/` triển khai batch precheck
+owned, job_type `domain_worker_precheck`, schema 4, no Redis reuse/no send.
+Tách `resolve_worker_report_recipients` và `render_hosting_email_draft` thành
+helper pure trong phishing_toolkit, local worker vẫn dùng cùng routing và wrapper
+ghi file cũ. Advisory draft dùng email variant Registrar/Registry/Hosting + hàm
+chèn full URL của legacy, chỉ trả trong memory response; không lưu body DB/log.
+Mọi draft bị chặn cho cloaking, no-email, unknown hoặc check khác ngày.
+
+ReviewCase/CaseSource dedupe owner/day/full URL, giữ terminal state và lịch sử nguồn;
+no-email không tạo case. HTTP cloaking chạy song song lookup; Playwright cloaking
+chưa chạy trong DW-01, có pending flag và không mở hành động approve/send. Capture
+thường dùng guarded adapter hiện có theo browser flag, validate/store immutable
+owned evidence trước ready; tắt/lỗi thì evidence_review. Sender/account scope và
+exact immutable preview sẽ được bổ sung trước khi có gửi thật.
+
+Shared durable worker dùng cùng injected clock lúc claim/recover/start/checkpoint,
+gia hạn lease cả stopping để URL hiện tại kết thúc, finalize_stop sau checkpoint;
+sweeper chỉ recover stop đúng job_type, item đang chạy thành unknown. EvidenceSet
+phải flush trước Artifact để giữ composite FK cả khi không có ORM relationship.
+
+Quick Report không override width/padding `.workspace-main`; AppShell và quy
+tắc responsive chung là nguồn duy nhất cho khoảng cách content các page.
+
+UI 2026-10-16: mật độ layout áp dụng ở AppShell, app.css, AppDialog và spacing
+các trang dashboard/admin/mail, không chỉ Quick Report. InvestigationDetails
+trình bày DTO bằng nhãn/giá trị, giữ false/0 và phân biệt thiếu dữ liệu;
+profile dài/raw JSON mặc định đóng. Component không tính lại verdict/routing
+và không phát request. Responsive 4/2/1 nhóm thông số, hai metric/hàng mobile.
+
+Ghi chú vận hành 2026-10-16: Hatch force-include tạo bản sao các module legacy
+trong site-packages kể cả editable install. Sau khi sửa formatter root phải
+cài lại backend và restart process; chỉ uvicorn reload `src` có thể vẫn thiếu
+`render_registrar_email_draft`/`render_registry_email_draft`. Regression packaging
+chạy subprocess ngoài repo cwd, dựng cả browser/CDN/registrar email/registry
+webform và email bằng formatter thật; không probe hay ghi draft.
+
 > Legacy reference only. Do not use this file as the source of truth for the web
 > migration. Use `AGENTS.md`, `docs/implementation-plan.md`, the current source and
 > tests. CACHE-01 now scopes Redis keys by owner/feature/business day/version,
@@ -1091,3 +1277,65 @@ Status sau các nút mở Google/Microsoft trong Quick Report phải dùng khố
 `if/else` statement. Không dùng conditional expression trả về
 `st.success()`/`st.error()` vì Streamlit magic sẽ render `DeltaGenerator` và
 docstring nội bộ ra page.
+
+## CD-01 web Check Domain
+
+API `POST/GET /api/v1/domain-checks/checks` tạo/đọc operation owned cho đúng
+một `target`; DTO trả một `check`, job chỉ có một item. Worker `check_domain`
+gọi chung `run_check` qua adapter và checkpoint item đó. Web
+adapter tắt ghi `case_log.csv`, tạo draft file và manifest cloaking dùng chung;
+chỉ lưu DTO whitelist không có body, secret, file path. Khác CLI/Streamlit,
+full check web không reuse Redis cache. `submit_vt` mặc định false và phải có
+permission `check_domain.submit_vt` cùng key backend. Chưa có React/evidence,
+preview hoặc gửi Check Domain.
+
+React `/domain-check` dùng API owned cho đúng một target và một check. Operation
+ID lưu trong sessionStorage theo user để F5 chỉ GET lại, không POST lần nữa;
+poll chỉ khi operation đang chạy. Kết quả hiển thị theo các field whitelist từ
+backend. `GET /checks/{check_id}/report-guidance` owner scoped đọc check đã hoàn
+thành và profile, gọi formatter thuần của legacy cùng routing form tĩnh; không
+ghi file draft, không submit/gửi. React hiện form + nội dung để copy, không đặt
+điều kiện Browser Evidence hay hiện nút capture/upload. Backend evidence vẫn là
+luồng tùy chọn riêng và Playwright chạy headless trên server khi worker được bật.
+
+Web `run_check(create_drafts=False)` vẫn chọn email registrar từ WHOIS/RDAP/static
+lookup trước nhánh tạo file draft; DTO giữ `registrar_abuse_email_used`. Guidance
+chỉ tạo mẫu email khi recipient hợp lệ và registrar không thuộc WEB_FORM_REGISTRARS,
+loại địa chỉ WHOIS privacy; mẫu dùng `render_registrar_email_draft` tách từ
+`generate_email_drafts`, giữ RNG domain + ngày và thứ tự chọn biến thể cũ.
+Mẫu webform vẫn dùng `get_webform_draft_text`. Không ghi file hoặc gửi SMTP. React chia bốn nhóm
+browser/CDN/registrar/registry, hiện thông số trực tiếp và chỉ thu gọn nội dung
+mẫu dài.
+Registry guidance dùng `result.registry_contact` làm nguồn routing; webform dùng
+`get_registry_webform_draft_text`, email dùng `render_registry_email_draft` tách từ
+`generate_registry_draft`. Nếu contact có cả hai kênh, tạo hai draft riêng;
+không thay email bằng nội dung webform hoặc suy ra route chỉ từ TLD.
+
+## EVID-01 web Browser Evidence
+
+`POST /domain-checks/checks/{id}/evidence/upload` nhận 1–3 ảnh; store kiểm
+MIME/signature/decode/byte/dimension và validate cả batch trước khi ghi. Evidence
+set cùng Artifact records scope theo owner/check, manifest DB chỉ giữ metadata
+allowlist + artifact ID/hash, không giữ local path/DOM snippet. Download dùng
+artifact route đã có và recheck size/hash. Capture là job `browser_evidence` riêng
+và dùng temporary staging dưới private artifact root; terminal page/manifest lỗi
+không được persist. Capture worker chỉ claim job khi chạy riêng với
+`--job-type browser_evidence`; worker mặc định không claim capture. Flag
+`DOMAINCHECK_BROWSER_CAPTURE_ENABLED` mặc định false
+và có thể bật capture trực tiếp không cần proxy; app kiểm URL ở
+HTTP redirect và từng browser request. Upload hoạt động độc
+lập với flag và CD-02 còn phụ trách React/preview/send.
+
+## NET-01 app boundary
+
+`core/networking.py` chặn URL không HTTP(S), port ngoài 80/443, private IPv4/IPv6
+và DNS không public. HTTP redirect probe validate từng hop; Playwright route
+guard mọi request/subresource. Proxy cấu hình là tùy chọn cho cả hai.
+Adapter không persist evidence nếu route guard đã chặn request. App không thể tự
+ngăn DNS rebinding sau khi resolve; direct capture cần mạng worker chặn outbound
+tới mạng nội bộ. Proxy nếu dùng phải pin IP ở connect; capture flag vẫn false
+mặc định. Mail connectivity API cũng
+false mặc định, chỉ delegate sau exact host:port allowlist + DNS public; firewall
+mail riêng vẫn cần. Legacy full Check Domain worker chưa dùng egress proxy này.
+
+SMTP/IMAP connectivity: public DNS validation uses the operating-system resolver (the same resolver as mail sockets), with a three-second guard deadline. Exact host:port allowlisting and rejection of any non-public result remain required. DNS failures return `dns_failed`, separately from endpoint/address policy rejection; tests authenticate only and never send/read mail.

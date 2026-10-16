@@ -160,7 +160,7 @@ class QuickReportWorker:
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], cache: ScopedRedisCache,
                  adapter: QuickReportAdapter, *, now: Callable[[], datetime] = lambda: datetime.now(UTC),
-                 heartbeat_seconds: float = 10) -> None:
+                 heartbeat_seconds: float = 10, job_type: str = "quick_report") -> None:
         self._sessions = session_factory
         self._cache = cache
         self._adapter = adapter
@@ -168,15 +168,18 @@ class QuickReportWorker:
         if not 0 < heartbeat_seconds < 30:
             raise ValueError("heartbeat_seconds must be between 0 and 30")
         self._heartbeat_seconds = heartbeat_seconds
+        self._job_type = job_type
 
     async def run_next(self, worker_token: str) -> UUID | None:
         async with self._sessions() as session:
             async with session.begin():
                 repo = JobRepository(session)
-                job = await repo.claim_next(worker_token=worker_token, job_types=frozenset({"quick_report"}))
+                await repo.recover_expired_stops(now=self._now(), job_types=frozenset({self._job_type}))
+                job = await repo.claim_next(worker_token=worker_token, job_types=frozenset({self._job_type}),
+                                            now=self._now())
                 if job is None:
                     return None
-                await repo.recover_interrupted_items(job=job, worker_token=worker_token)
+                await repo.recover_interrupted_items(job=job, worker_token=worker_token, now=self._now())
                 items = await repo.list_claimed_items(job, worker_token=worker_token)
                 job_id, owner_id = job.id, job.owner_user_id
                 pending_ids = [item.id for item in items if item.state == "pending"]
@@ -188,11 +191,15 @@ class QuickReportWorker:
             async with session.begin():
                 repo = JobRepository(session)
                 job = await repo.get_for_owner(owner_id, job_id)
-                if job is None or job.stop_requested:
+                if job is None:
+                    return job_id
+                if job.stop_requested:
+                    await repo.finalize_stop(owner_user_id=owner_id, job_id=job_id,
+                        worker_token=worker_token, expected_version=job.version)
                     return job_id
                 items = await repo.list_claimed_items(job, worker_token=worker_token)
-                terminal = "failed" if all(item.state == "failed" for item in items) else (
-                    "partial" if failures else "completed"
+                terminal = "completed" if all(item.state == "succeeded" for item in items) else (
+                    "failed" if all(item.state == "failed" for item in items) else "partial"
                 )
                 await repo.finalize_job(
                     job_id=job_id, worker_token=worker_token, expected_version=job.version,
@@ -239,11 +246,11 @@ class QuickReportWorker:
                     return await task
                 async with self._sessions() as session, session.begin():
                     repo = JobRepository(session)
-                    job = await repo.get_for_owner(owner_id, job_id)
+                    job = await OwnedRepository(session, Job, owner_id).get(job_id, for_update=True)
                     if job is None:
                         raise RuntimeError("Quick Report job lease lost")
                     renewed = await repo.heartbeat(job_id=job_id, worker_token=worker_token,
-                        expected_version=job.version, now=self._now())
+                        expected_version=job.version, now=self._now(), allow_stopping=True)
                     if renewed is None:
                         raise RuntimeError("Quick Report job lease lost or stopped")
         finally:

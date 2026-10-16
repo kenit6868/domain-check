@@ -141,10 +141,19 @@ class FilesystemArtifactStore:
         preview_id: UUID,
         data: bytes,
     ) -> StoredPrivateBlob:
+        return self._store_json(owner_user_id, "previews", preview_id, data,
+                                "application/vnd.domaincheck.preview+json")
+
+    def store_evidence_manifest(self, *, owner_user_id: UUID, evidence_set_id: UUID,
+                                data: bytes) -> StoredPrivateBlob:
+        return self._store_json(owner_user_id, "evidence", evidence_set_id, data, "application/json")
+
+    def _store_json(self, owner_user_id: UUID, category: str, resource_id: UUID,
+                    data: bytes, mime_type: str) -> StoredPrivateBlob:
         if not data or len(data) > 5 * 1024 * 1024:
             raise ArtifactValidationError("Preview payload is empty or exceeds 5 MiB")
         artifact_id = uuid4()
-        storage_key = f"users/{owner_user_id}/previews/{preview_id}/{artifact_id}.json"
+        storage_key = f"users/{owner_user_id}/{category}/{resource_id}/{artifact_id}.json"
         staging_dir = self._staging_root / str(uuid4())
         staging_dir.mkdir(parents=False, exist_ok=False)
         staged_path = staging_dir / f"{artifact_id}.json"
@@ -162,7 +171,7 @@ class FilesystemArtifactStore:
             return StoredPrivateBlob(
                 artifact_id=artifact_id,
                 storage_key=storage_key,
-                mime_type="application/vnd.domaincheck.preview+json",
+                mime_type=mime_type,
                 byte_size=len(data),
                 sha256=hashlib.sha256(data).hexdigest(),
             )

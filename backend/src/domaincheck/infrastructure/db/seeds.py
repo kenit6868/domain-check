@@ -33,37 +33,38 @@ async def sync_permission_catalog(session: AsyncSession, *, reset_user_permissio
             )
         )
 
-    user_role_exists = await session.scalar(select(Role.id).where(Role.key == "user")) is not None
+    existing_roles = set(await session.scalars(select(Role.key).where(Role.key.in_(("user", "admin")))))
+    user_role_exists = "user" in existing_roles
     roles: dict[str, Role] = {}
     for key, name, description in (
         ("user", "User", "Default account role; permissions are selected by an administrator."),
-        ("admin", "Administrator", "Full application permissions with normal owner isolation."),
+        ("admin", "Administrator", "Administrator permissions can be edited in role settings."),
     ):
         await session.execute(
             insert(Role)
             .values(key=key, name=name, description=description, system=True)
             .on_conflict_do_update(
                 index_elements=[Role.key],
-                set_={"name": name, "description": description, "system": True},
+                set_={"system": True},
             )
         )
         role = await session.scalar(select(Role).where(Role.key == key))
         assert role is not None
         roles[key] = role
 
-    # Admin follows the code-owned catalog and is refreshed on every deploy.
-    # Existing user selections survive normal deploy-time syncs.
+    # Seed full admin access once. Later syncs retain operator choices for both
+    # system roles, including names and descriptions.
     admin_role = roles["admin"]
     permission_ids = list(
         await session.scalars(
             select(Permission.id).where(Permission.code.in_(ADMIN_PERMISSION_CODES))
         )
     )
-    await session.execute(delete(RolePermission).where(RolePermission.role_id == admin_role.id))
-    session.add_all(
-        RolePermission(role_id=admin_role.id, permission_id=permission_id)
-        for permission_id in permission_ids
-    )
+    if "admin" not in existing_roles:
+        session.add_all(
+            RolePermission(role_id=admin_role.id, permission_id=permission_id)
+            for permission_id in permission_ids
+        )
     if not user_role_exists or reset_user_permissions:
         user_role = roles["user"]
         await session.execute(delete(RolePermission).where(RolePermission.role_id == user_role.id))

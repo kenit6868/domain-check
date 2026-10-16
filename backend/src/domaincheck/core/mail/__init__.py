@@ -1,4 +1,5 @@
 from domaincheck.core.mail.connectivity import (
+    AllowlistedMailConnectionTester,
     ConnectionTestResult,
     ImapConnectionSpec,
     MailConnectionTester,
@@ -8,6 +9,7 @@ from domaincheck.core.mail.connectivity import (
 )
 
 __all__ = [
+    "AllowlistedMailConnectionTester",
     "ConnectionTestResult",
     "ImapConnectionSpec",
     "MailConnectionTester",

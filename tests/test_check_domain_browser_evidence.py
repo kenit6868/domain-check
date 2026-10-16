@@ -170,7 +170,7 @@ class CheckDomainBrowserEvidenceTests(unittest.TestCase):
     def test_check_domain_page_wires_evidence_into_every_send_action(self):
         source = (ROOT / "pages" / "1_Check_Domain.py").read_text(encoding="utf-8")
         email_ui = (ROOT / "email_send_ui.py").read_text(encoding="utf-8")
-        toolkit = (ROOT / "phishing_toolkit.py").read_text(encoding="utf-8")
+        toolkit = (ROOT / "backend" / "compat" / "phishing_toolkit.py").read_text(encoding="utf-8")
         self.assertIn("capture_passive_browser_evidence", source)
         self.assertIn("capture_dom_destination_evidence", source)
         self.assertIn("st.segmented_control", source)
