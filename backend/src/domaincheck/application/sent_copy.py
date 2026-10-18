@@ -54,7 +54,7 @@ class SentCopyService:
     async def _save(self, owner, actor, delivery_id, *, message=None):
         async with self.sessions() as session, session.begin():
             row = await OwnedRepository(session, Delivery, owner).get(delivery_id, for_update=True)
-            if row is None or row.workflow != 'domain_worker' or row.state != 'sent':
+            if row is None or row.workflow not in {'domain_worker', 'provider_replies'} or row.state != 'sent':
                 raise ValueError('Only accepted owned Domain Worker mail can be saved to Sent')
             attempt = await session.scalar(select(DeliveryAttempt).where(DeliveryAttempt.owner_user_id == owner,
                 DeliveryAttempt.delivery_id == row.id, DeliveryAttempt.state == 'sent')

@@ -1,3 +1,4 @@
+import { ForbiddenPage } from '../../../components/shared/StatusPage'
 import { InvestigationDetails } from '../components/InvestigationDetails'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -35,10 +36,10 @@ export function DomainCheckPage() {
     refetchInterval: (query) => query.state.data && activeStates.has(query.state.data.state) ? 2000 : false })
   const current = operation.data ?? (create.data?.id === operationId ? create.data : undefined)
   const busy = create.isPending || Boolean(current && activeStates.has(current.state))
-  if (!canView) return <div className="error-notice" role="alert">Bạn không có quyền xem Check Domain.</div>
+  if (!canView) return <ForbiddenPage message="Bạn không có quyền xem Check Domain." />
   return <section className="space-y-3">
     <header><h1 className="text-xl font-semibold">Check Domain</h1><p className="mt-1 text-xs text-slate-500">Kiểm tra một URL, xem thông số và mẫu báo cáo theo từng kênh.</p></header>
-    <form className="data-panel space-y-2 p-3" onSubmit={(event) => { event.preventDefault(); if (target.trim() && !busy) create.mutate() }}>
+    <form className="data-panel space-y-2 p-3" onSubmit={(event) => { event.preventDefault(); if (target.trim() && !busy && me.permissions.includes('check_domain.check')) create.mutate() }}>
       <div className="flex flex-wrap items-end gap-2"><label className="field flex-1 basis-64" htmlFor="domain-target">Domain hoặc URL cần kiểm tra
         <input id="domain-target" className="w-full" type="text" value={target}
           onChange={(event) => { setTarget(event.target.value) }} placeholder="vd: example.com/login"

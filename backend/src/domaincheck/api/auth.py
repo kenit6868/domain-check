@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from domaincheck.api.dependencies import current_user, get_db_session, require_csrf
 from domaincheck.application.auth import AuthenticatedUser, AuthenticationError, AuthService
 from domaincheck.infrastructure.auth.oidc import OIDCError
+from domaincheck.application.audit_log import persist
 
 
 router = APIRouter(tags=["auth"])
@@ -20,6 +21,7 @@ class MeResponse(BaseModel):
     status: str
     timezone: str
     permissions: list[str]
+    roles: list[str]
 
 
 class TelegramAuthStatusResponse(BaseModel):
@@ -66,11 +68,13 @@ async def telegram_callback(
     session: AsyncSession = Depends(get_db_session),
 ):
     if error or not code or not state:
+        await persist(request, action='auth.login_failed', outcome='denied', metadata={'reason_code': 'provider_denied_or_missing_parameters'})
         response = RedirectResponse("/login?login_error=telegram_denied", status_code=status.HTTP_303_SEE_OTHER)
         response.delete_cookie("dc_oidc_binding", path="/api/v1/auth/telegram/callback")
         return response
     binding = request.cookies.get("dc_oidc_binding")
     if not binding or request.app.state.oidc is None:
+        await persist(request, action='auth.login_failed', outcome='denied', metadata={'reason_code': 'binding_expired_or_missing'})
         response = RedirectResponse('/login?login_error=telegram_expired', status_code=status.HTTP_303_SEE_OTHER)
         response.delete_cookie('dc_oidc_binding', path='/api/v1/auth/telegram/callback')
         return response
@@ -78,7 +82,7 @@ async def telegram_callback(
         claims, _return_path = await request.app.state.oidc.exchange_code(
             code=code, state=state, browser_binding=binding
         )
-        login = await AuthService(session).login_oidc_identity(
+        login = await AuthService(session, request.state.request_id).login_oidc_identity(
             issuer=str(claims["iss"]),
             subject=str(claims["sub"]),
             display_name=str(claims.get("name") or claims.get("preferred_username") or "Telegram user"),
@@ -86,6 +90,9 @@ async def telegram_callback(
             timezone=request.app.state.settings.default_timezone,
         )
     except (OIDCError, AuthenticationError, KeyError) as exc:
+        owner = exc.user_id if isinstance(exc, AuthenticationError) else None
+        await persist(request, owner=owner, actor=owner, action='auth.login_failed', outcome='denied',
+            metadata={'reason_code': exc.reason_code if isinstance(exc, AuthenticationError) else 'oidc_validation_failed'})
         response = RedirectResponse("/login?login_error=telegram_callback", status_code=status.HTTP_303_SEE_OTHER)
         response.delete_cookie("dc_oidc_binding", path="/api/v1/auth/telegram/callback")
         return response
@@ -104,15 +111,17 @@ async def me(user: AuthenticatedUser = Depends(current_user)) -> MeResponse:
         id=str(user.user_id), display_name=user.display_name,
         telegram_username=user.telegram_username, status=user.status,
         timezone=user.timezone, permissions=sorted(user.permissions),
+        roles=list(user.roles),
     )
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
+    request: Request,
     response: Response,
     user: AuthenticatedUser = Depends(require_csrf),
     session: AsyncSession = Depends(get_db_session),
 ) -> None:
-    await AuthService(session).revoke(user.session_id)
+    await AuthService(session, request.state.request_id).revoke(user.session_id)
     response.delete_cookie("dc_session", path="/")
     response.delete_cookie("dc_csrf", path="/")

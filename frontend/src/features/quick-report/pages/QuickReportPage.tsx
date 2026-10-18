@@ -1,4 +1,5 @@
-﻿import { Button } from '../../../components/shared/Button'
+import { ForbiddenPage } from '../../../components/shared/StatusPage'
+import { Button } from '../../../components/shared/Button'
 import { Link, useOutletContext } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
@@ -23,7 +24,7 @@ export function QuickReportPage() {
     queryFn: async ({ signal }) => z.object({ ready: z.boolean(), missing: z.array(z.enum(['brand_name', 'contact_name', 'contact_email'])) }).parse(
       await request<unknown>({ url: '/quick-reports/readiness', signal })),
   })
-  if (!canView) return <div className="error-notice" role="alert">Bạn không có quyền xem Quick Report.</div>
+  if (!canView) return <ForbiddenPage message="Bạn không có quyền xem Quick Report." />
   if (readiness.isPending) return <div className="data-panel p-6" role="status">Đang kiểm tra cấu hình…</div>
   if (readiness.isError) return <div className="error-notice" role="alert">{readiness.error.message}<Button className="secondary-button ml-3" onClick={() => { void readiness.refetch() }}>Thử lại</Button></div>
   if (!readiness.data.ready) {
@@ -50,7 +51,7 @@ function ConfiguredQuickReportPage() {
   const daily = useQuery({ queryKey: ['quick-report', me.id, 'daily', operation?.id, operation?.state],
     queryFn: ({ signal }) => getDailyQuickReports(signal), refetchInterval: active ? 2_000 : 30_000,
     placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === me.id ? previous : undefined })
-  if (!canView) return <div className="error-notice" role="alert">Bạn không có quyền xem Quick Report.</div>
+  if (!canView) return <ForbiddenPage message="Bạn không có quyền xem Quick Report." />
   const error = workflow.create.error ?? workflow.operation.error
   return (
     <section className="quick-report-workspace">

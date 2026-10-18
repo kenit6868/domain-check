@@ -18,14 +18,23 @@ async def get_db_session(request: Request):
 
 
 async def current_user(
+    request: Request,
     dc_session: str | None = Cookie(default=None),
     session: AsyncSession = Depends(get_db_session),
 ) -> AuthenticatedUser:
     if not dc_session:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentication required")
     try:
-        return await AuthService(session).authenticate(dc_session)
+        user = await AuthService(session).authenticate(dc_session)
+        request.state.audit_actor = user
+        return user
     except AuthenticationError as exc:
+        if exc.user_id and exc.session_id:
+            from domaincheck.application.audit_log import persist
+            await persist(request, owner=exc.user_id, actor=exc.user_id,
+                action='auth.' + exc.reason_code, resource_type='session', resource_id=exc.session_id,
+                outcome='denied', metadata={'reason_code': exc.reason_code},
+                event_key=f'session-terminal:{exc.session_id}')
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
 
 

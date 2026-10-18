@@ -15,8 +15,8 @@ export function QuickReportResultCard({ check, index, canOpenForm, extension }: 
   const pending = !['succeeded', 'failed'].includes(check.status)
   return <article className="data-panel overflow-hidden">
     <header className="flex flex-wrap items-center justify-between gap-3 px-3 py-2">
-      <div className="flex min-w-0 items-center gap-3"><span className="text-xs text-slate-500">#{index + 1}</span><h2 className="break-all font-mono text-sm font-semibold">{check.requested_url}</h2></div>
-      <div className="flex items-center gap-2">{check.cache_provenance.reused === true && <span title="Dùng kết quả đã check trong ngày, không kiểm tra mạng lại" className="inline-flex items-center gap-1 text-xs text-sky-600 dark:text-sky-300"><Database size={14} />Cache</span>}<Status status={check.status} /><CopyButton value={check.requested_url} label="Copy URL" /></div>
+      <div className="flex min-w-0 max-w-full items-center gap-2"><span className="text-xs text-slate-500">#{index + 1}</span><h2 className="min-w-0 break-all font-mono text-sm font-semibold">{check.requested_url}</h2><CopyButton value={check.requested_url} label="Copy URL" iconOnly /></div>
+      <div className="flex items-center gap-2">{check.cache_provenance.reused === true && <span title="Dùng kết quả đã check trong ngày, không kiểm tra mạng lại" className="inline-flex items-center gap-1 text-xs text-sky-600 dark:text-sky-300"><Database size={14} />Cache</span>}<Status status={check.status} /></div>
     </header>
     {pending ? <p className="border-t border-slate-100 px-3 py-2 text-sm text-slate-500 dark:border-slate-800" role="status">{check.status === 'not_queued' ? 'Bản ghi cũ chưa có job xử lý. Nhập lại URL ở trên và bấm Kiểm tra để tạo lượt mới.' : check.status === 'running' ? 'Worker đang kiểm tra URL này.' : 'URL đang chờ worker nhận xử lý.'}</p>
       : check.status === 'failed' ? <div className="flex gap-3 px-5 pb-4 text-sm text-rose-600"><AlertTriangle size={18} /><p>Không hoàn tất được lượt kiểm tra URL này.</p></div>

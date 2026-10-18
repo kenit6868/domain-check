@@ -8,7 +8,7 @@ from sqlalchemy import DateTime, cast, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domaincheck.domain.jobs import ITEM_FINAL_STATES, JOB_TERMINAL_STATES, validate_code, validate_result_metadata
-from domaincheck.infrastructure.db.models import Artifact, Job, JobItem, Target
+from domaincheck.infrastructure.db.models import Artifact, AuditEvent, Job, JobItem, Target
 from domaincheck.infrastructure.db.owned import OwnedRepository
 
 
@@ -310,7 +310,7 @@ class JobRepository:
         if unfinished is not None:
             raise ValueError("Cannot finalize a job with unfinished items")
         observed = now or datetime.now(UTC)
-        return await self._session.scalar(
+        row = await self._session.scalar(
             update(Job)
             .where(
                 Job.id == job_id,
@@ -327,6 +327,12 @@ class JobRepository:
             )
             .returning(Job)
         )
+        if row:
+            self._session.add(AuditEvent(owner_user_id=row.owner_user_id, actor_user_id=row.actor_user_id,
+                action='jobs.completed', resource_type='job', resource_id=row.id, outcome=row.state,
+                request_id=f'job:{row.id}', metadata_allowlist={'job_type': row.job_type, 'state': row.state},
+                event_key=f'job-final:{row.id}:{row.version}'))
+        return row
 
     async def finalize_stop(
         self,
@@ -345,7 +351,7 @@ class JobRepository:
         )
         if running_item is not None:
             raise ValueError("Cannot stop while an item is still running")
-        return await self._session.scalar(
+        row = await self._session.scalar(
             update(Job)
             .where(
                 Job.id == job_id,
@@ -361,6 +367,12 @@ class JobRepository:
             )
             .returning(Job)
         )
+        if row:
+            self._session.add(AuditEvent(owner_user_id=row.owner_user_id, actor_user_id=row.actor_user_id,
+                action='jobs.stopped', resource_type='job', resource_id=row.id, outcome='stopped',
+                request_id=f'job:{row.id}', metadata_allowlist={'job_type': row.job_type},
+                event_key=f'job-final:{row.id}:{row.version}'))
+        return row
 
     async def recover_expired_stops(
         self,

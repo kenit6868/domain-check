@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from uuid import uuid4
+from types import SimpleNamespace
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -19,6 +20,11 @@ from domaincheck.api.domain_checks import router as domain_checks_router
 from domaincheck.api.domain_worker import router as domain_worker_router
 from domaincheck.api.evidence_review import router as evidence_review_router
 from domaincheck.api.cloaking_review import router as cloaking_review_router
+from domaincheck.api.provider_replies import router as provider_replies_router
+from domaincheck.api.cloudflare_worker import router as cloudflare_worker_router
+from domaincheck.api.link_status import router as link_status_router
+from domaincheck.api.audit_log import router as audit_log_router
+from domaincheck.api.dashboard import router as dashboard_router
 from domaincheck.api.form_tasks import router as form_tasks_router
 from domaincheck.application.context import SystemClock
 from domaincheck.core.mail import AllowlistedMailConnectionTester, StandardMailConnectionTester
@@ -26,6 +32,7 @@ from domaincheck.infrastructure.auth.oidc import RedisOIDCStateStore, TelegramOI
 from domaincheck.infrastructure.artifacts import FilesystemArtifactStore
 from domaincheck.infrastructure.cache import ScopedRedisCache
 from domaincheck.infrastructure.db.session import Database
+from domaincheck.infrastructure.db.seeds import sync_permission_catalog
 from domaincheck.infrastructure.secrets import SecretEnvelope
 from domaincheck.settings import Settings, get_settings
 
@@ -47,9 +54,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        yield
-        await application.state.database.dispose()
-        await application.state.redis.aclose()
+        try:
+            # Run after schema migrations, before accepting traffic. Upsert new
+            # codes/initial roles and retire obsolete codes without resetting
+            # existing role selections. The seed serializes API replicas/CLI.
+            async with application.state.database.session_factory() as session, session.begin():
+                await sync_permission_catalog(session)
+            yield
+        finally:
+            await application.state.database.dispose()
+            await application.state.redis.aclose()
 
     app = FastAPI(
         title="Domain Check Tool API",
@@ -94,8 +108,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         supplied = request.headers.get("X-Request-ID", "")
         request_id = supplied if supplied and len(supplied) <= 128 and supplied.isascii() else str(uuid4())
         request.state.request_id = request_id
-        response = await call_next(request)
+        from domaincheck.api.audit_capture import capture_command
+        try:
+            response = await call_next(request)
+        except Exception:
+            await capture_command(request, SimpleNamespace(status_code=500))
+            raise
         response.headers["X-Request-ID"] = request_id
+        await capture_command(request, response)
         return response
 
     @app.exception_handler(HTTPException)
@@ -124,6 +144,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return LiveResponse(status="ok", service="domaincheck-api")
 
     app.include_router(auth_router, prefix=settings.api_prefix)
+    app.include_router(audit_log_router, prefix=settings.api_prefix)
+    app.include_router(dashboard_router, prefix=settings.api_prefix)
     app.include_router(admin_router, prefix=settings.api_prefix)
     app.include_router(artifacts_router, prefix=settings.api_prefix)
     app.include_router(cache_router, prefix=settings.api_prefix)
@@ -133,6 +155,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(domain_worker_router, prefix=settings.api_prefix)
     app.include_router(evidence_review_router, prefix=settings.api_prefix)
     app.include_router(cloaking_review_router, prefix=settings.api_prefix)
+    app.include_router(provider_replies_router, prefix=settings.api_prefix)
+    app.include_router(cloudflare_worker_router, prefix=settings.api_prefix)
+    app.include_router(link_status_router, prefix=settings.api_prefix)
     app.include_router(form_tasks_router, prefix=settings.api_prefix)
     return app
 

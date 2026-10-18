@@ -145,10 +145,12 @@ class AdminService:
         )
         user.authz_version += 1
         user.version += 1
-        await self._revoke_user_sessions(user.id)
+        await self._refresh_permission_sessions(user)
         self._audit(
             owner_user_id=user.id, action="users.roles.replace", resource_type="user",
-            resource_id=user.id, metadata={"role_count": len(role_ids)},
+            resource_id=user.id, metadata={"role_count": len(role_ids),
+                'added_role_ids': sorted(str(value) for value in role_ids - old_role_ids),
+                'removed_role_ids': sorted(str(value) for value in old_role_ids - role_ids)},
         )
         await self._session.flush()
 
@@ -187,6 +189,7 @@ class AdminService:
         role = await self._session.scalar(select(Role).where(Role.id == role_id).with_for_update())
         if role is None:
             raise AdminNotFound("Role not found")
+        old_codes = set(await self._session.scalars(select(Permission.code).join(RolePermission).where(RolePermission.role_id == role.id)))
         if permission_codes is not None:
             validate_permission_codes(permission_codes)
             await self._replace_role_permissions(role, permission_codes)
@@ -202,10 +205,12 @@ class AdminService:
         for user in affected:
             user.authz_version += 1
             user.version += 1
-            await self._revoke_user_sessions(user.id)
+            await self._refresh_permission_sessions(user)
         self._audit(
             owner_user_id=self._actor_user_id, action="roles.update", resource_type="role",
-            resource_id=role.id, metadata={"permission_count": len(permission_codes) if permission_codes is not None else None},
+            resource_id=role.id, metadata={"permission_count": len(permission_codes) if permission_codes is not None else None,
+                'added_permissions': sorted(permission_codes - old_codes) if permission_codes is not None else [],
+                'removed_permissions': sorted(old_codes - permission_codes) if permission_codes is not None else []},
         )
         await self._session.flush()
         return role
@@ -288,11 +293,29 @@ class AdminService:
         await self._session.execute(delete(RolePermission).where(RolePermission.role_id == role.id))
         self._session.add_all(RolePermission(role_id=role.id, permission_id=item.id) for item in permissions)
 
-    async def _revoke_user_sessions(self, user_id: UUID) -> None:
+    async def _refresh_permission_sessions(self, user: User) -> None:
+        # Preserve only currently valid sessions; never revive revoked, expired
+        # or previously stale tokens. Worker bindings retain the version bump.
         await self._session.execute(
+            update(Session).where(
+                Session.user_id == user.id,
+                Session.revoked_at.is_(None),
+                Session.expires_at > datetime.now(UTC),
+                Session.authz_version == user.authz_version - 1,
+            ).values(authz_version=user.authz_version, version=Session.version + 1)
+        )
+
+    async def _revoke_user_sessions(self, user_id: UUID) -> None:
+        from domaincheck.application.audit_log import record
+        identities = list(await self._session.scalars(
             update(Session).where(Session.user_id == user_id, Session.revoked_at.is_(None))
             .values(revoked_at=datetime.now(UTC), version=Session.version + 1)
-        )
+            .returning(Session.id)))
+        for identity in identities:
+            await record(self._session, owner=user_id, actor=self._actor_user_id,
+                action='auth.session_revoked', resource_type='session', resource_id=identity,
+                request_id=self._request_id, metadata={'reason_code': 'administrative_change'},
+                event_key=f'session-terminal:{identity}')
 
     def _audit(self, *, owner_user_id: UUID, action: str, resource_type: str, resource_id: UUID | None, metadata: dict) -> None:
         self._session.add(AuditEvent(

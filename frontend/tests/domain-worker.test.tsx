@@ -1,5 +1,6 @@
+import { Theme } from '@radix-ui/themes'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, render, screen, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -26,8 +27,55 @@ const item = { id: checkId, item_id: checkId, requested_url: 'https://ready.exam
 const operation = { id: operationId, state: 'completed', stage: 'completed', business_day: '2026-10-16',
   sender_account_ids: [accountId], checks: [item] }
 function view(path = '/domain-worker') { return render(<QueryClientProvider client={createQueryClient()}>
-  <MemoryRouter initialEntries={[path]}><AppRouter /></MemoryRouter></QueryClientProvider>) }
+  <Theme><MemoryRouter initialEntries={[path]}><AppRouter /></MemoryRouter></Theme></QueryClientProvider>) }
 afterEach(() => { cleanup(); sessionStorage.clear(); vi.restoreAllMocks() })
+
+it('drops yesterday URL and saved selection but allows explicitly opening history', async () => {
+  sessionStorage.setItem(key, operationId)
+  const calls: string[] = []
+  const restore = installApiMock((config) => {
+    calls.push(config.url ?? '')
+    if (config.url === '/me') return me
+    if (config.url === '/domain-worker/workspace') return { business_day: '2026-10-18', current_id: null, send_job_id: null, phase: 'idle', locked: false, history: [{ ...historyEntry, business_day: '2026-10-17', send_job_id: null, send_state: null }] }
+    if (config.url === '/domain-worker/accounts') return accounts
+    if (config.url === '/domain-worker/readiness') return { ready: true, missing: [] }
+    if (config.url === `/domain-worker/prechecks/${operationId}`) return { ...operation, business_day: '2026-10-17', is_current_day: false }
+    throw new Error(`Unexpected ${config.url ?? ''}`)
+  })
+  try {
+    view(`/domain-worker?batch=${operationId}`)
+    await screen.findByText('Lịch sử batch (50 lượt gần nhất)')
+    expect(screen.queryByLabelText('Tiến trình precheck')).not.toBeInTheDocument()
+    expect(calls).not.toContain(`/domain-worker/prechecks/${operationId}`)
+    expect(sessionStorage.getItem(key)).toBeNull()
+    expect(screen.getByLabelText('Danh sách URL')).toBeEnabled()
+    await userEvent.click(screen.getByText('Lịch sử batch (50 lượt gần nhất)'))
+    await userEvent.click(screen.getByRole('button', { name: 'Xem kết quả' }))
+    expect(await screen.findByText(/Lịch sử ngày trước/)).toBeVisible()
+    expect(screen.getByText(item.requested_url)).toBeVisible()
+    expect(calls.some((url) => /send-summary|send-jobs/.test(url))).toBe(false)
+  } finally { restore() }
+})
+
+it('clears the displayed completed precheck when workspace rolls into the next day', async () => {
+  let nextDay = false
+  const restore = installApiMock((config) => {
+    if (config.url === '/me') return me
+    if (config.url === '/domain-worker/workspace') return { business_day: nextDay ? '2026-10-18' : '2026-10-17', current_id: nextDay ? null : operationId, send_job_id: null, phase: 'idle', locked: false, history: [{ ...historyEntry, business_day: '2026-10-17', send_job_id: null, send_state: null }] }
+    if (config.url === '/domain-worker/accounts') return accounts
+    if (config.url === '/domain-worker/readiness') return { ready: true, missing: [] }
+    if (config.url === `/domain-worker/prechecks/${operationId}`) return { ...operation, business_day: '2026-10-17', is_current_day: !nextDay }
+    throw new Error(`Unexpected ${config.url ?? ''}`)
+  })
+  try {
+    view()
+    await screen.findByLabelText('Tiến trình precheck')
+    nextDay = true
+    await waitFor(() => { expect(screen.queryByLabelText('Tiến trình precheck')).not.toBeInTheDocument() }, { timeout: 5000 })
+    expect(sessionStorage.getItem(key)).toBeNull()
+    expect(screen.getByLabelText('Danh sách URL')).toBeEnabled()
+  } finally { restore() }
+})
 
 it('pauses and restores a job, resumes it, then permanently stops without offering resume or retry', async () => {
   let state = 'running'

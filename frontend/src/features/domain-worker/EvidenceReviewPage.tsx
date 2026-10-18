@@ -1,3 +1,5 @@
+import { ForbiddenPage } from '../../components/shared/StatusPage'
+import { AppSelect, AppSelectItem } from '../../components/shared/AppSelect'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
@@ -25,7 +27,7 @@ export function EvidenceReviewPage({ kind = 'evidence' }: { kind?: 'evidence' | 
   const queue = useQuery({ queryKey: ['worker-review', me.id, kind], enabled: me.permissions.includes(`${permission}.view`),
     queryFn: async ({ signal }) => queueSchema.parse(await request({ url: `/domain-worker/reviews/${kind}`, signal, timeout: 30000 })), refetchInterval: 5000 })
   const busy = mutating || Boolean(queue.data?.some((entry) => entry.id === selected && entry.state === 'sending'))
-  if (!me.permissions.includes(`${permission}.view`)) return <p role="alert">Bạn không có quyền xem trang này.</p>
+  if (!me.permissions.includes(`${permission}.view`)) return <ForbiddenPage message="Bạn không có quyền xem trang này." />
   return <section className="space-y-3">
     <header className="flex flex-wrap items-center justify-between gap-2"><div><h1 className="text-xl font-semibold">{kind === 'cloaking' ? 'Cloaking Review' : 'Domain Evidence Review'}</h1>
       <p className="mt-1 text-xs text-slate-500">{kind === 'cloaking' ? 'Chọn case → đối chiếu bằng chứng → kết luận → xem draft → gửi trực tiếp.' : 'Chọn case → bổ sung ảnh → xem đúng draft → gửi trực tiếp. Không tạo job gửi mới.'}</p></div>
@@ -95,9 +97,9 @@ function CaseEditor({ id, me, onComplete, onBusy, kind }: { kind: 'evidence' | '
     {kind === 'cloaking' && <div className="space-y-2 rounded-lg bg-amber-50 p-3 dark:bg-amber-950/30">
       <p className="text-xs font-semibold">Kết quả precheck: {data.cloaking?.verdict ?? 'INCONCLUSIVE'} · Điểm: {data.cloaking?.score ?? 0}/100</p>
       {Boolean(Object.keys(data.cloaking?.profiles ?? {}).length) && <details className="text-xs"><summary className="cursor-pointer font-medium">Quan sát theo profile</summary><div className="mt-2 overflow-x-auto"><table className="data-table"><thead><tr><th>Profile</th><th>HTTP</th><th>URL cuối / tiêu đề</th></tr></thead><tbody>{Object.entries(data.cloaking?.profiles ?? {}).map(([name, profile]) => <tr key={name}><td>{profile.label ?? name}</td><td>{profile.status_code ?? 'Chưa rõ'}</td><td className="max-w-96 break-all">{profile.final_url}<p className="text-xs text-slate-500">{profile.title}</p></td></tr>)}</tbody></table></div></details>}
-      <label className="field">Kết luận duyệt<select disabled={busy || data.state === 'sent' || data.deliveries.some((delivery) => ['sent', 'sending', 'unknown'].includes(delivery.state))} value={decision} onChange={(event) => { setDecisionChoice(event.target.value); setFiles([]); setUseCapture(false); setDifference(false); setPrepared(null); setConfirmed(false); if (fileInput.current) fileInput.current.value = '' }}>
-        <option value="confirmed_cloaking">Xác nhận cloaking — hai ảnh đối chiếu</option><option value="not_cloaking">Không cloaking — bằng chứng report thường riêng</option>
-      </select></label>
+      <label className="field">Kết luận duyệt<AppSelect disabled={busy || data.state === 'sent' || data.deliveries.some((delivery) => ['sent', 'sending', 'unknown'].includes(delivery.state))} value={decision} onValueChange={(event) => { setDecisionChoice(event); setFiles([]); setUseCapture(false); setDifference(false); setPrepared(null); setConfirmed(false); if (fileInput.current) fileInput.current.value = '' }}>
+        <AppSelectItem value="confirmed_cloaking">Xác nhận cloaking — hai ảnh đối chiếu</AppSelectItem><AppSelectItem value="not_cloaking">Không cloaking — bằng chứng report thường riêng</AppSelectItem>
+      </AppSelect></label>
       {decision === 'confirmed_cloaking' ? <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={difference} disabled={busy} onChange={(event) => { setDifference(event.target.checked); setConfirmed(false) }} />Tôi xác nhận hai ảnh của đúng URL này thể hiện nội dung khác nhau giữa các profile.</label>
         : <p className="text-xs">Bổ sung 1–3 ảnh report thường. Draft và tệp gửi sẽ không chứa bằng chứng hoặc kết luận cloaking.</p>}
       {!data.deliveries.some((delivery) => ['sent', 'sending', 'unknown'].includes(delivery.state)) && me.permissions.includes('cloaking_review.skip') && <Button disabled={busy} loading={skip.isPending} onClick={() => { skip.mutate() }}>Bỏ qua case này</Button>}

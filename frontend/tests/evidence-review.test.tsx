@@ -1,3 +1,4 @@
+import { Theme } from '@radix-ui/themes'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -26,7 +27,7 @@ const exact = { id: planId, check_id: checkId, revision: 1, fingerprint: 'a'.rep
 const base = { ...row, check_id: checkId, evidence_version: 0, accounts, source_job_ids: [planId], images: [], preview: null, deliveries: [] }
 const images = [{ id: imageId, mime_type: 'image/png', byte_size: 100 }]
 function view(path = `/domain-evidence-review?case=${caseId}`) {
-  return render(<QueryClientProvider client={createQueryClient()}><MemoryRouter initialEntries={[path]}><AppRouter /></MemoryRouter></QueryClientProvider>)
+  return render(<QueryClientProvider client={createQueryClient()}><Theme><MemoryRouter initialEntries={[path]}><AppRouter /></MemoryRouter></Theme></QueryClientProvider>)
 }
 afterEach(() => { cleanup(); sessionStorage.clear(); vi.restoreAllMocks() })
 

@@ -7,7 +7,7 @@ export interface MailAccount {
   smtp_transport: 'implicit_tls' | 'starttls' | 'plain'
   enabled: boolean
   is_default: boolean
-  imap: { host: string; port: number; username: string; mailbox: string; sent_mailbox: string; junk_mailbox: string; cloudflare_mailbox: string; evidence_mailbox: string }
+  imap: { reply_mailboxes?: string[] | null; host: string; port: number; username: string; mailbox: string; sent_mailbox: string; junk_mailbox: string; cloudflare_mailbox: string; evidence_mailbox: string }
   proxy: { scheme: 'socks5' | 'socks4' | 'http' | null; host: string; port: number | null }
   signature: { contact_name: string; contact_email: string; signature_role: string }
   has_smtp_password: boolean

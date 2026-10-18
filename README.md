@@ -1,4 +1,4 @@
-﻿# Domain Check Tool — Phát hiện & báo cáo domain phishing
+# Domain Check Tool — Phát hiện & báo cáo domain phishing
 
 Quick Report dùng cùng chiều rộng tối đa và padding content của AppShell,
 không có override riêng theo trang.
@@ -281,6 +281,7 @@ Copy-Item backend/.env.example backend/.env
 docker compose up -d db redis
 python -m pip install -e ".\backend[test]"
 python -m alembic -c backend/alembic.ini upgrade head
+# Tùy chọn: API cũng tự seed khi khởi động sau migration.
 domaincheck-admin sync-rbac
 # Sau khi Telegram identity đã login một lần, bootstrap bằng stable OIDC subject:
 domaincheck-admin bootstrap-admin --telegram-subject "<stable-oidc-subject>"
@@ -397,7 +398,7 @@ Quick Report dừng tự làm mới khi batch hoàn tất; mỗi khối domain x
 Quick Report giữ kết quả và lượt check đang chạy khi F5 hoặc chuyển menu; danh sách đã check được khôi phục vào ô nhập. **Xóa cache** dọn kết quả, cache lọc và ô nhập để bắt đầu lại. Kết quả lưu trong RAM của server, mất khi restart server; bấm **Kiểm tra tất cả** tạo lượt check thay thế.
 
 Quick Report web không yêu cầu backend chạy cùng máy với Chrome. Load extension từ
-`chrome_extension/cloudflare-profile-worker/`, mở **Options** và cấu hình exact origin
+`chrome_extension/cloudflare-profile-worker/`, hoặc tải ZIP bằng nút **Tải extension** trên Quick Report. Giải nén vào thư mục cố định, vào `chrome://extensions`, bật Developer mode và chọn **Load unpacked** tới thư mục có `manifest.json`. Khi có bản mới, nút hiển thị **Tải bản cập nhật** nếu phiên bản đã kết nối cũ hơn bản đi kèm web. Thay nội dung trong đúng thư mục đã cài rồi **Reload** extension; tải ZIP không tự cài hay cập nhật Chrome. Sau đó mở **Options** và cấu hình exact origin
 ứng dụng (HTTPS ở production; HTTP chỉ localhost). Build FE với ID extension công khai
 trong `VITE_FORM_ASSISTANT_EXTENSION_ID`. Task Google/Microsoft có TTL ngắn, dùng một
 lần, chỉ nằm trong session của tab và luôn `fill_only`; nếu extension chưa kết nối,
@@ -441,14 +442,21 @@ RBAC không tự cấp quyền nghiệp vụ theo tên role. `admin` được se
 lần đầu; sau đó sửa được quyền, tên và mô tả tại **Role & quyền**, như `user`
 và role tùy chỉnh. Khi admin kích hoạt một
 tài khoản thường, hệ thống gán role `user`; seed mới cấp toàn bộ quyền nghiệp vụ,
-trừ `users.*` và `roles.*`. Admin có thể điều chỉnh tại
+trừ `users.*`, `roles.*` và `audit_logs.view_all`. Admin có thể điều chỉnh tại
 **Role & quyền**. Bộ mặc định bao gồm gửi mail, đọc IMAP và chạy worker; các bước
 preview/approve và owner isolation vẫn được thực thi.
 
-Lưu role tự bổ sung permission đã được code đăng ký nhưng còn thiếu trong database;
-không cần chạy CLI chỉ để sửa lỗi catalog chưa đồng bộ. `sync-rbac` giữ quyền, tên
+API tự đồng bộ permission catalog khi khởi động sau migration. Deploy mới seed
+54 quyền hiện hành và role mặc định. Khi thêm tính năng, đăng ký quyền trong
+`backend/src/domaincheck/domain/authz.py` cùng guard API/FE; lần khởi động tiếp
+theo tự bổ sung mã mới vào DB để admin chọn, không tự grant cho role đã tồn tại.
+Bảy mã không có chức năng web đã bị xoá khỏi catalog và được seed dọn khỏi
+DB/binding cũ; quyền còn hiệu lực được giữ nguyên. Lưu role cũng tự bổ sung mã
+code đã đăng ký còn thiếu trong DB. `sync-rbac` vẫn dùng được và giữ quyền, tên
 và mô tả đã chọn cho cả `admin` lẫn `user`. Sau khi
-đổi quyền role, các phiên của thành viên bị thu hồi; người dùng đăng nhập lại.
+đổi quyền role hoặc gán lại role, phiên hợp lệ được giữ và quyền mới áp dụng ở
+request tiếp theo. Giao diện cập nhật ngay sau lưu, khi quay lại tab hoặc mỗi
+30 giây. Khóa tài khoản hoặc chủ động thu hồi phiên vẫn yêu cầu đăng nhập lại.
 Để áp dụng lại bộ mặc định trên DB đã có role `user`, chạy
 `domaincheck-admin sync-rbac --reset-user-permissions`; lệnh thay toàn bộ quyền
 của role này và thu hồi phiên thành viên.
@@ -1401,3 +1409,219 @@ không click/type/submit. Cloaking capture dùng detector đa profile cũ (gồm
 Googlebot Smartphone) và cặp ảnh khác biệt mạnh nhất; ảnh chỉ là bản chờ duyệt.
 Upload dùng quyền `cloaking_review.upload`; preview cần `.preview` và `.approve`,
 gửi cần `.send` và `.approve`, bỏ qua cần `.skip`. Không có migration hoặc dependency mới.
+# Phản hồi NCC trên web
+
+Mở **Phản hồi NCC** (`/provider-replies`), chọn tài khoản và khoảng ngày (tối đa
+32 ngày), rồi bấm **Đồng bộ phản hồi**. Đọc Inbox, Junk/Spam, thư mục cần bằng
+chứng và Cloudflare; ưu tiên tên thư mục thực tế do server công bố. Lỗi một thư
+mục không làm mất thư đọc được từ các thư mục khác. GET/refresh chỉ đọc dữ liệu
+đã lưu, không tự mở IMAP, đánh dấu đã đọc hoặc gửi mail.
+
+Mở một thư để xem email gốc, tóm tắt tiếng Việt, yêu cầu và liên kết báo cáo đã gửi.
+Danh sách dài cuộn trong bảng với tiêu đề cố định. Bấm Mở thư sẽ đưa ngay đến
+phần xử lý; nút Về danh sách giữ nguyên case và draft đang mở.
+Gửi phản hồi xong vẫn giữ dòng trong danh sách và cập nhật trạng thái tại chỗ;
+bộ lọc thư có yêu cầu phản hồi không tự ẩn thư đã gửi. Email gốc mặc định đóng,
+bấm tiêu đề để mở khi cần đọc.
+Ghép theo Message-ID/thread hoặc domain + NCC, luôn trong đúng tài khoản. Việc ghép
+lịch sử chỉ bổ sung ngữ cảnh, không khóa yêu cầu Cloudflare hợp lệ chưa có delivery web.
+Thư portal/no-reply, acknowledgement và các nhóm cũ không cần reply
+giữ nguyên quy tắc phân loại của bản trước. Portal có mẫu tham khảo để copy thủ công.
+
+Mặc định lọc Cloudflare và thư cần phản hồi. Chọn **Lọc NCC** để xem riêng từng NCC
+hoặc tất cả; hiện chỉ Cloudflare được mở capture/preview/send, NCC khác chỉ xem.
+Thư Cloudflare phải có yêu cầu rõ ràng, kênh email và Message-ID hợp lệ. Nút chụp
+DOM luôn hiện cho thư có thể xử lý, kèm lý do nếu thiếu URL/quyền hoặc backend tắt capture.
+Mặc định bật **Mở cửa sổ Chrome/Chromium** khi chụp DOM để quan sát browser riêng.
+Cửa sổ nằm trên máy chạy backend (local thì trên máy đang dùng); khi backend ở
+server hoặc không có desktop, tắt lựa chọn này để chạy ngầm. Không dùng Chrome
+profile cá nhân, không nhập dữ liệu hay submit form. Capture giới hạn 180 giây;
+lỗi trả mã cụ thể như thiếu Chromium, timeout hoặc lỗi điều hướng, không chỉ báo
+capture thất bại chung. Ảnh cũ vẫn được giữ nếu lần chụp mới thất bại.
+
+Thanh tiến độ đồng bộ hiển thị thư mục đang đọc, số thư đã kiểm tra/tổng thư của
+thư mục, kết quả từng thư mục và thông báo hoàn tất/lỗi/giới hạn. Đây là số đếm thật,
+không phải thời gian ước tính. Reload/tab khác đọc lại tiến độ backend; không tự mở
+thêm lượt đồng bộ. Tiến độ không còn cập nhật quá 5 phút báo gián đoạn để thử lại.
+
+Báo cáo cũ chưa có delivery trong web vẫn khớp được bằng Message-ID gốc trong
+header Sent cùng tài khoản và NCC/người nhận. Đồng bộ tìm tối đa 500 header Sent
+từ 31 ngày trước ngày bắt đầu đã chọn; đây là phạm vi đọc, không xóa lịch sử.
+
+Với thư cần phản hồi: bổ sung URL/thông tin đã xác minh bằng tiếng Anh, chụp DOM
+bằng hàm chung hoặc upload 1–3 ảnh PNG/JPEG <=10 MB/ảnh, tạo draft rồi xác nhận
+gửi đúng thread. Có thể sửa subject/body và tạo lại preview; chỉnh dữ liệu sẽ hủy
+xác nhận cũ. Email có logo/chữ ký theo đúng tài khoản; ảnh/manifest/hash được khóa
+trước SMTP. Yêu cầu pháp lý/định danh cần xác nhận của người có thẩm quyền; không
+tự tạo tài liệu pháp lý. Cloudflare technical reply cần DOM destination đã capture.
+
+Gửi lỗi chắc chắn có thể thử lại với cùng Message-ID; sent/unknown không tự gửi
+lại. Bản sao Sent dùng cùng MIME. Đồng bộ có đọc header Sent giới hạn để phát hiện
+phản hồi cũ khớp thread + người nhận + tài khoản; trạng thái này phân biệt với SMTP
+accepted, không khẳng định thư tới người nhận. Đánh dấu đã đọc là thao tác riêng,
+kiểm UIDVALIDITY trước khi ghi vào IMAP.
+
+Dùng quyền `provider_replies.view/sync/mark_seen/preview/send` đã có. Capture dùng
+thêm `check_domain.capture` và flag browser capture hiện có. IMAP/SMTP cần endpoint
+allowlist, public DNS, TLS và secret mã hóa hiện có; không đọc `config.ini`.
+Không migration hoặc dependency mới; nội dung thư/draft nằm trong private artifact,
+database chỉ giữ metadata/tham chiếu. Giới hạn sync mỗi thư mục 1–500, thư quá 2 MiB
+không nhập, mỗi lượt có ngân sách 120 giây + socket timeout; các phần chưa đọc báo riêng.
+
+
+2026-10-17 - Provider Replies web removes the backend browser window checkbox.
+Capture defaults to headless in UI/API; progress, source/destination images and
+specific errors remain. API show_browser stays available for compatibility.
+
+2026-10-17 - Provider Replies list status uses color badges and icons: amber pending,
+green replied, blue sending, red failed, violet unknown. Text labels remain visible
+and icons are decorative; sending animation respects reduced motion. UI only.
+
+
+2026-10-17 - Dynamic Provider Replies folders: in Mail settings, edit an account's
+IMAP section and use the reply-folder list to add/remove exact server folder names
+(e.g. `3 - Can bang chung`, using the actual accents/spaces on your mail server).
+Each folder can contain multiple providers. Saving replaces the legacy Inbox/Junk/
+Cloudflare/Evidence reading selection; existing settings remain effective until
+saved. New accounts start with INBOX only. Sent mailbox remains separate for header
+reconciliation. No folders are created, renamed or moved on the mail server.
+Select All providers and disable Only needs reply to inspect other providers;
+only Cloudflare currently supports replying.
+
+
+### Cloudflare Worker web (2026-10-18)
+
+Open **Cloudflare Worker**, enter URLs and run precheck. Review each generated
+report, enter your Cloudflare Dashboard Cookie, choose a 0-300 second delay and
+confirm before starting. Pause/Resume/Cancel and failed retry keep accepted rows;
+UNKNOWN reports stay locked. Initial exclusions are hidden behind a toggle.
+Configure your Cloudflare Account ID under **Mail settings > Cloudflare Dashboard**,
+independently from SMTP accounts. It must match Cookie curr-account when present.
+
+Start `run_cloudflare_worker.bat` from the repository root alongside the API and
+normal workers. It uses the backend venv and existing master key. The dedicated
+runner listens only on 127.0.0.1:8789; Cookie is kept in runner RAM. Reloading the
+page preserves a running session; restarting the runner requires entering Cookie
+again. No browser extension or Chrome profile is needed for this menu.
+
+`DOMAINCHECK_CLOUDFLARE_RUNNER_URL` points API processes to the same private runner.
+`DOMAINCHECK_CLOUDFLARE_SUBMIT_ENABLED=false` disables submissions; default true
+still requires owned permissions, a Cookie and explicit confirmation. Keep the
+runner private. Existing Streamlit JSON history is not automatically imported into
+an owner account; reconcile legacy submissions before resubmitting old lists.
+Details: [Cloudflare Worker validation](docs/testing/cloudflare-worker-web-2026-10-18.md).
+
+2026-10-18 - Cloudflare precheck now shows preparation, measured URL progress, current
+URL and completion. No fabricated ETA/percentage while waiting for the batch.
+The send panel displays the Account ID bound to the batch. An empty Account ID
+setting still permits submission only when Cookie curr-account supplies a valid ID;
+if both sources are missing, the runner rejects before any outbound POST.
+
+2026-10-18 - Cloudflare Cookie diagnostics distinguish missing curr-account,
+unreadable/ambiguous curr-account, a mismatch with Mail settings, and a mismatch
+with an already-bound batch. With settings empty, a fresh precheck accepts a valid
+Cookie from another account. If curr-account is absent, configure Account ID or
+provide the complete Cookie; no outbound submission occurs without a resolved ID.
+
+2026-10-18 - Account ID priority correction: a saved valid Cloudflare Account ID
+is used even when curr-account is missing or unreadable. A readable, unambiguous
+different Cookie account still blocks a mismatch. With no saved Account ID, Cookie
+fallback supports URL/JSON wrappers, explicit account fields and nested account.id;
+ambiguous or absent IDs require configuration instead of guessing.
+# Audit Log trên web
+
+Menu **Audit Log** (`/audit-log`) có ba tab **Đăng nhập & phiên**, **Hoạt động**,
+**Quản trị & cấu hình**. Lọc theo khoảng ngày (mặc định 7 ngày, tối đa 367 ngày),
+chức năng, hành động, kết quả và Request ID; toàn hệ thống thêm bộ lọc tên/ID
+người dùng. Bảng phân trang 50 sự kiện/lượt; **Xem chi tiết** hiển thị đối tượng
+và metadata đã lọc. Thời gian và ngày lọc theo múi giờ tài khoản.
+
+Cấp `audit_logs.view` tại **Role & quyền** để hiện menu và xem lịch sử cá nhân.
+Thêm `audit_logs.view_all` để xem toàn hệ thống, gồm đăng nhập thất bại chưa xác
+định danh tính. API/FE cùng kiểm tra quyền. Hai mã tự seed nhưng không tự thêm
+vào role cũ; role user mới chỉ mặc định có quyền xem cá nhân.
+
+Trước khi mở API chạy `python -m alembic -c backend/alembic.ini upgrade head`.
+Migration `0005_audit_log` giữ log cũ, hỗ trợ vô danh và chống lặp phiên.
+Login/logout/revoke được ghi từ khi nâng cấp; phiên hết hạn ghi khi phiên tiếp
+tục gọi API. Không backfill hoặc suy đoán lịch sử đăng nhập chưa được ghi.
+“Đã tiếp nhận yêu cầu” chỉ xác nhận HTTP, không đồng nghĩa email/report đã gửi.
+Kết quả gửi dựa trên ledger. Không ghi Cookie/token/password, nội dung email/ảnh
+hoặc raw request body/URL. Check Link Status chỉ audit số lượng, không lưu URL/
+kết quả check. Không có sửa/xóa/export log; bản này không thu thập IP/User-Agent.
+
+# Check Link Status trên web
+
+Sidebar và thanh điều hướng mobile dùng icon riêng cho từng menu để dễ phân biệt.
+Menu **Cấu hình mail** mở trang `/settings/mail` để quản lý tài khoản và cài đặt mail.
+
+Phân quyền web tách quyền xem menu và quyền thao tác. Khi cấp quyền chức năng,
+chọn quyền `view` tương ứng cùng các thao tác cần dùng. Gán role từ trang Người dùng
+cần cả `users.assign_roles` và `roles.view` để tải danh sách role. Tải artifact draft
+cần quyền xem tính năng và quyền preview (Quick Report dùng `submit_netcraft`).
+Chi tiết phạm vi: [rà soát permission](docs/testing/permission-audit-2026-10-18.md).
+
+Menu **Check Link Status** (`/link-status`) là công cụ kiểm tra dùng chung trong
+ứng dụng, không gắn kết quả với tài khoản email hay workspace người dùng. Dán
+URL/ghi chú có nhóm thương hiệu rồi bấm **Kiểm tra trạng thái**. Không giới hạn
+số URL hoặc độ dài danh sách ở cấp ứng dụng; URL trùng được loại trong lần nhập.
+Hệ thống xử lý dần, tối đa 5 probe đồng thời trên mỗi process backend.
+
+Kết quả trả trực tiếp về tab, chỉ giữ tạm trong bộ nhớ trang, không ghi DB hay
+cache kết quả. Mỗi lần bấm check/kiểm tra lại đều chạy mới. F5, rời trang hoặc
+đóng tab sẽ bỏ kết quả tạm; mất kết nối giữ phần đã nhận để xem trước khi
+check lại. Không chạy job nền hoặc phục hồi lịch sử theo tài khoản.
+
+Lọc kết hợp **Trạng thái tên miền** và **Trạng thái website**; kết quả chỉ xem
+trực tiếp trên trang, không có chức năng xuất Excel/CSV.
+Nhấn URL trong bảng kết quả để mở website ở tab mới và kiểm tra đối chiếu.
+Cột **Chuyển hướng** hiển thị từng mã 301/302/3xx và URL đích mở tab mới;
+không ghi nhận chuyển hướng thì hiện “—”. Cột HTTP giữ mã phản hồi cuối.
+**Xem dữ liệu đối chiếu** hiển thị RDAP/WHOIS, DNS, HTTP và redirect. Giữ đăng nhập,
+quyền menu/check và CSRF hiện có; không cần cấu hình email/Cookie Cloudflare.
+
+Phân biệt domain hold, CF chặn phishing/malware, Challenge/WAF, DNS/TLS/timeout/
+server và URL 404/410. HTTP OK chỉ xác nhận phản hồi HTTP. Quan sát từ backend
+không tự chứng minh domain đã bị thu hồi hay takedown thành công.
+
+Backend dùng `tldextract==5.3.0` với PSL đóng gói offline. Không có migration;
+module/schema Streamlit legacy giữ tương thích. Các snapshot cũ không còn được
+menu đọc/ghi; không tự xóa dữ liệu runtime đã có.
+
+2026-10-18 - Check Link Status uses the operating-system resolver for A/AAAA and
+public-address validation before HTTP/redirect requests. Direct DNS timeouts no
+longer hide reachable sites as DNS errors. DNS source is shown as SYSTEM in raw
+observations; HTTP OK may refer to a redirect destination, shown in final_url.
+
+Permission edits preserve valid login sessions. A protected API 401 still redirects to login with a Vietnamese explanation; 403 refreshes current permissions without ending the session.
+
+The header shows the display name, Telegram @username when available, and rounded role badges beside the name/username block (all assigned roles), including on mobile.
+
+### Web Dashboard: personal and system
+
+Dashboard shows persisted web statistics, daily trends, current-day review queues, active/paused workers and permission-filtered shortcuts. Use Today / 7 days / 30 days, workflow and per-user filters. User rows are paginated in groups of 50; worker lists show at most 20 batches per workflow. Refresh manually or every 30 seconds while the tab is active.
+
+`dashboard.view` enables personal statistics. Add `dashboard.view_all` for system aggregates and user summaries, regardless of role name. It does not grant access to another user's messages, evidence, jobs or actions. Personal totals include only features with their view permission; changing role permissions replaces the dashboard query immediately when /me refreshes. Without dashboard.view, permitted shortcuts remain available. Audit previews independently require audit view/view_all.
+
+First rollout for an existing installation: `python -m domaincheck.cli sync-rbac --grant-dashboard` (backend venv). This explicitly adds dashboard.view to the user role and both dashboard permissions to admin; custom roles remain unchanged. Ordinary startup/sync preserves subsequent operator choices. Fresh installations get these defaults from seed. This rollout has been applied locally.
+
+URL totals count distinct requested URLs among successful saved checks, not actual network request counts. Daily bars count distinct URLs per business day and may sum differently from range totals. Check/Cloudflare dates use the record's business day; review queues use today's business day in the viewer timezone. Successful emails count one delivery at its first successful SMTP checkpoint timestamp, grouped in the viewer timezone; retries and already-submitted Cloudflare records are not new successes. Failed/UNKNOWN delivery cards are current backlog across all dates. These figures do not prove takedown or mailbox delivery. Legacy CSV/runtime data and temporary Link Status probes are not included. Dashboard never probes websites, reads IMAP, sends mail or modifies workflow state.
+
+Dashboard status values use localized color badges: green for active/success, blue for running/request accepted, amber for waiting/stale/UNKNOWN, neutral for locked/stopped, red for failures/denials.
+
+Web dropdown controls use the shared themed Select: rounded popup, hover/selected styles and checkmark, keyboard/typeahead navigation, Escape and light/dark styling. Applied to Dashboard, Audit Log, review decisions, link filters, mail transport/proxy, provider replies and draft selection.
+# Giao diện trạng thái web
+
+Cột Kết quả của Audit Log dùng badge gọn trên một dòng, màu phân biệt thành công, tiếp nhận, thất bại và chờ/chưa rõ kết quả.
+
+Domain Worker chỉ tự khôi phục precheck của ngày hiện tại theo múi giờ tài khoản. Sang ngày mới, lượt hoàn tất ngày trước không tự hiện lại từ URL/bộ nhớ tab; vẫn có thể mở bằng **Lịch sử batch → Xem kết quả** để xem lịch sử, không gửi lại bằng kết quả cũ. Batch còn thực sự hoạt động vẫn giữ khóa an toàn.
+
+Thông báo toast hiển thị ở góc phải phía trên trên toàn bộ web.
+
+Quick Report hiển thị icon copy ngay cạnh URL trên từng thẻ kết quả, có tooltip và phản hồi khi sao chép.
+
+Web có favicon khiên xanh với dấu kiểm, đồng bộ nhận diện Domain Check Tool và dùng được trên theme sáng/tối.
+
+Trong bảng kết quả Check Link Status, biểu tượng copy bên cạnh URL và URL chuyển hướng sao chép nguyên đường dẫn vào clipboard; nhấn URL vẫn mở website trong tab mới. Ba bộ đếm **Lỗi DNS**, **Domain Hold**, **CF Phishing** phía trên bảng cập nhật theo kết quả đã nhận của toàn bộ lần kiểm tra hiện tại, không đổi khi lọc bảng. Lỗi DNS đếm `DNS_ERROR`, không gộp `DNS_NXDOMAIN`.
+
+Màn hình lỗi tải phiên đăng nhập có nút thử lại. Các trang thiếu quyền dùng giao diện 403 với hướng dẫn liên hệ quản trị viên; đường dẫn không tồn tại hiển thị 404 và liên kết về Dashboard. Các màn hình hỗ trợ theme sáng/tối và thiết bị di động.

@@ -103,7 +103,8 @@ class MailSettingsService:
                     secrets[field] = value
             self._store_secrets(account, secrets)
         account.version += 1
-        self._audit("mail_accounts.update", account.id, {"transport": account.smtp_transport})
+        self._audit("mail_accounts.update", account.id, {"transport": account.smtp_transport,
+            'fields': sorted(set(asdict(values)) | changed_secret_fields)})
         await self._session.flush()
         return account
 

@@ -167,6 +167,17 @@ class FilesystemArtifactStoreTests(unittest.TestCase):
         self.assertFalse(can_read_artifact("unknown:evidence", frozenset({"check_domain.view"})))
         self.assertFalse(can_read_artifact("check_domain", frozenset({"check_domain.view"})))
 
+    def test_draft_download_cannot_bypass_preview_permission(self):
+        for feature in ('domain_worker', 'cloaking_review', 'domain_evidence_review', 'provider_replies', 'quick_report'):
+            with self.subTest(feature=feature):
+                view = f'{feature}.view'
+                action = 'quick_report.submit_netcraft' if feature == 'quick_report' else f'{feature}.preview'
+                self.assertFalse(can_read_artifact(f'{feature}:draft', frozenset({view})))
+                self.assertFalse(can_read_artifact(f'{feature}:draft', frozenset({action})))
+                self.assertTrue(can_read_artifact(f'{feature}:draft', frozenset({view, action})))
+        self.assertFalse(can_read_artifact('check_domain:draft', frozenset({'check_domain.view', 'check_domain.preview'})))
+        self.assertFalse(can_read_artifact('lead_triage:draft', frozenset({'lead_triage.view', 'lead_triage.preview'})))
+
 
 if __name__ == "__main__":
     unittest.main()

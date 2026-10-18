@@ -3,6 +3,7 @@
 import unittest
 import asyncio
 import os
+from unittest.mock import AsyncMock, patch
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -128,7 +129,8 @@ class FoundationTests(unittest.TestCase):
                     "/api/v1/auth/telegram/callback?error=access_denied&error_description=sensitive"
                 )
 
-        response = asyncio.run(run())
+        with patch('domaincheck.api.auth.persist', new_callable=AsyncMock):
+            response = asyncio.run(run())
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/login?login_error=telegram_denied")
         self.assertNotIn("sensitive", response.text)
@@ -136,7 +138,7 @@ class FoundationTests(unittest.TestCase):
     def test_default_role_includes_business_permissions_and_excludes_administration(self):
         self.assertIn("cloaking_review.send", PERMISSIONS_BY_CODE)
         self.assertEqual(DEFAULT_USER_PERMISSIONS, frozenset(
-            code for code in PERMISSIONS_BY_CODE if not code.startswith(("users.", "roles."))
+            code for code in PERMISSIONS_BY_CODE if not code.startswith(("users.", "roles.")) and code not in {'audit_logs.view_all', 'dashboard.view_all'}
         ))
         validate_permission_codes({"quick_report.view"})
         with self.assertRaises(ValueError):

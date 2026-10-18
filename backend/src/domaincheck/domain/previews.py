@@ -33,6 +33,8 @@ class PreparedDelivery:
     sender_email: str | None = None
     sender_name: str = ""
     sender_label: str = ""
+    in_reply_to: str | None = None
+    references: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +66,10 @@ def validate_prepared_deliveries(deliveries: list[PreparedDelivery]) -> None:
             raise ValueError("Preview sender is invalid")
         if not delivery.text_body.strip():
             raise ValueError("Preview text body is required")
+        for header in (delivery.in_reply_to, delivery.references):
+            if header is not None and (len(header) > 998 or any(c in header for c in '\r\n')
+                                       or not re.fullmatch(r'(?:<[^<>\s]+>\s*)+', header)):
+                raise ValueError('Reply thread header is invalid')
         key = (delivery.sender_account_id, recipient, delivery.draft_identity)
         if key in seen:
             raise ValueError("Preview contains a duplicate delivery identity")

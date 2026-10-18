@@ -1,3 +1,4 @@
+import { ForbiddenPage } from '../../../components/shared/StatusPage'
 import { QueryError } from '../../../components/shared/QueryError'
 import { AppDialog } from '../../../components/shared/AppDialog'
 import { Button } from '../../../components/shared/Button'
@@ -18,14 +19,14 @@ export function RolesPage() {
   const [editing, setEditing] = useState<RoleDetail | 'new' | null>(null)
   const roles = useQuery({ queryKey: ['admin', 'roles'], queryFn: ({ signal }) => getRoles(signal), enabled: canView })
   const permissions = useQuery({ queryKey: ['admin', 'permissions'], queryFn: ({ signal }) => getPermissions(signal), enabled: canView })
-  const refresh = () => { void client.invalidateQueries({ queryKey: ['admin', 'roles'] }) }
+  const refresh = () => { void client.invalidateQueries({ queryKey: ['auth', 'me'] }); void client.invalidateQueries({ queryKey: ['admin', 'roles'] }) }
   const save = useMutation({ meta: { successMessage: 'Đã lưu role và bộ quyền.' }, mutationFn: (input: { id?: string; key: string; name: string; description: string; permissions: string[] }) => input.id ? updateRole(input.id, input) : createRole(input), onSuccess: () => { refresh(); setEditing(null) } })
   const remove = useMutation({ meta: { successMessage: 'Đã xóa role.' }, mutationFn: deleteRole, onSuccess: refresh })
   const { ask, confirmation } = useConfirmation()
   const confirmRemove = (role: RoleDetail) => { ask({ title: 'Xóa role?', description: `Role ${role.name} sẽ bị xóa. Hãy kiểm tra ảnh hưởng đến quyền truy cập của thành viên trước khi tiếp tục.`, label: 'Xác nhận xóa', action: () => { remove.mutate(role.id) } }) }
   const error = save.error ?? remove.error
   const canManage = me.permissions.includes('roles.manage')
-  if (!canView) return <div className="error-notice" role="alert">Bạn không có quyền xem trang role.</div>
+  if (!canView) return <ForbiddenPage message="Bạn không có quyền xem trang role." />
   return <section>{confirmation}{roles.isError && <QueryError message={roles.error.message} onRetry={() => { void roles.refetch() }} />}{permissions.isError && <QueryError message={permissions.error.message} onRetry={() => { void permissions.refetch() }} />}<div className="page-heading flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><p className="eyebrow">Access policy</p><h1 className="page-title">Role & quyền</h1><p className="page-description">Quyền của admin, user và role tùy chỉnh đều có thể sửa tại đây.</p></div>{canManage && <Button className="primary-button flex items-center gap-2" onClick={() => { setEditing('new') }}><Plus size={17} />Tạo role</Button>}</div>{error && <div className="error-notice" role="alert">{error.message}</div>}<div className="mt-3 grid gap-3 xl:grid-cols-2">{roles.isPending ? <div className="data-panel p-4">Đang tải role…</div> : roles.data?.map((role) => <article className="data-panel p-4" key={role.id}><div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-2"><Shield size={18} className="text-indigo-600" /><h2 className="font-semibold">{role.name}</h2>{role.system && <span className="role-chip">Hệ thống</span>}</div><p className="mt-1 font-mono text-xs text-slate-500">{role.key}</p></div>{canManage && <div className="flex gap-2"><Button className="secondary-button" onClick={() => { setEditing(role) }}>Sửa quyền</Button><Button className="danger-button" disabled={role.system || remove.isPending} onClick={() => { confirmRemove(role) }}>Xóa</Button></div>}</div><p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{role.description || 'Không có mô tả.'}</p><p className="mt-3 text-xs font-medium text-slate-500">{role.permissions.length} quyền</p><div className="mt-2 flex max-h-28 flex-wrap gap-1 overflow-y-auto">{role.permissions.map((code) => <code className="permission-chip" key={code}>{code}</code>)}</div></article>)}</div>{editing && permissions.data && <RoleEditor role={editing} permissions={permissions.data} busy={save.isPending} onClose={() => { setEditing(null) }} onSave={(value) => { save.mutate(value) }} />}</section>
 }
 

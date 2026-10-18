@@ -1,5 +1,51 @@
 # CLAUDE.md
 
+2026-10-18 — Audit Log web: reuse AuditEvent with migration 0005 for nullable
+owner/actor only on anonymous events, actor_type scope check, nullable unique
+event_key and occurred_at/id index. Read-only GET /audit-logs and /audit-logs/{id}:
+fixed owner unless both view/view_all, anonymous global only, local-date range
+<=367 days, escaped name/UUID filters, stable timestamp/UUID cursor, 50/100 page,
+metadata allowlist/no-store. No edit/delete/export/TTL or synthetic backfill.
+Catalog now 54; user defaults exclude both audit/dashboard view_all, existing grants retained.
+Auth success/logout transactional; failed callbacks and observed expired/stale
+sessions persist independently with 2s deadline and fixed warning on failure.
+Session terminal event_key dedupes polling/revocation/logout. Never persist raw
+token/code/state/provider errors, request bodies/URLs, IP or User-Agent. Admin
+revocation logs each session; role changes safe permission deltas; mail field names
+only. SMTP intent/outcome/recovery share ledger transactions and UNKNOWN handling.
+Job completion/stop audit shares version-guarded transitions. HTTP command events
+are accepted/denied/failed observations, not proof of external success; normal GET/
+polling skipped. Link Status emits count-only start/end/interrupted with no target
+or result persistence. UI has three tabs and server filtering/detail. Existing
+Cloudflare/Netcraft outcomes normalize for display/filter without rewriting history.
+See docs/testing/audit-log-web-2026-10-18.md.
+
+2026-10-18 — Retired seven unused web permissions: check_domain.preview/send,
+link_status.export and lead_triage.view/check/preview/send. Catalog now 50 codes.
+RETIRED_PERMISSION_CODES is an explicit deletion allowlist; seed deletes only these
+inert rows/bindings, preserves unknown rows and all active role choices, increments
+affected Role.version once, retains sessions/worker authz versions. Auth reads the
+current permission joins every request; retired codes had no active API behavior.
+API lifespan runs sync_permission_catalog in a transaction before traffic;
+PostgreSQL transaction advisory lock serializes replicas and CLI. First deploy
+seeds admin/current catalog and user/non-admin defaults; subsequent boots upsert
+new registered codes without granting them to existing roles. Migrate schema first;
+seed failure fails startup and still disposes DB/Redis clients. No schema migration
+or dependency/config change. CLI sync-rbac remains optional/manual. Unsupported
+draft artifact kinds fail closed; old Alembic revision snapshots remain historical.
+
+2026-10-18 — Permission audit: runtime catalog read-only matched all 57 codes.
+UsersPage role-choice query/action now requires roles.view plus users.assign_roles;
+Check Domain submit handler rechecks check_domain.check; Cloudflare mail-settings
+link respects mail_accounts.view_own. Generic artifact downloads for feature:draft
+require feature view AND feature.preview (Quick Report: submit_netcraft), matching
+preview endpoint redaction. No DB/role grant/catalog/migration change. New regression
+audits 97 protected method/path pairs, registered codes, missing action and CSRF,
+and rejects newly added unguarded business routes unless explicitly accounted for.
+FE tests deny all 11 feature direct routes without protected requests. Reserved
+catalog codes do not imply implemented web functionality; see
+docs/testing/permission-audit-2026-10-18.md.
+
 2026-10-16 — Domain Worker batch lifecycle/UX consistency. New worker_batches.py
 uses one PostgreSQL transaction advisory lock per owner for create/start/resume/retry,
 covering precheck and send queues together (other users/features are independent).
@@ -241,7 +287,8 @@ I/O ngoài event loop và chỉ audit code/transport đã sanitize. Save account
 tự gọi tester. Test dùng mock hoàn toàn; production vẫn bị chặn bởi NET-01 egress.
 
 Administrative mutations nằm ở `application/admin.py` và `api/admin.py`. Thay
-status/role tăng `authz_version`, revoke session, chỉ ghi audit metadata allowlist và
+status/role tăng `authz_version`; status thu hồi phiên, role đồng bộ version cho
+phiên còn hợp lệ (không khôi phục phiên revoked/expired/stale), chỉ ghi audit metadata allowlist và
 serialize invariant admin hoạt động cuối cùng bằng PostgreSQL advisory lock trong
 transaction. System role do seed quản lý. Bootstrap là lệnh local explicit theo
 Telegram issuer + subject, không theo username hay thứ tự login. Actor chỉ có
@@ -1519,3 +1566,218 @@ current-day normal case. Detail exposes enabled owned sender choices, initially
 unselected. Only explicit preview under the owner/case advisory lock binds the
 chosen enabled owned IDs. Existing nonempty scope remains enforced. Upload and
 exact preview validation are unchanged; no default account inference or SMTP.
+# Provider Replies web
+
+The list has a bounded scroll area and sticky table header. Case selection focuses
+and scrolls to the detail region once per selected ID; polling does not move focus.
+Returning to the list preserves the mounted editor and draft/confirmation state.
+The actionable filter selects needs_reply regardless of sent status. Send/detail
+updates patch existing list cache rows immediately then invalidate for authoritative
+backend state; sent rows keep their place. Original email details is closed by default.
+
+`backend/compat/provider_replies.py` is canonical; root is an exec wrapper preserving
+legacy __file__/runtime paths. Wheel includes the canonical module; packaged imports
+do not create/migrate its global JSON runtime. PhishingTool.spec includes its source.
+
+`core/provider_mail.py` adds the guarded IMAP boundary (allowlisted exact endpoint,
+public DNS, TLS, 60s sockets). It reuses canonical parsing/classification/build_reply,
+does not call legacy cache/send helpers. Readonly SELECT + BODY.PEEK, INTERNALDATE
+filtered in actor timezone, UIDVALIDITY per folder. Inbox/Junk/Evidence/Cloudflare
+are isolated; defaults resolve against actual advertised folder names. Header-only
+Sent sync is bounded, validates From, and supplies metadata for same-account thread
+and recipient reconciliation. Search starts 31 days before the selected start date,
+at most 500 headers, including original legacy reports for source matching.
+Explicit seen checks UIDVALIDITY before STORE.
+
+`application/provider_replies.py` uses existing ReviewCase(case_type=provider_reply)
+and ReviewSnapshot(feature=provider_replies) for metadata; original ProviderMail JSON
+is an owned immutable provider_replies:message artifact. No new table/migration.
+Case identity = account + Message-ID, UIDVALIDITY/mailbox/UID fallback. Moved messages
+update their location without replacing original content. Global case lookup under
+owner+digest advisory lock dedupes across folder/day changes. Source report matching
+requires accepted Delivery in the same owner/account, by thread IDs or Check domain
+plus provider, or a referenced original Sent Message-ID with matching recipient/provider
+and verified sender account. Sent-only matching does not manufacture a Delivery.
+Historical source matching is informational for Cloudflare: an owned original
+Cloudflare email with legacy needs_reply, email channel and valid Message-ID can
+capture/preview/send without a Delivery match. Other providers are read-only on web
+until explicitly supported. Enforce this policy in capture, preview and send.
+Snapshot contains no body/credential.
+
+Preview resource review_case binds case version, source-locked account/recipient,
+In-Reply-To/References, profile/account versions, evidence/manifest/logo hashes.
+PreparedDelivery optional thread headers are validated and serialized into exact
+payload; shared MIME composer and SentCopyService support provider_replies. Existing
+normal mail payloads retain their prior shape. Preview edits do not bypass the stable
+business identity case_id/account/reply-v1. SENDING intent commits before SMTP;
+SENT/UNKNOWN never reset, failed retries reuse Message-ID, expired claims become UNKNOWN.
+Owner/case session advisory lock covers direct SMTP; preview/capture take its xact
+counterpart. Sync takes an account xact lock until database commit. No send jobs or
+process launch for SMTP. Browser evidence capture uses the existing isolated process.
+
+Only explicit provider_replies sync/seen/send actions reach mail servers. GET never
+opens IMAP. UI keeps selection in URL, shows original plain text/reading aid, exact
+English preview, partial folder errors and distinct UNKNOWN/Sent-copy status.
+Legal/identity requires explicit approval at preview; Cloudflare technical replies
+require DOM evidence rather than an invented link. Signature fields come from owned
+profile/account, not client input. No secret or raw mail body in DB/audit/logs.
+
+Sync accepts optional sync_id and publishes throttled real IMAP folder/processed/
+total progress into ReviewSnapshot(feature=provider_replies_progress), in separate
+short transactions while the request retains its account advisory lock. Owned GET
+/provider-replies/sync-progress reads this snapshot without IMAP. Commit imported
+results before publishing completed; stale run IDs cannot overwrite a newer run.
+After 300s without updates GET reports interrupted (no durable job/process needed).
+React defaults to Cloudflare/action-required filters, restores live progress after
+reload, and shows capture even when disabled with the concrete permission/flag reason.
+Provider capture accepts show_browser (default true), binds headed mode on the
+existing bounded review subprocess. LegacyBrowserCaptureAdapter accepts headless
+(default true), so other capture consumers retain existing execution mode. No user
+Chrome profile is attached. The child writes only whitelisted failure codes into
+its private temporary error.json; parent preserves them instead of dropping to
+generic capture_failed. CaptureFailed maps to safe specific HTTP409 diagnostics.
+Window is displayed on backend host, never streamed to a remote user's browser.
+
+
+2026-10-17 - Provider Replies web removes the backend browser window checkbox.
+Capture defaults to headless in UI/API; progress, source/destination images and
+specific errors remain. API show_browser stays available for compatibility.
+
+2026-10-17 - Provider Replies list status uses color badges and icons: amber pending,
+green replied, blue sending, red failed, violet unknown. Text labels remain visible
+and icons are decorative; sending animation respects reduced motion. UI only.
+
+
+2026-10-17 - IMAP reply_mailboxes is an optional JSON list (max 30, each non-empty
+name <=500 chars, no controls; trimmed and deduplicated). None/missing retains the
+legacy folder selection/autodiscovery. An explicit list, including [], overrides
+legacy receive folders. Provider detection stays message-based; Sent header matching
+remains separate. Progress totals reflect unique selected folders plus detected Sent.
+Account editor converts legacy fields into editable rows when opened; only explicit
+save persists the new list. Legacy fields/API stay compatible. No DB migration.
+
+
+2026-10-18 - Cloudflare Dashboard Cookie worker web: application/cloudflare_worker.py
+owns per-user settings and batch snapshots in ReviewSnapshot plus CloudflareRecord
+ledger, with owner advisory transaction locks. No DB migration. Account ID is a
+public per-user cloudflare_settings snapshot (not SMTP credentials); Cookie never
+persists. application/cloudflare_runner.py executes one URL at a time with RAM
+sessions, heartbeat/runner claims, explicit approval and current permissions/day.
+cloudflare_runner.py is an authenticated private HTTP service, one process per DB
+via session advisory lock, with a domain-separated HMAC token from the existing
+master key. API replicas on the same host all dispatch to that service, not to
+arbitrary API-local cookie variables. Network calls occur outside DB transactions.
+Profile/payload/hash bindings are checked at start and each intent. Interruptions
+mark in-flight work UNKNOWN after 90s, never blindly retry. Full URL terminals stay
+protected across web history/draft changes; clear hides workspace, retains ledger.
+Old active-day scope is cancelled when a new day starts. Legacy JSON is not imported.
+Default submit is enabled under explicit permission/confirmation; an operator can
+switch it off with DOMAINCHECK_CLOUDFLARE_SUBMIT_ENABLED. Child CDN checks have a
+180s bound and no Cookie, Dashboard POST has 30s timeout/no redirects/no retry.
+Canonical cloudflare_dashboard_session.py and cloudflare_abuse_api.py moved into
+backend/compat with root wrappers, wheel/PyInstaller includes. Pure URL annotation
+parser moved to core/cloudflare_input.py and shared by legacy/web. No dependency
+version changes; reinstall package/reload idle runner after canonical edits.
+
+2026-10-18 - Cloudflare progress is UI-only: pending POST is indeterminate; CHECKING
+uses persisted processed/urls count with reduced-motion-safe visual transitions and
+a semantic progress element. Precheck response seeds query cache to avoid stale
+prior-batch progress. Account ID already exposed by the owned batch DTO is now shown
+in the send panel. Fallback logic remains unchanged; regression proves blank settings
++ valid Cookie curr-account works, and missing both prevents any submitter call.
+
+2026-10-18 - Replaced substring-based Cloudflare runner exception classification
+with explicit CloudflareConflict.code. Missing/invalid Cookie account is no longer
+reported as an account mismatch. Private RPC returns fixed reason codes and public
+API maps them to safe Vietnamese messages, never raw Cookie/exception content.
+Regression covers fresh precheck switching to another valid Cookie account while
+old-batch retry remains bound; validation rejects before calling the submitter.
+Read-only live metadata confirmed recent CHECKED batches had neither settings ID
+nor bound batch ID; no runtime records or Cookies were changed during diagnosis.
+
+2026-10-18 - Fixed the runner guard that rejected unreadable curr-account before
+using a configured Account ID. Parsing inability is not a proven mismatch: only
+reject missing/ambiguous Cookie identity when no configured ID is available.
+Readable differing Cookie IDs and existing batch bindings remain mandatory guards.
+Canonical parser prefers explicit account fields over unrelated user IDs, supports
+bounded URL/JSON wrappers and direct/nested account forms, and rejects conflicting
+repeated curr-account cookies. Config IDs require exactly 32 hex characters.
+Read-only live checks confirmed a valid saved ID and an unbound fresh batch; no
+Cookie or raw ID was printed. Reinstalled compat modules and reloaded idle runner.
+
+2026-10-18 - Identity investigation: read-only batch metadata shows recent sending
+batches bound to the currently configured Account ID, different from older batches.
+Report email/email2 come from the immutable owner contact_email profile, independent
+of Dashboard Cookie/account identity. Initial duplicate history may be excluded
+without a new POST. Added a transport regression proving new account path + exact
+new Cookie header while reporter email remains profile-based. No production logic,
+runtime records or credentials changed; core regressions 5/5 passed.
+# Link Status web (2026-10-18)
+
+Core `backend/src/domaincheck/core/link_status.py` returns independent registration,
+DNS and website observations; HTTP 404/410 or CF Challenge never imply domain death.
+Offline PSL tldextract 5.3.0, HTTPS IANA-bootstrap RDAP with domain binding, bounded
+WHOIS fallback and exact-host DNS plus registrable NS. Probe subprocess deadline 45s.
+
+Application/API link_status is stateless: POST /link-status/check streams NDJSON
+start/result/heartbeat/complete into the requesting browser. No ReviewSnapshot,
+owner workspace, results DB/cache, GET recovery or server export. No application
+URL count/text length cap. O(n) input dedupe, shared ThreadPoolExecutor(max_workers=5),
+only five async workers per request, bounded output queue. Disconnect cancels
+scheduling; already-running subprocesses finish within deadline. Login/permission/
+Origin/CSRF remain. Auth may read DB; investigation results never do.
+
+React component state only; unmount/reload discards observations and aborts stream.
+Recheck always sends a fresh request. Two AND-combined status filters; no Excel/CSV export. No persistence or query cache. Partial interrupted stream
+shows retained observations and explicit retry. Existing old snapshots are unused,
+not deleted. No migration or mail/profile/Cookie dependency. See
+`docs/testing/link-status-web-2026-10-18.md`.
+
+2026-10-18 - Link Status DNS correction: core/link_status.py uses bounded (3s)
+socket.getaddrinfo for exact-host A/AAAA observations and an injected resolver for
+its PublicEgressPolicy (including RDAP/HTTP redirect checks). This aligns DNS with
+requests sockets without changing shared browser/mail egress behavior. Every
+returned address must remain public; mixed private/public answers fail closed.
+On OS lookup failure, detailed dnspython fallback retains timeout/SERVFAIL/NXDOMAIN
+distinctions. Successful OS lookup has source=SYSTEM and no synthetic CNAME/NS
+records. Parent probe still has the 45s subprocess deadline; no result persistence.
+
+DNS fix validation: backend 295 total, 137 passed / 158 integration skips
+(no isolated DB/Redis configured); tests namespace was explicitly scoped to
+backend/tests to avoid collision with legacy tests. Legacy 420 keeps the existing
+4 failures / 7 errors. compileall passed. No frontend change or dependency change.
+
+Session invalidation UI: QueryCache and MutationCache propagate protected API 401 to the cached auth/me error state. AppShell redirects prior authenticated users to /login?session_expired=1. Query retries exclude 401; 403 refreshes /me while retaining login. Role edits/assignments atomically advance only unrevoked, unexpired sessions matching the previous user authz_version; current permissions are queried on every request. Worker bindings keep the authz_version bump and fail closed. Explicit revoke/status changes still invalidate sessions. FE refreshes /me on save, focus and every 30 seconds while authenticated.
+
+GET /me includes roles as an ordered list of assigned role display names, read from Role/UserRole on authentication rather than inferred from permissions. Header renders display name, optional Telegram handle with one @, and assigned roles; existing permission refresh keeps these current.
+
+### Dashboard aggregates (2026-10-18)
+
+`application/dashboard.py`, `api/dashboard.py` and React foundation DashboardPage implement GET /dashboard (no-store, read-only). Require dashboard.view, plus dashboard.view_all for cross-user aggregates. Own scope fixes owner to actor; own user_id overrides and unauthorized feature filters deny. System scope may filter owner, retains disabled users' historical data, exposes no target URLs, private metadata, emails or artifact bytes. User roster has 50-row offset pagination; workers capped at 20 per workflow. No N+1 worker/item/user queries.
+
+Counts: successful Check distinct requested_url, operational business_day; CloudflareRecord SUBMITTED only (exclude ALREADY_SUBMITTED), operational day. Delivery joins the original preview draft Artifact kind plus owned CaseSource provenance for shared domain_worker/evidence ledgers. Success groups sent attempts by delivery, uses earliest finished_at and viewer timezone; failed/unknown are current backlog, not range outcomes. Queues use today's business_day and valid saved check sources; mail needs_reply is cached/synced data and last sync is shown. Domain Worker state and Cloudflare snapshots remain untouched (no recovery/reconciliation on dashboard reads).
+
+New dashboard permission defaults seed only on new roles. CLI sync-rbac --grant-dashboard is an explicit first rollout option for existing standard roles; no broad permission reset or session revoke. Future ordinary syncs retain choices. FE query keys include user, all permissions, scope, period, workflow, owner filter and roster offset; no previous-data placeholder on privilege changes. Poll 30s in visible tabs. CSS gives chart an explicit height and responsive metric grid; header actions wrap on narrow screens.
+
+Shared StatusBadge normalizes uppercase/lowercase states, maps labels and semantic tones, preserves original code in title, and distinguishes HTTP accepted from business success. Dashboard uses it for account, worker, user roster and audit outcome statuses. CSS keeps table badges inline and supports dark mode.
+
+Shared AppSelect/AppSelectItem wraps installed Radix Themes Select. Controlled values normalize numbers to strings; an internal sentinel maps empty filter values to/from an empty string (Radix items cannot use empty values). Existing form/filter handlers now receive strings directly through onValueChange; disabled controls/items remain disabled. Popup portals use collision handling, viewport limits and inherited appearance. Native option arrays became AppSelectItem arrays, including Link Status dynamic options. React tests now include the production Radix Theme context and exercise actual listbox choices; jsdom supplies pointer capture/scroll/ResizeObserver stubs. No dependency or backend changes.
+# Web recovery screens
+
+Audit Log outcomes reuse StatusBadge with audit-specific labels (accepted remains HTTP acceptance, sent remains SMTP acceptance). The shared .status class excludes badges from .data-table td span typography overrides, preserving inline width and tone. Partial/interrupted use pending tone.
+
+Domain Worker workspace returns business_day from backend owner timezone. Idle fallback selects only today's history; historical records remain unchanged. FE validates saved/query batch selection against that server day, clears stale pointers, and allows old history only via an explicit history action for the current day. Workspace polling clears a completed batch at day rollover even with the tab open. Preserve active owner locks across rollover until worker/recovery releases them; never reset delivery state. Operation current-day guards also compare cached business_day to workspace day; review links count only current-day checks.
+
+AppToaster uses Sonner position="top-right" globally; notification behavior and duration remain unchanged.
+
+QuickReportResultCard keeps the icon-only URL CopyButton in the same flex group as its wrapping URL heading, separate from the right-aligned status/cache badges.
+
+Quick Report extension source remains canonical at chrome_extension/cloudflare-profile-worker (not moved into BE/FE). frontend/tooling/extensionPackage.ts packages only runtime JS/JSON/HTML/CSS/PNG assets into a store-only ZIP at downloads/web-form-assistant.zip in Vite build and dev middleware. No secret/runtime config is packaged. Vite injects the manifest version into the connection panel; a numeric comparison with the installed handshake version suggests updates, while disconnected users always have a download link. No Chrome auto-install or report submission occurs. Build from the full repository so the sibling extension source exists; deploy the complete frontend/dist including downloads. Increment manifest.version whenever publishing extension changes and rebuild/redeploy FE; restart Vite after changing the manifest.
+
+The web favicon is a self-contained SVG in frontend/public/favicon.svg, linked by frontend/index.html and copied by Vite into the build. It uses the blue shield/check branding with no external asset dependency.
+
+Link Status result URLs and redirect destinations reuse the shared CopyButton with the exact displayed URL, including path/query. Clipboard success/failure uses the existing shared feedback; no backend request or probe is involved.
+
+Link Status opts into CopyButton.iconOnly with an accessible URL-specific label and tooltip. Summary counters derive from all current streamed results before table filters: domain_status DNS_ERROR and DOMAIN_HOLD, website_status CF_PHISHING_BLOCKED. They reset with a new check and do not conflate DNS_NXDOMAIN with DNS_ERROR.
+
+`frontend/src/components/shared/StatusPage.tsx` shares presentation for session recovery, page permission denial (403), and unknown routes (404). Unknown routes remain under AppShell so anonymous visitors still pass through authentication. Retry refetches the current-user query without changing authentication semantics; feature permission checks remain in their owning pages.

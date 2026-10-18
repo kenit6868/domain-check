@@ -1,3 +1,4 @@
+import { ForbiddenPage } from '../../../components/shared/StatusPage'
 import { QueryError } from '../../../components/shared/QueryError'
 import { AppDialog } from '../../../components/shared/AppDialog'
 import { Button } from '../../../components/shared/Button'
@@ -20,8 +21,8 @@ export function UsersPage() {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<UserItem | null>(null)
   const users = useQuery({ queryKey: ['admin', 'users', search], queryFn: ({ signal }) => getUsers(search, signal), enabled: canView })
-  const roles = useQuery({ queryKey: ['admin', 'roles'], queryFn: ({ signal }) => getRoles(signal), enabled: canView && me.permissions.includes('users.assign_roles') })
-  const refresh = () => { void client.invalidateQueries({ queryKey: ['admin', 'users'] }) }
+  const roles = useQuery({ queryKey: ['admin', 'roles'], queryFn: ({ signal }) => getRoles(signal), enabled: canView && me.permissions.includes('users.assign_roles') && me.permissions.includes('roles.view') })
+  const refresh = () => { void client.invalidateQueries({ queryKey: ['auth', 'me'] }); void client.invalidateQueries({ queryKey: ['admin', 'users'] }) }
   const statusMutation = useMutation({ meta: { successMessage: 'Đã cập nhật trạng thái người dùng.' }, mutationFn: ({ id, status }: { id: string; status: UserItem['status'] }) => updateUserStatus(id, status), onSuccess: refresh })
   const roleMutation = useMutation({ meta: { successMessage: 'Đã lưu role và cập nhật quyền người dùng.' }, mutationFn: ({ id, ids }: { id: string; ids: string[] }) => replaceUserRoles(id, ids), onSuccess: () => { refresh(); setSelected(null) } })
   const revokeMutation = useMutation({ meta: { successMessage: 'Đã thu hồi các phiên đăng nhập.' }, mutationFn: revokeUserSessions, onSuccess: refresh })
@@ -30,9 +31,9 @@ export function UsersPage() {
   const confirmRevoke = (user: UserItem) => { ask({ title: 'Thu hồi phiên đăng nhập?', description: `Các phiên của ${user.display_name} sẽ hết hiệu lực. Người dùng cần đăng nhập lại.`, label: 'Thu hồi phiên', action: () => { revokeMutation.mutate(user.id) } }) }
   const error = statusMutation.error ?? roleMutation.error ?? revokeMutation.error
   const canManage = me.permissions.includes('users.manage')
-  const canAssign = me.permissions.includes('users.assign_roles')
+  const canAssign = me.permissions.includes('users.assign_roles') && me.permissions.includes('roles.view')
 
-  if (!canView) return <State text="Bạn không có quyền xem trang người dùng." error />
+  if (!canView) return <ForbiddenPage message="Bạn không có quyền xem trang người dùng." />
 
   return <section>
     {confirmation}
@@ -42,7 +43,7 @@ export function UsersPage() {
       {users.isPending ? <State text="Đang tải người dùng…" /> : users.isError ? <QueryError message={users.error.message} onRetry={() => { void users.refetch() }} /> : users.data.items.length === 0 ? <State text="Không có người dùng phù hợp." /> :
       <table className="data-table"><thead><tr><th>Người dùng</th><th>Trạng thái</th><th>Role</th><th>Lần đăng nhập cuối</th><th className="text-right">Thao tác</th></tr></thead><tbody>{users.data.items.map((user) => <tr key={user.id}><td><strong>{user.display_name}</strong><span>@{user.telegram_username ?? 'chưa có username'} · {user.identity_provider ?? 'unknown'}</span></td><td><Status status={user.status} /></td><td><div className="flex flex-wrap gap-1">{user.roles.map((role) => <span className="role-chip" key={role.id}>{role.name}</span>)}</div></td><td>{user.last_login_at ? new Date(user.last_login_at).toLocaleString('vi-VN') : '—'}</td><td><div className="flex justify-end gap-2">{canAssign && <Button className="secondary-button" onClick={() => { setSelected(user) }}>Gán role</Button>}{canManage && (user.status !== 'active' ? <Button className="primary-button" disabled={statusMutation.isPending} onClick={() => { statusMutation.mutate({ id: user.id, status: 'active' }) }}>Kích hoạt</Button> : <Button className="danger-button" disabled={statusMutation.isPending} onClick={() => { confirmLock(user) }}>Khóa</Button>)}{canManage && <Button className="secondary-button" disabled={revokeMutation.isPending} onClick={() => { confirmRevoke(user) }}>Thu hồi phiên</Button>}</div></td></tr>)}</tbody></table>}
     </div>
-    {selected && roles.data && <RoleDialog user={selected} roles={roles.data} busy={roleMutation.isPending} onClose={() => { setSelected(null) }} onSave={(ids) => { roleMutation.mutate({ id: selected.id, ids }) }} />}
+    {canAssign && selected && roles.data && <RoleDialog user={selected} roles={roles.data} busy={roleMutation.isPending} onClose={() => { setSelected(null) }} onSave={(ids) => { roleMutation.mutate({ id: selected.id, ids }) }} />}
   </section>
 }
 

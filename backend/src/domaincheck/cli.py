@@ -11,14 +11,14 @@ from domaincheck.infrastructure.db.session import Database
 from domaincheck.settings import get_settings
 
 
-async def sync_rbac(*, reset_user_permissions: bool = False) -> None:
+async def sync_rbac(*, reset_user_permissions: bool = False, grant_dashboard: bool = False) -> None:
     """Synchronize the code-owned permission catalog and protected roles."""
 
     settings = get_settings()
     database = Database(settings.database_url)
     try:
         async with database.session_factory() as session, session.begin():
-            await sync_permission_catalog(session, reset_user_permissions=reset_user_permissions)
+            await sync_permission_catalog(session, reset_user_permissions=reset_user_permissions, grant_dashboard=grant_dashboard)
             role_count = int(await session.scalar(select(func.count()).select_from(Role)) or 0)
             permission_count = int(await session.scalar(select(func.count()).select_from(Permission)) or 0)
             binding_count = int(await session.scalar(select(func.count()).select_from(RolePermission)) or 0)
@@ -77,11 +77,12 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
     sync = subparsers.add_parser("sync-rbac")
     sync.add_argument("--reset-user-permissions", action="store_true", help="Reset user role to all non-administration permissions")
+    sync.add_argument("--grant-dashboard", action="store_true", help="Explicit first rollout: grant personal dashboard to user and personal/system dashboard to admin")
     bootstrap = subparsers.add_parser("bootstrap-admin")
     bootstrap.add_argument("--telegram-subject", help="Stable OIDC subject, never a Telegram username")
     arguments = parser.parse_args()
     if arguments.command == "sync-rbac":
-        asyncio.run(sync_rbac(reset_user_permissions=arguments.reset_user_permissions))
+        asyncio.run(sync_rbac(reset_user_permissions=arguments.reset_user_permissions, grant_dashboard=arguments.grant_dashboard))
     elif arguments.command == "bootstrap-admin":
         asyncio.run(bootstrap_admin(arguments.telegram_subject))
 

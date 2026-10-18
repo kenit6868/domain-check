@@ -9,8 +9,13 @@ from domaincheck.infrastructure.auth.oidc import OIDCError
 
 
 class LoginRedirectTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        recorder = patch('domaincheck.api.auth.persist', new_callable=AsyncMock)
+        self.recorder = recorder.start()
+        self.addCleanup(recorder.stop)
+
     def request(self, binding=True):
-        return SimpleNamespace(cookies={'dc_oidc_binding': 'fixture'} if binding else {},
+        return SimpleNamespace(state=SimpleNamespace(request_id='login-test'), cookies={'dc_oidc_binding': 'fixture'} if binding else {},
             app=SimpleNamespace(state=SimpleNamespace(
                 settings=SimpleNamespace(default_timezone='Asia/Bangkok', environment='production'),
                 oidc=SimpleNamespace(exchange_code=AsyncMock(return_value=({'iss': 'https://oauth.telegram.org', 'sub': 'fixture'}, '/quick-report'))))))

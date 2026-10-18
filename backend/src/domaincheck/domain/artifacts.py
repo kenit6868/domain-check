@@ -8,8 +8,15 @@ _FEATURE_VIEW_PERMISSIONS: dict[str, frozenset[str]] = {
     "cloaking_review": frozenset({"cloaking_review.view"}),
     "domain_evidence_review": frozenset({"domain_evidence_review.view"}),
     "provider_replies": frozenset({"provider_replies.view"}),
-    "lead_triage": frozenset({"lead_triage.view"}),
     "mail_settings": frozenset({"mail_accounts.view_own"}),
+}
+
+_DRAFT_READ_PERMISSIONS = {
+    'quick_report': 'quick_report.submit_netcraft',
+    'domain_worker': 'domain_worker.preview',
+    'cloaking_review': 'cloaking_review.preview',
+    'domain_evidence_review': 'domain_evidence_review.preview',
+    'provider_replies': 'provider_replies.preview',
 }
 
 
@@ -22,4 +29,9 @@ def can_read_artifact(kind: str, permissions: frozenset[str]) -> bool:
 
     feature, separator, purpose = kind.partition(":")
     required = _FEATURE_VIEW_PERMISSIONS.get(feature)
-    return bool(separator and purpose and required and permissions.intersection(required))
+    if not (separator and purpose and required and permissions.intersection(required)):
+        return False
+    if purpose == "draft":
+        # Match preview endpoint redaction; generic download must not bypass it.
+        return _DRAFT_READ_PERMISSIONS.get(feature) in permissions
+    return True

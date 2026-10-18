@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domaincheck.application.previews import PreviewConflict, PreviewService
+from domaincheck.application.audit_log import record
 from domaincheck.domain.deliveries import (
     DELIVERY_FAILED,
     DELIVERY_PENDING,
@@ -175,6 +176,11 @@ class DeliveryService:
         delivery.version += 1
         self._session.add(attempt)
         await self._session.flush()
+        await record(self._session, owner=self._owner_user_id, actor=self._actor_user_id,
+            action='delivery.intent', resource_type='delivery', resource_id=delivery.id,
+            outcome='pending', request_id=self._request_id,
+            metadata={'attempt_id': str(attempt.id), 'attempt_number': attempt_number},
+            event_key=f'delivery-intent:{attempt.id}')
         return DeliveryIntent(
             delivery_id=delivery.id,
             attempt_id=attempt.id,
@@ -211,6 +217,12 @@ class DeliveryService:
         attempt.smtp_stage = smtp_stage
         attempt.finished_at = observed
         attempt.sanitized_result = metadata
+        await record(self._session, owner=self._owner_user_id, actor=self._actor_user_id,
+            action='delivery.outcome', resource_type='delivery', resource_id=delivery.id,
+            outcome=outcome, request_id=self._request_id,
+            metadata={'attempt_id': str(attempt.id), 'attempt_number': attempt.attempt_number,
+                      'smtp_stage': smtp_stage, 'reason_code': metadata.get('reason_code', '')},
+            event_key=f'delivery-outcome:{attempt.id}')
         delivery.state = outcome
         delivery.claim_token = None
         delivery.claim_expires_at = None
@@ -287,6 +299,14 @@ class DeliveryRecoveryRepository:
                 attempt.smtp_stage = "checkpoint_missing"
                 attempt.finished_at = observed
                 attempt.sanitized_result = {"reason_code": "claim_expired_after_intent"}
+                plan = await self._session.scalar(select(PreviewPlan).where(
+                    PreviewPlan.id == delivery.preview_id, PreviewPlan.owner_user_id == delivery.owner_user_id))
+                await record(self._session, owner=delivery.owner_user_id,
+                    actor=plan.actor_user_id if plan else delivery.owner_user_id,
+                    action='delivery.outcome', resource_type='delivery', resource_id=delivery.id,
+                    outcome='unknown', request_id=f'delivery:{delivery.id}',
+                    metadata={'attempt_id': str(attempt.id), 'reason_code': 'claim_expired_after_intent'},
+                    event_key=f'delivery-outcome:{attempt.id}')
             delivery.state = DELIVERY_UNKNOWN
             delivery.claim_token = None
             delivery.claim_expires_at = None

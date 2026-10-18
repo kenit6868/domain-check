@@ -30,7 +30,9 @@ export function normalizeApiError(error: unknown): ApiError {
     return new ApiError(error instanceof Error ? error.message : 'Yêu cầu không thể hoàn tất.')
   }
   const payload = error.response?.data ?? {}
-  const message = payload.message ?? payload.detail ?? (
+  const message = error.response?.status === 401
+    ? 'Phiên đăng nhập đã hết hạn hoặc quyền truy cập đã thay đổi. Vui lòng đăng nhập lại.'
+    : payload.message ?? payload.detail ?? (
     error.code === 'ERR_CANCELED'
       ? 'Yêu cầu đã bị hủy.'
       : error.response

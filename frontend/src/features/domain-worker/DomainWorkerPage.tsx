@@ -1,3 +1,4 @@
+import { ForbiddenPage } from '../../components/shared/StatusPage'
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
@@ -19,6 +20,7 @@ export function DomainWorkerPage() {
   const client = useQueryClient()
   const key = `domaincheck:v1:u:${me.id}:domain-worker:operation`
   const [search, setSearch] = useSearchParams()
+  const [historySelection, setHistorySelection] = useState<{ id: string; day: string | undefined } | null>(null)
   const [input, setInput] = useState('')
   const accountKey = `${key}:accounts`
   const [accountSelection, setAccountSelection] = useState<string[] | null>(() => {
@@ -31,10 +33,21 @@ export function DomainWorkerPage() {
   const workspaceKey = ['domain-worker-workspace', me.id]
   const workspace = useQuery({ queryKey: workspaceKey, enabled: canView,
     queryFn: ({ signal }) => getWorkerWorkspace(signal), refetchInterval: 2000 })
-  const id = workspace.data ? ((workspace.data.locked ? workspace.data.current_id : search.get('batch'))
-    || workspace.data.current_id || sessionStorage.getItem(key) || '') : ''
-  useEffect(() => { if (id) sessionStorage.setItem(key, id) }, [id, key])
-  const [submission, setSubmission] = useState<{ noJob: boolean; summary: WorkerOperation['input_summary'] } | null>(null)
+  const day = workspace.data?.business_day
+  const requestedId = search.get('batch') || sessionStorage.getItem(key) || ''
+  const selectedHistory = historySelection?.id === requestedId && historySelection.day === day
+  const savedIsToday = !day || workspace.data?.history.some((entry) => entry.id === requestedId && entry.business_day === day)
+  const id = workspace.data ? ((workspace.data.locked ? workspace.data.current_id : (selectedHistory || savedIsToday ? requestedId : null))
+    || workspace.data.current_id || '') : ''
+  useEffect(() => {
+    if (id) sessionStorage.setItem(key, id)
+    else if (workspace.isSuccess) sessionStorage.removeItem(key)
+    if (workspace.isSuccess && requestedId && !selectedHistory && !savedIsToday && search.has('batch')) {
+      const next = new URLSearchParams(search); next.delete('batch'); setSearch(next, { replace: true })
+    }
+  }, [id, key, workspace.isSuccess, requestedId, selectedHistory, savedIsToday, search, setSearch])
+  const [submitted, setSubmission] = useState<{ day: string | undefined; noJob: boolean; summary: WorkerOperation['input_summary'] } | null>(null)
+  const submission = submitted?.day === day ? submitted : null
   const queryKey = ['domain-worker', me.id, id]
   const accounts = useQuery({ queryKey: ['domain-worker', me.id, 'accounts'], enabled: canView,
     queryFn: ({ signal }) => getWorkerAccounts(signal) })
@@ -48,12 +61,13 @@ export function DomainWorkerPage() {
     queryFn: ({ signal }) => getReadiness(signal) })
   const create = useMutation({ mutationFn: () => createPrecheck(input.split(/\r?\n/).map((v) => v.trim()).filter(Boolean), selectedAccounts),
     onSuccess: (data) => {
-      setSubmission({ noJob: Boolean(data.no_job), summary: data.input_summary })
-      if (data.id) { setSearch({ batch: data.id }); sessionStorage.setItem(key, data.id)
+      setSubmission({ day, noJob: Boolean(data.no_job), summary: data.input_summary })
+      if (data.id) { setHistorySelection({ id: data.id, day }); setSearch({ batch: data.id }); sessionStorage.setItem(key, data.id)
         client.setQueryData(['domain-worker', me.id, data.id], data) }
       void client.invalidateQueries({ queryKey: workspaceKey })
     }, onError: () => { void client.invalidateQueries({ queryKey: workspaceKey }) } })
   const operation = useQuery({ queryKey, enabled: canView && Boolean(id), queryFn: ({ signal }) => getPrecheck(id, signal),
+    select: (data) => ({ ...data, is_current_day: data.is_current_day && (!day || data.business_day === day) }),
     refetchInterval: (query) => query.state.data && active.has(query.state.data.state) ? 2000 : 30000 })
   const control = useMutation({ mutationFn: (action: 'stop' | 'resume' | 'retry') => controlPrecheck(id, action,
     operation.data?.checks.filter((item) => item.status === 'failed').map((item) => item.item_id)),
@@ -68,7 +82,7 @@ export function DomainWorkerPage() {
   const sendJobId = workspace.data?.history.find((entry) => entry.id === id)?.send_job_id ?? sendSummary.data?.send_job_id ?? (workspace.data?.current_id === id ? workspace.data.send_job_id : null)
   const sendPanel = operation.data && !active.has(operation.data.state) && ((operation.data.is_current_day && me.permissions.includes('domain_worker.start') && operation.data.checks.some((item) => item.disposition === 'ready' && item.recipients.length > 0 && item.evidence_set_id)) || workspace.data?.history.some((entry) => entry.id === id && entry.send_job_id)) && operation.data.sender_account_ids.length > 0 && <SendBatchPanel key={operation.data.id} sourceId={operation.data.id} me={me}
       readOnly={!operation.data.is_current_day} sendJobId={workspace.data?.history.find((entry) => entry.id === id)?.send_job_id ?? null} />
-  if (!canView) return <p className="error-notice" role="alert">Bạn không có quyền xem Domain Worker.</p>
+  if (!canView) return <ForbiddenPage message="Bạn không có quyền xem Domain Worker." />
   return <section className="space-y-3">
     <header className="rounded-xl border border-cyan-200 bg-gradient-to-r from-cyan-50 to-blue-50 p-4 dark:border-cyan-900 dark:from-cyan-950 dark:to-slate-900"><h1 className="text-xl font-semibold">Domain Worker</h1><p className="mt-1 text-xs text-slate-500">Chọn tài khoản → precheck → cấu hình batch → gửi email. Delivery đã gửi được bỏ qua trong ngày.</p></header>
     {processing && <p role="status" className="data-panel p-3 text-sm">{workspace.data?.phase === 'paused' ? 'Job đang tạm dừng. Tiếp tục job hoặc ngừng hẳn trước khi kiểm tra danh sách mới.' : 'Đang xử lý batch hiện tại. Vui lòng đợi hoàn thành trước khi kiểm tra danh sách mới.'}</p>}
@@ -104,8 +118,8 @@ export function DomainWorkerPage() {
     {operation.isError && <p role="alert" className="error-notice">Không tải được lượt precheck. <Button onClick={() => { void operation.refetch() }}>Thử lại</Button></p>}
     {id && operation.isPending && <p role="status">Đang tải lượt precheck…</p>}
     <div className="flex flex-wrap gap-4 text-xs">
-      {me.permissions.includes('cloaking_review.view') && <Link className="underline" to="/cloaking-review">Cloaking Review ({operation.data?.checks.filter((item) => item.disposition === 'cloaking_review').length ?? 0})</Link>}
-      {me.permissions.includes('domain_evidence_review.view') && <Link className="underline" to="/domain-evidence-review">Domain Evidence Review ({operation.data?.checks.filter((item) => item.disposition === 'evidence_review').length ?? 0})</Link>}
+      {me.permissions.includes('cloaking_review.view') && <Link className="underline" to="/cloaking-review">Cloaking Review ({operation.data?.is_current_day ? operation.data.checks.filter((item) => item.disposition === 'cloaking_review').length : 0})</Link>}
+      {me.permissions.includes('domain_evidence_review.view') && <Link className="underline" to="/domain-evidence-review">Domain Evidence Review ({operation.data?.is_current_day ? operation.data.checks.filter((item) => item.disposition === 'evidence_review').length : 0})</Link>}
     </div>
     {operation.data && !operation.data.is_current_day && <p className="data-panel p-3 text-sm">Lịch sử ngày trước: chỉ xem kết quả, không dùng để gửi hôm nay.</p>}
     {operation.data && <section className="data-panel overflow-hidden" aria-label="Tiến trình precheck">
@@ -129,7 +143,7 @@ export function DomainWorkerPage() {
     {workspace.data && workspace.data.history.length > 0 && <details className="data-panel p-3 text-xs"><summary>Lịch sử batch (50 lượt gần nhất)</summary>
       <div className="space-y-2 pt-2">{workspace.data.history.map((entry) => <div key={entry.id} className="flex flex-wrap items-center gap-2">
         <span>{new Date(entry.created_at).toLocaleString('vi-VN')} · {entry.send_state ? sendStates[entry.send_state] ?? entry.send_state : states[entry.state] ?? entry.state} · {entry.id.slice(0, 8)}</span>
-        <Button disabled={processing || create.isPending || id === entry.id} onClick={() => { setSubmission(null); setSearch({ batch: entry.id }); sessionStorage.setItem(key, entry.id) }}>Xem kết quả</Button>
+        <Button disabled={processing || create.isPending || id === entry.id} onClick={() => { setSubmission(null); setHistorySelection({ id: entry.id, day }); setSearch({ batch: entry.id }); sessionStorage.setItem(key, entry.id) }}>Xem kết quả</Button>
       </div>)}</div></details>}
   </section>
 }

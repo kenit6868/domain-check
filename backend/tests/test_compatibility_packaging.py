@@ -10,6 +10,11 @@ import zipfile
 
 
 GUIDANCE_SMOKE = '''
+from domaincheck.core.link_status import registered_domain, classify
+from domaincheck.api.link_status import router as link_status_router
+assert registered_domain('https://a.example.co.uk/path') == 'example.co.uk'
+assert classify(404, {}, '')[0] == 'URL_NOT_FOUND'
+assert classify(403, {'cf-mitigated':'challenge'}, '')[0] == 'CF_CHALLENGE'
 from domaincheck.core.report_guidance import build_report_guidance
 guides = build_report_guidance(domain='fixture.cc', target_url='https://fixture.cc/path?q=1',
     result={'cloudflare': True, 'whois': {'registrar': 'NAMECHEAP INC'},
@@ -34,6 +39,15 @@ from domaincheck.core.email_content import bundled_logo_bytes
 from domaincheck.application.sent_copy import SentCopyService, LegacySentCopyAdapter
 from domaincheck.application.evidence_review import EvidenceReviewService, EvidenceReviewSender
 from domaincheck.application.cloaking_review import CloakingReviewService, CloakingReviewSender
+from domaincheck.application.provider_replies import ProviderRepliesService, ProviderReplySender
+import provider_replies
+assert provider_replies.MODULE_VERSION >= 12
+assert provider_replies.parse_message('1', 'a@example.com', b'From: abuse@dynadot.com' + bytes([13,10]) + b'Subject: Request' + bytes([13,10,13,10]) + b'Please provide the full URL.').request_type == 'full_url'
+from domaincheck.application.cloudflare_runner import CloudflareRunner
+from domaincheck.cloudflare_runner import create_runner_app
+from cloudflare_dashboard_session import CloudflareDashboardConfig, build_dashboard_payload
+from cloudflare_abuse_api import build_phishing_payload
+assert CloudflareDashboardConfig.from_mapping({'cloudflare_account_id': 'a' * 32}).account_id == 'a' * 32
 from domaincheck.core.review_capture import capture_review
 from domaincheck.application.delivery_dispatch import dispatch_intent
 import inspect, phishing_toolkit
@@ -82,7 +96,7 @@ assert any(p['id']=='xyz_registry_abuse' for p in dto.checks[0].providers)
             metadata = archive.read(next(name for name in names if name.endswith('.dist-info/METADATA'))).decode()
             self.assertIn('Requires-Dist: playwright==1.62.0', metadata)
         self.assertTrue({'phishing_toolkit.py', 'cloaking_detector.py', 'browser_evidence.py',
-            'quick_report_actions.py'} <= names)
+            'quick_report_actions.py', 'cloudflare_dashboard_session.py', 'cloudflare_abuse_api.py'} <= names)
         self.assertFalse(any(name.endswith('config.ini') or '/.env' in name or
             name.startswith(('data/', 'reports/')) for name in names))
         script = '''

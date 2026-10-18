@@ -130,10 +130,12 @@ async def workspace_state(session, owner, now, timezone):
         send = latest.get(str(source.id))
         history.append({'id': str(source.id), 'created_at': source.created_at, 'business_day': str(source.business_day),
             'state': source.state, 'send_job_id': str(send.id) if send else None, 'send_state': send.state if send else None})
-    if not state['current_id'] and history:
-        state['current_id'] = history[0]['id']
-        state['send_job_id'] = history[0]['send_job_id']
-    return {**state, 'history': history}
+    day = str(business_day(now, timezone))
+    today = next((entry for entry in history if entry['business_day'] == day), None)
+    if not state['current_id'] and today:
+        state['current_id'] = today['id']
+        state['send_job_id'] = today['send_job_id']
+    return {**state, 'business_day': day, 'history': history}
 
 
 async def filter_sent_inputs(session, owner, day, accounts, parsed):

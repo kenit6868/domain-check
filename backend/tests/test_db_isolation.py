@@ -306,6 +306,7 @@ class DatabaseIsolationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(reset_codes, DEFAULT_USER_PERMISSIONS)
             self.assertEqual(reset_codes, ADMIN_PERMISSION_CODES - {
                 "users.view", "users.manage", "users.assign_roles", "roles.view", "roles.manage",
+                "audit_logs.view_all", "dashboard.view_all",
             })
             await transaction.rollback()
 

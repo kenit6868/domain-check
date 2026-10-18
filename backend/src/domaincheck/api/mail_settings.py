@@ -95,6 +95,7 @@ async def apply_default_logo(request: Request,
 
 
 class ImapInput(BaseModel):
+    reply_mailboxes: list[str] | None = Field(default=None, max_length=30)
     host: str = Field(default="", max_length=500)
     port: int = Field(default=993, ge=1, le=65535)
     username: str = Field(default="", max_length=500)
@@ -103,6 +104,19 @@ class ImapInput(BaseModel):
     junk_mailbox: str = Field(default="Junk", max_length=500)
     cloudflare_mailbox: str = Field(default="2-Cloudflare", max_length=500)
     evidence_mailbox: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def validate_reply_mailboxes(self):
+        if self.reply_mailboxes is not None:
+            names = []
+            for value in self.reply_mailboxes:
+                name = value.strip()
+                if not name or len(name) > 500 or any(ord(c) < 32 or ord(c) == 127 for c in value):
+                    raise ValueError("Use valid non-empty IMAP folder names (maximum 500 characters)")
+                if name not in names:
+                    names.append(name)
+            self.reply_mailboxes = names
+        return self
 
 
 class ProxyInput(BaseModel):

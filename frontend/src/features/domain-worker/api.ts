@@ -16,7 +16,7 @@ export async function createPrecheck(targets: string[], senderAccountIds: string
   return operation.extend({ id: z.uuid().nullable(), no_job: z.boolean().optional() }).parse(await request({ url: '/domain-worker/prechecks', method: 'POST', data: { targets, sender_account_ids: senderAccountIds } }))
 }
 export async function getWorkerWorkspace(signal?: AbortSignal) {
-  return z.object({ current_id: z.uuid().nullable(), send_job_id: z.uuid().nullable(), phase: z.string(), locked: z.boolean(),
+  return z.object({ current_id: z.uuid().nullable(), send_job_id: z.uuid().nullable(), phase: z.string(), locked: z.boolean(), business_day: z.string().optional(),
     history: z.array(z.object({ id: z.uuid(), created_at: z.string(), business_day: z.string(), state: z.string(),
       send_job_id: z.uuid().nullable(), send_state: z.string().nullable() })) }).parse(await request({
         url: '/domain-worker/workspace', ...(signal ? { signal } : {}) }))

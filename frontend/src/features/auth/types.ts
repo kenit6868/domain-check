@@ -5,4 +5,5 @@ export interface Me {
   status: 'pending' | 'active' | 'disabled'
   timezone: string
   permissions: string[]
+  roles?: string[]
 }

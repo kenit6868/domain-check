@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import unittest
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -11,7 +12,9 @@ from sqlalchemy import delete, func, select
 from domaincheck.api.dependencies import require_permission
 from domaincheck.application.admin import AdminConflict, AdminService
 from domaincheck.application.auth import AuthenticatedUser
-from domaincheck.infrastructure.db.models import AuditEvent, Permission, Role, RolePermission, User, UserRole
+from domaincheck.application.auth import AuthenticationError, AuthService
+from domaincheck.infrastructure.auth.sessions import hash_token
+from domaincheck.infrastructure.db.models import AuditEvent, Permission, Role, RolePermission, Session, User, UserRole
 from domaincheck.infrastructure.db.seeds import ADMIN_PERMISSION_CODES, sync_permission_catalog
 from domaincheck.infrastructure.db.session import Database
 
@@ -34,6 +37,45 @@ class PermissionDependencyTests(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(TEST_DATABASE_URL, "requires isolated PostgreSQL test database")
 class AdminDatabaseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_permission_changes_keep_valid_sessions_and_enforce_current_grants(self):
+        async with self.database.session_factory() as session:
+            transaction = await session.begin()
+            actor, _ = await self._seed_admin(session, f"live-role-admin-{uuid4()}")
+            service = AdminService(session, actor_user_id=actor.id, request_id="live-permissions")
+            role = await service.create_role(key=f"live-{uuid4().hex}", name="Live", description="",
+                permission_codes={"link_status.view", "link_status.check"}, actor_permissions=ADMIN_PERMISSION_CODES)
+            target = User(display_name="Live permissions", status="active", timezone="Asia/Bangkok")
+            session.add(target)
+            await session.flush()
+            session.add(UserRole(user_id=target.id, role_id=role.id, assigned_by_user_id=actor.id))
+            now = datetime.now(UTC)
+            tokens = [uuid4().hex for _ in range(4)]
+            sessions = [Session(user_id=target.id, token_hash=hash_token(token), csrf_hash=b'x'*32,
+                authz_version=target.authz_version if index != 3 else target.authz_version - 1,
+                expires_at=now + timedelta(hours=1) if index != 2 else now - timedelta(hours=1),
+                revoked_at=now if index == 1 else None) for index, token in enumerate(tokens)]
+            session.add_all(sessions)
+            await session.flush()
+            await service.update_role(role.id, name="Updated", description=None,
+                permission_codes={"link_status.view"}, actor_permissions=ADMIN_PERMISSION_CODES)
+            authenticated = await AuthService(session).authenticate(tokens[0])
+            self.assertEqual(authenticated.roles, ("Updated",))
+            self.assertEqual(authenticated.permissions, frozenset({"link_status.view"}))
+            with self.assertRaises(HTTPException) as denied:
+                await require_permission("link_status.check")(authenticated)
+            self.assertEqual(denied.exception.status_code, 403)
+            for token in tokens[1:]:
+                with self.assertRaises(AuthenticationError):
+                    await AuthService(session).authenticate(token)
+            await service.assign_user_roles(target.id, set(), ADMIN_PERMISSION_CODES)
+            self.assertFalse((await AuthService(session).authenticate(tokens[0])).permissions)
+            await service.assign_user_roles(target.id, {role.id}, ADMIN_PERMISSION_CODES)
+            self.assertIn("link_status.view", (await AuthService(session).authenticate(tokens[0])).permissions)
+            await service.revoke_user_sessions(target.id)
+            with self.assertRaises(AuthenticationError):
+                await AuthService(session).authenticate(tokens[0])
+            await transaction.rollback()
+
     async def asyncSetUp(self):
         self.database = Database(TEST_DATABASE_URL or "")
 
@@ -152,7 +194,7 @@ class AdminDatabaseTests(unittest.IsolatedAsyncioTestCase):
             service = AdminService(session, actor_user_id=actor.id, request_id="req-escalation")
             dangerous = await service.create_role(
                 key=f"sender-{uuid4()}", name="Sender", description="fixture",
-                permission_codes={"check_domain.send"}, actor_permissions=ADMIN_PERMISSION_CODES,
+                permission_codes={"domain_worker.start"}, actor_permissions=ADMIN_PERMISSION_CODES,
             )
             with self.assertRaises(AdminConflict):
                 await service.assign_user_roles(

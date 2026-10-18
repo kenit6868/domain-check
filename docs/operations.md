@@ -224,7 +224,12 @@ User login lần đầu vẫn ở `pending`; bootstrap/kích hoạt admin là b�
 
 ## Bootstrap quản trị viên
 
-Sau mỗi deploy có thay đổi permission catalog, chạy bước idempotent sau migration:
+Chạy migration trước khi mở API. API tự seed RBAC trong transaction trước khi nhận
+request; replica/CLI đồng bộ tuần tự bằng PostgreSQL advisory lock. Deploy đầu seed
+catalog/role mặc định; deploy sau tự thêm code permission mới đã đăng ký, giữ
+quyền/tên/mô tả của role đang có. Seed lỗi thì API không phục vụ request.
+
+Nếu muốn đồng bộ thủ công trước khi mở API, vẫn dùng lệnh idempotent:
 
 ```powershell
 domaincheck-admin sync-rbac
@@ -236,6 +241,14 @@ tạo lần đầu; user seed các quyền nghiệp vụ. Những lần sync sau
 mô tả đã chỉnh của cả hai role. Trang Role & quyền cho sửa cả admin; lưu role tự
 materialize code permission mới thiếu trong DB trong cùng transaction. Không cần
 reset role hoặc chạy sync riêng chỉ để lưu quyền mới từ catalog của code.
+
+Catalog hiện có 52 mã, gồm hai quyền Audit Log. Seed dọn bảy mã không dùng và role binding của chúng:
+`check_domain.preview`, `check_domain.send`, `link_status.export` và bốn mã
+`lead_triage.view/check/preview/send`. Chỉ dọn retirement list tường minh, không
+xoá mã lạ hoặc reset quyền hợp lệ. Role bị dọn tăng version một lần; giữ session
+và worker authz_version vì các mã bị bỏ không có thao tác hiệu lực. Thêm tính năng
+phải thêm permission/guard/test vào code; seed không suy đoán quyền từ tên menu
+và không tự grant mã mới cho role hiện hữu.
 
 Không có cơ chế “user đầu tiên là admin” và không dùng Telegram username. Sau khi
 danh tính đích đã login một lần và đang ở trạng thái pending, chạy lệnh cục bộ với
@@ -253,6 +266,16 @@ nhận đúng permission admin đã chọn cho role này. Sau bootstrap hoặc t
 user đăng nhập lại vì session cũ bị revoke qua `authz_version`.
 
 ## Secret/log policy
+
+Audit Log: migrate `0005_audit_log` trước khi mở API, seed tự động hoặc sync-rbac.
+Cấp audit_logs.view cho cá nhân; thêm audit_logs.view_all để xem toàn hệ thống/
+vô danh. Không tự thêm grant vào role cũ. Không tự xóa log/backfill login cũ.
+Nối Request ID và resource/job/delivery/attempt ID để đối soát; HTTP accepted
+không chứng minh SMTP/provider accepted. Phiên hết hạn ghi khi dùng lại, chống
+lặp theo session. Command/security recorder riêng best-effort deadline 2s; theo
+dõi warning cố định `audit_event_persistence_unavailable`. Ledger vẫn là nguồn
+kết quả. Không thu thập IP/User-Agent. Downgrade từ chối nếu còn anonymous event,
+không tự xóa lịch sử để hạ schema. Màn hình chỉ đọc, không edit/delete/export.
 
 Không log request body route Cookie/OIDC token, SMTP/IMAP/proxy password, master
 key hoặc URL có token. `VITE_*` là public. Secret envelope cần key AES-256 ở
@@ -311,3 +334,58 @@ Capture uses existing check_domain.capture permission and browser capture flag,
 with a bounded child browser process; it creates candidates only. No new migration,
 queue service or configuration is required. API hot reload applies these handlers;
 no SMTP worker restart is needed. Test with fixtures; do not probe/send on render.
+# Provider Replies web operations
+
+Routes: GET `/provider-replies/accounts`, GET `/provider-replies` with account_id/
+date_from/date_to, GET `/{case_id}`, POST `/sync`, POST `/{case_id}/seen`, multipart
+POST `/{case_id}/previews` (details JSON + optional files), POST `/{case_id}/capture`
+(reported_url JSON), GET `/{case_id}/images/{artifact_id}`, POST `/{case_id}/send`
+(preview_id/revision/fingerprint/confirmed). All under /api/v1; mutations require
+feature permission and CSRF. Capture additionally requires existing capture flag/
+permission. Sync/seen do not send mail; GET does not connect to mail servers.
+
+GET `/provider-replies/sync-progress?account_id=...` returns owned persisted progress.
+POST sync accepts optional UUID sync_id; folder callbacks report scanned/total counts,
+not estimated completion times. Progress uses separate short snapshot transactions;
+account xact lock still blocks concurrent sync. Completed publishes after import
+commit; stale run updates are ignored, inactive progress expires to interrupted
+after 300s without deleting history. No migration/new queue required.
+Only actionable Cloudflare email replies are enabled. Historical Delivery/Sent
+matching enriches context but is not required for owned Cloudflare requests.
+
+No schema/dependency changes. Private artifacts hold original mail and exact plans;
+ReviewCase/ReviewSnapshot index only sanitized metadata. Existing encrypted account
+settings and exact host:port/public DNS/TLS guards apply. Sync time budget 120s,
+60s socket timeout, per-folder cap 500, original raw mail cap 2 MiB; Sent reconciliation
+reads at most 500 headers from 31 days before the selected start date. A referenced
+original Sent ID with matching account/recipient/provider can link legacy reports
+without a database Delivery. This bound does not expire stored history.
+Provider capture JSON accepts show_browser=true by default. It opens isolated
+Chromium on the backend host desktop, not the client's computer when remote.
+Set false in UI for headless servers. Other review/worker capture defaults are
+unchanged. Subprocess remains bounded to 180s, stdout/stderr suppressed; private
+error.json transports only whitelisted reason codes for safe specific diagnostics.
+Partial folder errors retained in the sync snapshot.
+Root provider_replies.py remains a legacy wrapper and PyInstaller includes canonical
+backend/compat source. Install refreshed backend package and reload API; don't
+restart active SMTP workers. No real SMTP/IMAP actions were used during implementation.
+
+
+### Cloudflare Dashboard session runner (2026-10-18)
+
+Run `run_cloudflare_worker.bat` or backend `python -m domaincheck.cloudflare_runner`.
+The runner binds 127.0.0.1:8789, requires the API's existing master key, and holds a
+PostgreSQL singleton lock for its lifetime. API instances use the same private
+DOMAINCHECK_CLOUDFLARE_RUNNER_URL. Its token is derived from the key and never sent
+to Cloudflare. Do not publish this port through the frontend/reverse proxy.
+Cookie is request-only between API/runner and retained solely in runner memory;
+checkpoints contain metadata and references to immutable public report payloads.
+No Cookie in database, Redis, files, artifacts, audit, responses or logs.
+
+Heartbeat every 10 seconds; after 90 seconds without heartbeat, interrupted submit
+intents become UNKNOWN and remaining work waits for a new Cookie. A live paused
+runner retains the session; API/page reload does not lose it. Shutdown/restart must
+not reset accepted/duplicate/UNKNOWN records. Operator clear only hides the owned
+workspace. Old day batches close before creating a new day's scope. No automatic
+import of legacy JSON history. Submission can be disabled by
+DOMAINCHECK_CLOUDFLARE_SUBMIT_ENABLED=false (default true with explicit UI approval).

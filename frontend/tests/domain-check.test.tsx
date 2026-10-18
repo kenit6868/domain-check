@@ -1,3 +1,4 @@
+import { Theme } from '@radix-ui/themes'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -27,7 +28,7 @@ const guidance = [
     draft: 'To: abuse@registrar.example\nSubject: Suspected phishing report', note: 'Email nhận: abuse@registrar.example' },
 ]
 function renderPage() { return render(<QueryClientProvider client={createQueryClient()}>
-  <MemoryRouter initialEntries={['/domain-check']}><AppRouter /></MemoryRouter></QueryClientProvider>) }
+  <Theme><MemoryRouter initialEntries={['/domain-check']}><AppRouter /></MemoryRouter></Theme></QueryClientProvider>) }
 
 describe('Check Domain guidance workflow', () => {
   afterEach(() => { cleanup(); sessionStorage.clear(); vi.restoreAllMocks() })

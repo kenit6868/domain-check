@@ -9,9 +9,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domaincheck.infrastructure.auth.sessions import generate_session_token, hash_token
+from domaincheck.application.audit_log import record
 from domaincheck.infrastructure.db.models import (
     AuthIdentity,
     Permission,
+    Role,
     RolePermission,
     Session,
     User,
@@ -20,7 +22,9 @@ from domaincheck.infrastructure.db.models import (
 
 
 class AuthenticationError(ValueError):
-    pass
+    def __init__(self, message, *, reason_code='authentication_failed', user_id=None, session_id=None):
+        super().__init__(message)
+        self.reason_code, self.user_id, self.session_id = reason_code, user_id, session_id
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -41,11 +45,13 @@ class AuthenticatedUser:
     permissions: frozenset[str]
     session_id: UUID
     csrf_hash: bytes
+    roles: tuple[str, ...] = ()
 
 
 class AuthService:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, request_id='auth'):
         self._session = session
+        self._request_id = request_id
 
     @staticmethod
     def _advisory_key(issuer: str, subject: str) -> int:
@@ -96,7 +102,7 @@ class AuthService:
             user.display_name = display_name or user.display_name
             user.telegram_username = telegram_username
         if user.status == "disabled":
-            raise AuthenticationError("User is disabled")
+            raise AuthenticationError("User is disabled", reason_code='account_disabled', user_id=user.id)
         now = datetime.now(UTC)
         user.last_login_at = now
         raw_token = generate_session_token()
@@ -111,6 +117,9 @@ class AuthService:
         )
         self._session.add(session)
         await self._session.flush()
+        await record(self._session, owner=user.id, actor=user.id, action='auth.login_success',
+            resource_type='session', resource_id=session.id, request_id=self._request_id,
+            metadata={'provider': 'telegram', 'state': user.status}, event_key=f'login:{session.id}')
         return LoginSession(raw_token, raw_csrf, user, expires_at)
 
     async def authenticate(self, raw_token: str) -> AuthenticatedUser:
@@ -121,16 +130,16 @@ class AuthService:
                 .join(User, User.id == Session.user_id)
                 .where(
                     Session.token_hash == hash_token(raw_token),
-                    Session.revoked_at.is_(None),
-                    Session.expires_at > observed,
                 )
             )
         ).one_or_none()
         if row is None:
             raise AuthenticationError("Session is invalid or expired")
         session, user = row
-        if user.status == "disabled" or session.authz_version != user.authz_version:
-            raise AuthenticationError("Session authorization is stale")
+        if session.revoked_at is not None or user.status == "disabled" or session.authz_version != user.authz_version:
+            raise AuthenticationError("Session authorization is stale", reason_code='session_revoked', user_id=user.id, session_id=session.id)
+        if session.expires_at <= observed:
+            raise AuthenticationError("Session is invalid or expired", reason_code='session_expired', user_id=user.id, session_id=session.id)
         permissions: frozenset[str]
         if user.status != "active":
             permissions = frozenset()
@@ -142,6 +151,10 @@ class AuthService:
                 .where(UserRole.user_id == user.id)
             )
             permissions = frozenset(codes)
+        roles = tuple(await self._session.scalars(
+            select(Role.name).join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id == user.id).order_by(Role.key, Role.id)
+        ))
         return AuthenticatedUser(
             user_id=user.id,
             display_name=user.display_name,
@@ -151,6 +164,7 @@ class AuthService:
             permissions=permissions,
             session_id=session.id,
             csrf_hash=session.csrf_hash,
+            roles=roles,
         )
 
     async def revoke(self, session_id: UUID) -> None:
@@ -158,5 +172,8 @@ class AuthService:
         if session is not None and session.revoked_at is None:
             session.revoked_at = datetime.now(UTC)
             session.version += 1
+            await record(self._session, owner=session.user_id, actor=session.user_id, action='auth.logout',
+                resource_type='session', resource_id=session.id, request_id=self._request_id,
+                event_key=f'session-terminal:{session.id}')
             await self._session.flush()
 

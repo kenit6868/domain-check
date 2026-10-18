@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     oidc_state_ttl_seconds: int = 300
     form_task_ttl_seconds: int = Field(default=300, ge=60, le=900)
     netcraft_submit_enabled: bool = False
+    cloudflare_submit_enabled: bool = True
+    cloudflare_runner_url: str = "http://127.0.0.1:8789"
     vt_api_key: SecretStr | None = None
     gsb_api_key: SecretStr | None = None
     browser_capture_enabled: bool = False

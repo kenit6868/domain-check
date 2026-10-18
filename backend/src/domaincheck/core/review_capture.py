@@ -6,15 +6,17 @@ import sys
 import tempfile
 from pathlib import Path
 
-from domaincheck.core.evidence import CaptureFailed, LegacyBrowserCaptureAdapter
+from domaincheck.core.evidence import CaptureFailed, LegacyBrowserCaptureAdapter, capture_failure_code
 from domaincheck.core.investigation import sanitize_result
 from domaincheck.ports.artifacts import ImageUpload
 
 
-def capture_review(target, decision):
+def capture_review(target, decision, *, headed=False):
     with tempfile.TemporaryDirectory(prefix='review-browser-') as directory:
         try:
-            subprocess.run([sys.executable, '-m', 'domaincheck.core.review_capture', target, decision, directory],
+            command = [sys.executable, '-m', 'domaincheck.core.review_capture', target, decision, directory]
+            if headed: command.append('headed')
+            subprocess.run(command,
                 check=True, timeout=180, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             path = Path(directory) / 'result.json'
@@ -27,14 +29,19 @@ def capture_review(target, decision):
                         for row in payload.get('internal_images', [])]
             return images, payload['manifest'], internal
         except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
-            raise CaptureFailed('capture_failed') from exc
+            reason = 'browser_timeout' if isinstance(exc, subprocess.TimeoutExpired) else 'capture_failed'
+            error_path = Path(directory) / 'error.json'
+            if error_path.is_file() and error_path.stat().st_size <= 1024:
+                try: reason = capture_failure_code(json.loads(error_path.read_text(encoding='utf-8'))['reason'])
+                except (OSError, ValueError, KeyError): pass
+            raise CaptureFailed(reason) from exc
 
 
-def _capture(target, decision, directory):
+def _capture(target, decision, directory, display_mode='headless'):
     root = Path(directory).resolve()
     internal = []
     if decision == 'not_cloaking':
-        images, manifest = LegacyBrowserCaptureAdapter().capture(target, staging_root=root)
+        images, manifest = LegacyBrowserCaptureAdapter(headless=display_mode != 'headed').capture(target, staging_root=root)
     elif decision == 'confirmed_cloaking':
         import cloaking_detector as detector
         result = detector.probe_playwright_cloaking(target, timeout_ms=15_000, evidence_root=str(root))
@@ -70,4 +77,8 @@ def _capture(target, decision, directory):
 
 
 if __name__ == '__main__':
-    _capture(*sys.argv[1:])
+    try:
+        _capture(*sys.argv[1:])
+    except Exception as exc:
+        (Path(sys.argv[3]) / 'error.json').write_text(json.dumps({'reason': capture_failure_code(exc)}), encoding='utf-8')
+        sys.exit(1)

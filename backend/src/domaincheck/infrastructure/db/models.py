@@ -4,6 +4,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
+    CheckConstraint,
     BigInteger,
     Boolean,
     Date,
@@ -395,8 +396,10 @@ class ReviewSnapshot(Base, IdMixin, TimestampMixin, VersionMixin):
 
 class AuditEvent(Base, IdMixin):
     __tablename__ = "audit_events"
-    owner_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    actor_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    actor_type: Mapped[str] = mapped_column(String(16), nullable=False, default='user', server_default='user')
+    event_key: Mapped[str | None] = mapped_column(String(200), unique=True)
     action: Mapped[str] = mapped_column(String(160), nullable=False)
     resource_type: Mapped[str] = mapped_column(String(80), nullable=False)
     resource_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True))
@@ -404,7 +407,9 @@ class AuditEvent(Base, IdMixin):
     outcome: Mapped[str] = mapped_column(String(40), nullable=False)
     metadata_allowlist: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     request_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    __table_args__ = (Index("ix_audit_owner_occurred", "owner_user_id", "occurred_at"),)
+    __table_args__ = (Index("ix_audit_owner_occurred", "owner_user_id", "occurred_at"),
+        Index('ix_audit_occurred_id', 'occurred_at', 'id'),
+        CheckConstraint("(actor_type = 'user' AND owner_user_id IS NOT NULL AND actor_user_id IS NOT NULL) OR (actor_type = 'anonymous' AND owner_user_id IS NULL AND actor_user_id IS NULL)", name='audit_actor_scope'))
 
 
 class MigrationRun(Base, IdMixin, TimestampMixin, VersionMixin):

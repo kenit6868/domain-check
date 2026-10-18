@@ -12,6 +12,106 @@ cả UI lẫn nghiệp vụ, dùng cả hai skill.
 
 ## Invariant cần giữ
 
+- Domain Worker idle workspace restores only its backend-local business day. FE
+  must reject stale URL/session selections and clear completed work on day rollover;
+  old batches require explicit History selection and remain read-only. Preserve
+  active owner locks and all historical delivery records across the day boundary.
+
+- Dashboard is a read-only aggregate of saved web records, never a trigger for
+  mailbox sync, probes, recovery or sends. Require dashboard.view plus view_all
+  for system scope; own metrics must respect each feature's view permission.
+  Never grant private cross-owner workflow access through an aggregate link.
+  Count SMTP deliveries once at their first sent checkpoint, not attempts;
+  distinguish business-day URL/Cloudflare counts from viewer-timezone SMTP dates.
+  Normal seed preserves grants; --grant-dashboard is an explicit rollout only.
+
+- Web permission edits/role assignments preserve only currently valid sessions:
+  update session authz_version atomically from the previous user version; never
+  revive revoked/expired/stale sessions. Read current grants per request. Keep
+  worker authz-version invalidation, status changes and explicit session revoke.
+  FE refreshes permissions on save/focus/30s and 403; 401 ends the UI session.
+
+- Audit Log read APIs fix owner scope; global/anonymous access needs view plus
+  view_all, excluded from user defaults. No bodies, Cookie/token/OIDC code,
+  credentials or raw exceptions. Session terminal events dedupe; failed-request
+  security logs persist independently with bounded timeout. SMTP intent/outcome
+  audit shares ledger transactions and preserves UNKNOWN/no resend. HTTP accepted
+  differs from business outcome. Link Status logs counts only, no targets/results;
+  normal GET/polling must not produce audit noise. Preserve historical records.
+
+- Web RBAC catalog contains implemented permissions only. Add feature permissions
+  with API/FE guards to domain/authz.py; API startup seeds them after migrations,
+  before traffic, under the shared PostgreSQL seed lock. Existing roles retain
+  active selections; new codes are not auto-granted. Retire obsolete codes only
+  through RETIRED_PERMISSION_CODES, never broad deletion of unknown rows or role
+  resets. Inert-code cleanup retains session/worker authz versions.
+
+- Generic `feature:draft` artifact download must require feature view plus the
+  preview action (Quick Report uses submit_netcraft), matching preview endpoint
+  redaction. Ownership alone or view alone must not expose private draft bytes.
+
+- Link Status web keeps registration, DNS and URL observations independent.
+  HTTP 404/410, WAF/challenge, DNS failure or timeout never prove domain takedown.
+  EPP hold must be explicit; RDAP inactive alone is insufficient. HTTPS RDAP
+  redirects use the public egress policy; never persist bodies/raw exceptions.
+  Link Status OS A/AAAA lookup and its public egress guard must use the same
+  system resolver as HTTP sockets (bounded 3s), retaining mixed/private address
+  rejection and per-hop redirect checks. Direct DNS failure cannot override a
+  successful OS resolution; do not change shared browser/mail policy implicitly.
+  Checks stream directly to the requesting browser tab; never store results in
+  DB/user workspaces/cache. No application URL-count/body-length cap. Bound actual
+  probes to five per API process, schedule incrementally and stop on disconnect.
+  Recheck always probes anew. No Excel/CSV export; reload/unmount discards
+  temporary results. Keep existing login/action permissions and CSRF.
+
+- Cloudflare web uses a dedicated private RAM-cookie runner (not API-local state).
+  Cookie/account errors must use explicit reason codes: missing/unreadable
+  curr-account is distinct from settings/batch mismatch; never classify by
+  matching account substrings in exception text.
+  A valid configured ID has priority when curr-account cannot be parsed; parser
+  failure alone must not block it. Only a readable, unambiguous differing Cookie ID
+  proves a mismatch. Without configuration, ambiguous/missing Cookie ID fails closed.
+  Per-user Account ID in Mail settings is separate from SMTP; validate against
+  Cookie curr-account and batch binding before releasing paused work. Settings/
+  batches use owned ReviewSnapshot and CloudflareRecord; immutable payloads/hash
+  plus profile-version checks at start and before each committed submit intent.
+  Singleton runner + heartbeat claim, sequential checkpoints, 90s stale recovery
+  to UNKNOWN; never resend accepted/duplicate/unknown by changing report text.
+  Cancel old-day active batches without resetting ledger. Legacy JSON stays
+  separate; no silent owner assignment/import. Shared annotation parser lives in
+  core/cloudflare_input.py. Dashboard/API canonical modules live in backend/compat.
+
+
+- Web Provider Replies: optional IMAP reply_mailboxes replaces fixed receive folders
+  only when explicitly saved. Missing/None retains legacy fallback; [] reads no
+  receive folders. Keep Sent reconciliation separate and progress totals dynamic.
+  Folder names are server locations, never provider identities. Validate bounded,
+  non-empty names without controls; retain readonly/BODY.PEEK and folder isolation.
+
+
+- Provider Replies web tái dùng canonical backend/compat/provider_replies.py,
+  root wrapper giữ runtime cũ. IMAP explicit và guarded: readonly/BODY.PEEK,
+  INTERNALDATE/timezone + folder UIDVALIDITY; seen explicit mới STORE. Match chỉ
+  cùng owner/account theo thread hoặc domain+provider. Original body và exact draft
+  ở private immutable artifact; ReviewCase/Snapshot chỉ index metadata. Không lấy
+  recipient/account/thread từ client gửi. Preview khóa chữ ký/logo/evidence/version,
+  legal approval, Cloudflare DOM facts; SMTP/Sent/ledger chung, failed retry cùng
+  Message-ID, UNKNOWN/sent không reset. Sent header match giữ trạng thái riêng và
+  chặn duplicate, không tự nâng thành SMTP accepted hoặc recipient-delivered.
+  Báo cáo legacy được khớp từ Message-ID gốc trong Sent cùng account và recipient/
+  provider; không tạo Delivery giả. Sent đọc tối đa 500 header từ 31 ngày trước
+  ngày bắt đầu đã chọn, không dùng giới hạn đọc này để hết hạn lịch sử đã lưu.
+  Web hiện chỉ mở Cloudflare; NCC khác chỉ xem. Ghép Delivery/Sent là context,
+  không khóa Cloudflare hợp lệ chưa có lịch sử web. Capture/preview/send cùng
+  kiểm tra legacy needs_reply, email channel, Message-ID và trạng thái ledger.
+  Sync progress dùng snapshot owned riêng, callback IMAP đếm thực theo folder,
+  giữ account lock và chỉ completed sau commit; không dùng %/ETA giả hoặc
+  tự sync lại khi render. Run ID cũ không ghi đè run mới; stale báo interrupted.
+  Giữ dòng đã phản hồi trong bộ lọc needs_reply, cập nhật state tại chỗ; original
+  mail đóng mặc định. Provider Replies capture defaults to headless with no browser-window checkbox.
+  API show_browser remains for compatibility; never use personal profiles.
+  Giữ subprocess timeout và chẩn đoán lỗi fixed-code, không lộ stderr/path/secret.
+
 - Evidence Review legacy thiếu source account vẫn đọc được; chỉ explicit preview
   dưới case lock được bind lựa chọn enabled/owned, không tự chọn account mặc định.
   Scope nguồn đã lưu không được thay bằng lựa chọn account tùy ý. Nếu mọi job

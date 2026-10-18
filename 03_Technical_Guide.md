@@ -98,7 +98,7 @@ bootstrap admin đầu tiên bằng OIDC subject. Bootstrap chỉ cấp role `ad
 này được seed toàn bộ permission khi tạo lần đầu, sau đó sửa được tại UI. Khi
 kích hoạt tài khoản thường, hệ thống gán role `user`; permission của role này do
 admin chỉnh trong trang **Role & quyền**. Seed role mới gán toàn bộ permission
-trừ `users.*` và `roles.*`, gồm cả gửi/đọc mail và worker.
+trừ `users.*`, `roles.*` và `audit_logs.view_all`, gồm cả gửi/đọc mail và worker.
 
 ## Giai đoạn chuyển đổi web
 
@@ -135,8 +135,9 @@ khi gán, tránh lỗi `Permission catalog is not synchronized`.
 Migration `0003_explicit_role_permissions` xóa một lần quyền `user` do seed cũ
 cấp sẵn. Với DB hiện có, chạy `domaincheck-admin sync-rbac --reset-user-permissions`
 để thay bằng bộ mặc định mới; không cần migration schema. Những lần chạy
-`sync-rbac` thường tiếp theo giữ quyền/tên/mô tả của cả admin và user. Đổi quyền role thu hồi phiên của
-mọi thành viên; yêu cầu họ đăng nhập lại sau khi lưu.
+`sync-rbac` thường tiếp theo giữ quyền/tên/mô tả của cả admin và user. Đổi quyền
+hoặc gán role giữ phiên hợp lệ; quyền được đọc mới ở mỗi request. Giao diện cập
+nhật khi lưu, quay lại tab hoặc mỗi 30 giây. Khóa user/thu hồi phiên vẫn đăng xuất.
 Backend kiểm tra permission và CSRF độc lập với việc FE ẩn nút. Không thể vô hiệu
 hóa hoặc gỡ role của admin hoạt động cuối cùng, kể cả hai request chạy đồng thời.
 
@@ -1304,3 +1305,127 @@ tài khoản đã thuộc phạm vi vẫn được giữ để theo dõi đủ k
 Nếu case cũ không ghi tài khoản nguồn, mở case và chọn tài khoản gửi trước khi
 tạo draft. Thao tác preview lưu lựa chọn và ảnh trong cùng transaction, không
 chạy precheck mới. Không tự chọn tài khoản mặc định; không cần migration.
+# Quy trình xử lý Phản hồi NCC trên web
+
+Hiện chỉ mở phản hồi Cloudflare; chọn bộ lọc NCC để xem các NCC khác ở chế độ chỉ
+xem. Thiếu liên kết delivery cũ không khóa Cloudflare: kiểm tra URL, đúng thư yêu cầu
+và bằng chứng trước khi tạo draft. Thư không yêu cầu phản hồi/portal/thiếu Message-ID
+vẫn bị chặn đúng lý do. Nút capture dùng Browser Evidence chung, hiển thị lý do nếu
+thiếu quyền hoặc capture bị tắt.
+
+Danh sách giữ cả thư đã phản hồi và cập nhật trạng thái đúng dòng, không tự loại
+khỏi bộ lọc yêu cầu phản hồi. Email gốc đóng mặc định, mở khi cần xem.
+Chụp DOM mặc định mở cửa sổ Chrome/Chromium riêng trên máy backend. Local Windows
+có thể theo dõi trực tiếp; backend server không có desktop cần tắt checkbox mở
+cửa sổ để chạy headless. Không dùng profile cá nhân hoặc tương tác/submit trang.
+Capture tối đa 180 giây, báo mã lỗi cụ thể và không làm mất evidence cũ khi lỗi.
+
+Trong lúc đồng bộ, theo dõi thư mục và số thư đã kiểm tra/tổng thư. Kết thúc có
+thông báo, lỗi thư mục/giới hạn số thư được giữ riêng; thu hẹp phạm vi rồi đồng bộ
+lại nếu cần. Reload khôi phục tiến độ từ backend; quá 5 phút không cập nhật sẽ báo
+gián đoạn, không tự khởi chạy lại IMAP.
+
+1. Chọn đúng tài khoản đã gửi báo cáo, khoảng ngày và bấm Đồng bộ phản hồi.
+2. Kiểm tra kết quả từng thư mục; thư mục lỗi/giới hạn chưa đọc hết phải đồng bộ
+   lại với phạm vi nhỏ hơn. Không suy ra không có thư từ một lượt sync bị lỗi.
+3. Mở thư, đọc bản gốc và tóm tắt đối chiếu, xác nhận đúng yêu cầu Cloudflare của
+   tài khoản nguồn. Ghép lịch sử hỗ trợ đối chiếu nhưng không bắt buộc phải có
+   delivery web cũ. Portal/no-reply xử lý theo hướng dẫn NCC, không ép SMTP.
+4. Bổ sung dữ kiện tiếng Anh và evidence: DOM capture dùng lõi chung; upload
+   thủ công 1–3 PNG/JPEG. URL thay đổi cần chụp/upload bộ ảnh tương ứng.
+5. Tạo exact draft, kiểm tra From/To/thread/nội dung/ảnh rồi xác nhận gửi. Không
+   nhập raw recipient/account để đổi người nhận ở request gửi.
+6. Gửi lỗi xác định được thì retry; timeout sau SMTP intent cần đối soát, không
+   gửi lại mù. Sent-copy lỗi không gửi lại SMTP. Header Sent khớp được hiển thị
+   riêng, không tự coi là bằng chứng người nhận đã nhận.
+
+Quyền mail và cấu hình egress dùng hệ thống hiện có. Không migration; cập nhật
+backend editable/wheel để có canonical provider_replies trước khi reload API.
+Không cần khởi động thêm worker sync/send. Không tự đồng bộ IMAP khi render page.
+
+Báo cáo legacy chưa có delivery web được nối bằng Message-ID báo cáo gốc trong
+Sent, đúng tài khoản và NCC/người nhận. Đồng bộ đọc tối đa 500 header Sent từ
+31 ngày trước ngày bắt đầu đã chọn; nếu chưa khớp, kiểm tra phạm vi ngày và thư mục
+Sent. Không xóa lịch sử hoặc tạo delivery thành công giả từ phép ghép này.
+
+
+2026-10-17 - Provider Replies web removes the backend browser window checkbox.
+Capture defaults to headless in UI/API; progress, source/destination images and
+specific errors remain. API show_browser stays available for compatibility.
+
+
+2026-10-17 - Provider Replies: configure exact IMAP folder names per owned sender
+account using Add folder/Remove in Mail settings. Mixed-provider evidence folders
+are supported without assigning a provider role. Saving the list replaces old fixed
+receive-folder selection. Preserve Sent mailbox separately. Folder read failures
+remain isolated and visible; sync remains explicit, readonly and BODY.PEEK.
+
+
+2026-10-18 - Cloudflare Worker web operations: configure Account ID in Mail settings,
+start run_cloudflare_worker.bat, then precheck full URLs, inspect reports, enter Cookie
+and explicitly confirm batch submission. Monitor the same per-URL list. Cookie
+rejection requires a new Cookie; challenge/rate limit pauses. Never retry UNKNOWN
+without provider reconciliation. Cancel finishes the in-flight request. F5 restores
+DB state; runner restart loses the RAM Cookie and needs re-entry after stale recovery.
+Keep API/runner on the same private host by default; share DB/artifact root/master
+key. Do not expose runner port 8789 publicly. No production Cookie/report request was
+used in validation. Streamlit JSON history stays separate and must be reconciled
+before repeating previously submitted lists on web. See docs/testing/cloudflare-worker-web-2026-10-18.md.
+# Vận hành Check Link Status web
+
+Phân quyền web: cấp quyền xem cùng quyền thao tác cần dùng, không reset role để
+đồng bộ catalog. Gán role qua UI cần `users.assign_roles` và `roles.view`.
+Artifact draft cần quyền xem tính năng + preview; quyền xem đơn thuần không tải
+được draft riêng. Quick Report dùng `submit_netcraft` cho draft Netcraft.
+Catalog giữ 52 mã của chức năng web/API đang có, gồm hai quyền Audit Log. Bảy mã dự phòng không có chức
+năng đã bị loại; API tự seed sau migration, trước nhận request, kể cả deploy đầu.
+Khi thêm tính năng, thêm mã vào domain/authz.py cùng guard API/FE; deploy tiếp theo
+tự đưa vào catalog để admin chọn và giữ các grant cũ. Có thể chạy sync-rbac thủ công;
+không dùng reset-user-permissions để thêm mã. Chi tiết tại
+`docs/testing/permission-audit-2026-10-18.md`.
+
+Audit Log dùng một menu `/audit-log` với ba tab: đăng nhập/phiên, hoạt động,
+quản trị/cấu hình. Trước deploy chạy Alembic head (0005_audit_log). Xem cá nhân
+cần audit_logs.view; xem toàn hệ thống cần thêm audit_logs.view_all, không mặc
+định cho user. Không sửa config.ini hoặc backfill login giả. Khi đối soát gửi,
+nối Request ID/job/delivery/attempt ID và outcome ledger; HTTP accepted chưa xác
+nhận SMTP/provider accepted. Link Status chỉ audit count, không lưu URL/kết quả.
+Lỗi login vô danh chỉ có reason code; không token/Cookie/nội dung thư/ảnh.
+
+Dán danh sách và chạy check explicit; không giới hạn số URL ở cấp ứng dụng, backend
+xử lý dần với tối đa 5 probe/process. Mỗi lần check lấy dữ liệu mới; không lưu kết quả
+DB/theo người dùng. F5/rời trang mất kết quả tạm. Lọc tên miền/website kết hợp
+để xem trực tiếp trên trang; không có chức năng xuất Excel/CSV.
+
+Kết quả truyền trực tiếp trên POST dạng NDJSON. Reverse proxy phải cho stream trả
+dần, tắt response buffering cho route này và giữ kết nối đủ thời gian xử lý danh
+sách lớn; heartbeat mỗi 10s khi chưa có kết quả. Mất kết nối/ngắt trang dừng schedule;
+request đang chạy có deadline riêng. Kích thước request tối đa thực tế còn phụ thuộc
+proxy/máy chủ và bộ nhớ máy, không có quota 200 URL trong ứng dụng.
+
+Đọc cờ đăng ký, DNS và redirect trước khi xác nhận kết quả xử lý NCC. Hold không
+xác nhận nguyên nhân; CF warning khác challenge/WAF; 404/410 là trạng thái URL.
+Timeout/SERVFAIL/TLS lỗi cần kiểm tra lại. Góc quan sát backend không đại diện mọi
+quốc gia/mạng. Không tự cập nhật outcome hoặc gửi report/email/IMAP từ menu này.
+
+2026-10-18 - Link Status troubleshooting: if direct DNS queries time out while
+browser/system resolution succeeds, the web check now uses OS A/AAAA resolution
+(source SYSTEM) and the same resolver for public destination validation. Re-run
+the check to replace temporary results; no DNS server or config.ini change needed.
+A redirect followed by HTTP 200 is reachable at final_url, not proof of legitimacy.
+
+Permission updates keep valid sessions. Revoked/expired/stale sessions remain invalid. A protected API 401 redirects to login; a 403 refreshes current grants without logging out. Explicit revoke/status transitions and the CLI reset-user-permissions command retain their revocation policy.
+
+### Dashboard operation
+
+Use system scope only with dashboard.view + dashboard.view_all; personal scope follows the union of current feature view permissions. Select Today/7/30 days and workflow; click a user row's statistics action to filter totals, then clear the filter to return. System summaries do not open private user workflows. Current review queues are today's records; delivery failures/UNKNOWN are existing backlog. SMTP success and provider acceptance are separate from takedown success. Check stored business-day semantics when comparing users with different timezones.
+
+On first upgrade run backend venv `python -m domaincheck.cli sync-rbac --grant-dashboard`. Do not put the explicit grant flag in normal startup if operators need to remove those permissions later. Custom roles receive permissions through Role settings. Dashboard performs DB reads only; mailbox refresh remains explicit on Provider Replies.
+
+### Quick Report extension distribution
+
+Build frontend from the full repository: Vite packages chrome_extension/cloudflare-profile-worker into frontend/dist/downloads/web-form-assistant.zip. Deploy the entire dist, including downloads. Bump manifest.version when releasing extension changes and rebuild/redeploy the web; the connected installed version is compared against that bundled version. Users download from Quick Report, extract to a stable folder, use Chrome Developer mode / Load unpacked for first install, or replace that folder and Reload for updates. Configure the exact Application origin in Options and check the public extension ID against the frontend configuration. Downloading never installs the extension automatically. The ZIP contains only extension runtime assets, without config.ini, credentials or runtime state.
+
+### Domain Worker day rollover
+
+The workspace business day is calculated by backend using the account timezone. Completed historical prechecks remain in History but are not automatically restored as today's work, including from old batch query parameters or tab storage. Explicitly open History to inspect an old batch read-only; run a new precheck for today's work. Do not delete jobs/deliveries to clear the screen. Active locked jobs remain visible until they safely stop or recover.

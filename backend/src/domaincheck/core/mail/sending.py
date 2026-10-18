@@ -13,6 +13,9 @@ def compose_message(intent, blobs):
     message['From'] = formataddr((row.get('sender_name', ''), row['sender_email']))
     message['To'], message['Subject'] = row['recipient'], row['subject']
     message['Message-ID'], message['Date'] = intent.message_id, formatdate(usegmt=True)
+    if row.get('in_reply_to'):
+        message['In-Reply-To'] = row['in_reply_to']
+        message['References'] = row.get('references') or row['in_reply_to']
     message.set_content(row['text_body'], charset='utf-8')
     html_part = None
     if row.get('html_body'):

@@ -9,5 +9,7 @@ export function useCurrentUser() {
     queryFn: ({ signal }) => getCurrentUser(signal),
     retry: false,
     staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchInterval: (query) => query.state.data && query.state.status !== 'error' ? 30_000 : false,
   })
 }

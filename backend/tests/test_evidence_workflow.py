@@ -98,6 +98,15 @@ class EvidenceWorkflowTests(unittest.TestCase):
                     LegacyBrowserCaptureAdapter().capture("https://example.com/", staging_root=Path(directory))
             self.assertEqual(capture.call_args.kwargs, {"headless": True})
 
+    def test_visible_capture_passes_headless_false_without_changing_shared_defaults(self):
+        with tempfile.TemporaryDirectory() as directory:
+            capture = Mock(return_value={'success': False})
+            fake = SimpleNamespace(capture_normal_report_evidence=capture)
+            with patch('domaincheck.core.evidence.importlib.import_module', return_value=fake):
+                with self.assertRaises(CaptureFailed):
+                    LegacyBrowserCaptureAdapter(headless=False).capture('https://example.com/', staging_root=Path(directory))
+            self.assertEqual(capture.call_args.kwargs, {'headless': False})
+
     def test_projection_keeps_dom_narrative_facts_without_html_or_credentials(self):
         from domaincheck.core.evidence import capture_manifest
         source = 'https://source.example/vi-vn/'

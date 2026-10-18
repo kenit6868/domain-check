@@ -21,13 +21,15 @@ def capture_failure_code(error) -> str:
     message = str(error).lower()
     known = {"egress_request_denied", "invalid_capture_artifacts", "capture_manifest_outside_staging",
              "capture_path_outside_staging", "capture_manifest_too_large", "terminal_page",
-             "browser_runtime_missing", "browser_executable_missing", "browser_timeout", "browser_navigation_failed"}
+             "browser_runtime_missing", "browser_executable_missing", "browser_timeout", "browser_navigation_failed", "headed_browser_unavailable"}
     if message in known:
         return message
     if "playwright" in message and any(term in message for term in ("no module named", "chưa cài")):
         return "browser_runtime_missing"
     if "executable doesn't exist" in message or "playwright install" in message:
         return "browser_executable_missing"
+    if 'headed browser' in message or 'missing x server' in message:
+        return 'headed_browser_unavailable'
     if "timeout" in message or "timed out" in message:
         return "browser_timeout"
     if "err_" in message or "net::" in message:
@@ -41,8 +43,9 @@ class BrowserCaptureAdapter(Protocol):
 
 class LegacyBrowserCaptureAdapter:
     """Use legacy passive/DOM logic in an isolated temporary directory."""
-    def __init__(self, *, browser_proxy: dict | None = None) -> None:
+    def __init__(self, *, browser_proxy: dict | None = None, headless: bool = True) -> None:
         self._browser_proxy = browser_proxy
+        self._headless = headless
 
     @staticmethod
     def validate_runtime() -> None:
@@ -59,7 +62,7 @@ class LegacyBrowserCaptureAdapter:
 
     def capture(self, target: str, *, staging_root: Path) -> tuple[list[ImageUpload], dict]:
         browser = importlib.import_module("browser_evidence")
-        options = {"headless": True}
+        options = {"headless": self._headless}
         if self._browser_proxy is not None:
             options["browser_proxy"] = self._browser_proxy
         with tempfile.TemporaryDirectory(prefix="capture-", dir=staging_root) as directory:

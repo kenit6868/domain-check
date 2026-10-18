@@ -2,13 +2,14 @@
 import { ThemeToggle } from '../../components/shared/ThemeToggle'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Suspense } from 'react'
-import { ChevronRight, FileSearch, LayoutDashboard, Layers3, LogOut, Mail, SearchCheck, ShieldCheck, UserCog, Users, Wifi } from 'lucide-react'
+import { ChevronRight, CloudCog, FileSearch, Images, LayoutDashboard, Layers3, Link2, LogOut, Mail, Reply, ScanEye, SearchCheck, ScrollText, ShieldCheck, UserCog, Users, Wifi } from 'lucide-react'
 import { Navigate, NavLink, Outlet } from 'react-router-dom'
 
 import { logoutCurrentUser } from '../../features/auth/api/authApi'
 import { useCurrentUser } from '../../features/auth/hooks/useCurrentUser'
 import { ApiError } from '../../lib/http/errors'
-import { QueryError } from '../../components/shared/QueryError'
+import { StatusPage } from '../../components/shared/StatusPage'
+import { RefreshCw } from 'lucide-react'
 import { toast } from '../../lib/notifications'
 
 export function AppShell() {
@@ -22,8 +23,8 @@ export function AppShell() {
   } })
   if (me.isPending) return <FullPageMessage title="Đang xác thực phiên…" />
   if (me.isError) {
-    if (!(me.error instanceof ApiError) || me.error.status !== 401) return <FullPageMessage title="Chưa thể tải phiên đăng nhập" action={<QueryError message="Không thể xác minh phiên. Kiểm tra kết nối rồi thử lại." onRetry={() => { void me.refetch() }} />} />
-    return <Navigate to="/login" replace />
+    if (!(me.error instanceof ApiError) || me.error.status !== 401) return <FullPageMessage title="Chưa thể tải phiên đăng nhập" detail="Không thể kết nối để xác minh phiên đăng nhập. Hãy kiểm tra kết nối mạng và thử lại." action={<Button className="primary-button" loading={me.isFetching} onClick={() => { void me.refetch() }}><RefreshCw size={16} />Thử tải lại</Button>} />
+    return <Navigate to={me.data ? '/login?session_expired=1' : '/login'} replace />
   }
   if (me.data.status === 'pending') {
     return <FullPageMessage title="Tài khoản đang chờ duyệt" detail="Quản trị viên cần kích hoạt tài khoản trước khi bạn có thể dùng công cụ." />
@@ -38,8 +39,8 @@ export function AppShell() {
       </aside>
       <div className="lg:pl-60">
         <header className="app-topbar sticky top-0 z-10 flex min-h-14 flex-wrap items-center justify-between gap-3 px-3 py-2 backdrop-blur-xl sm:px-4">
-          <div className="flex min-w-0 items-center gap-3"><span className="workspace-icon hidden sm:flex"><Layers3 size={18} /></span><div><p className="workspace-title text-sm font-semibold">Khu vực</p><p className="mt-1 text-xs text-slate-500">{me.data.timezone}</p></div></div>
-          <div className="flex items-center gap-3"><ThemeToggle /><div className="profile-pill hidden sm:flex"><span className="profile-avatar" aria-hidden="true">{me.data.display_name.trim().slice(0, 1).toUpperCase()}</span><span className="max-w-48 truncate text-xs font-medium">{me.data.display_name}</span></div><Button className="icon-button" aria-label="Đăng xuất" loading={logout.isPending} onClick={() => { logout.mutate() }}><LogOut size={18} /></Button></div>
+          <div className="flex min-w-0 items-center gap-3"><span className="workspace-icon hidden sm:flex"><Layers3 size={18} /></span><div><p className="workspace-title text-sm font-semibold">Timezone</p><p className="mt-1 text-xs text-slate-500">{me.data.timezone}</p></div></div>
+          <div className="header-actions flex items-center gap-3"><ThemeToggle /><div className="profile-pill flex min-w-0"><span className="profile-avatar" aria-hidden="true">{me.data.display_name.trim().slice(0, 1).toUpperCase()}</span><div className="min-w-0 max-w-36 sm:max-w-52"><span className="block truncate text-xs font-medium">{me.data.display_name}</span>{me.data.telegram_username && <span className="block truncate text-[11px] text-slate-500">@{me.data.telegram_username.replace(/^@+/, '')}</span>}</div>{Boolean(me.data.roles?.length) && <div className="flex max-w-32 flex-wrap items-center gap-1 sm:max-w-48" aria-label="Role">{me.data.roles?.map((role) => <span key={role} className="inline-flex max-w-full items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold leading-4 text-indigo-700 dark:border-indigo-400/25 dark:bg-indigo-400/10 dark:text-indigo-300" title={role}><span className="truncate">{role}</span></span>)}</div>}</div><Button className="icon-button" aria-label="Đăng xuất" loading={logout.isPending} onClick={() => { logout.mutate() }}><LogOut size={18} /></Button></div>
         </header>
         <div className="mobile-navigation overflow-x-auto px-3 py-2 lg:hidden"><Navigation permissions={permissions} mobile /></div>
         <main className="workspace-main mx-auto max-w-[1600px] p-3 sm:p-4"><Suspense fallback={<div className="data-panel p-4" role="status">Đang tải trang…</div>}><Outlet context={{ me: me.data }} /></Suspense></main>
@@ -54,13 +55,17 @@ function Navigation({ permissions, mobile = false }: { permissions: string[]; mo
     { permission: 'check_domain.view', to: '/domain-check', icon: <SearchCheck size={18} />, label: 'Check Domain' },
     { permission: 'quick_report.view', to: '/quick-report', icon: <FileSearch size={18} />, label: 'Quick Report' },
     { permission: 'domain_worker.view', to: '/domain-worker', icon: <Layers3 size={18} />, label: 'Domain Worker' },
-    { permission: 'cloaking_review.view', to: '/cloaking-review', icon: <Layers3 size={18} />, label: 'Cloaking Review' },
-    { permission: 'domain_evidence_review.view', to: '/domain-evidence-review', icon: <Layers3 size={18} />, label: 'Domain Evidence Review' },
-    { permission: 'mail_accounts.view_own', to: '/settings/mail', icon: <Mail size={18} />, label: 'Tài khoản gửi mail' },
+    { permission: 'cloaking_review.view', to: '/cloaking-review', icon: <ScanEye size={18} />, label: 'Cloaking Review' },
+    { permission: 'domain_evidence_review.view', to: '/domain-evidence-review', icon: <Images size={18} />, label: 'Domain Evidence Review' },
+    { permission: 'cloudflare_worker.view', to: '/cloudflare-worker', icon: <CloudCog size={18} />, label: 'Cloudflare Worker' },
+    { permission: 'link_status.view', to: '/link-status', icon: <Link2 size={18} />, label: 'Check Link Status' },
+    { permission: 'provider_replies.view', to: '/provider-replies', icon: <Reply size={18} />, label: 'Phản hồi NCC' },
+    { permission: 'mail_accounts.view_own', to: '/settings/mail', icon: <Mail size={18} />, label: 'Cấu hình mail' },
+    { permission: 'audit_logs.view', to: '/audit-log', icon: <ScrollText size={18} />, label: 'Audit Log' },
     { permission: 'users.view', to: '/admin/users', icon: <Users size={18} />, label: 'Người dùng' },
     { permission: 'roles.view', to: '/admin/roles', icon: <UserCog size={18} />, label: 'Role & quyền' },
   ].filter((item) => permissions.includes(item.permission))
-  return <nav className={mobile ? 'flex min-w-max gap-2' : 'mt-3 space-y-1'} aria-label="Điều hướng chính">{!mobile && <p className="mb-3 px-3 font-mono text-[10px] uppercase tracking-[0.2em] nav-heading">Workspace</p>}<NavItem to="/" icon={<LayoutDashboard size={18} />} label="Dashboard" />{items.map((item) => <NavItem key={item.to} {...item} />)}</nav>
+  return <nav className={mobile ? 'flex min-w-max gap-2' : 'mt-3 max-h-[calc(100dvh-12rem)] space-y-1 overflow-y-auto'} aria-label="Điều hướng chính">{!mobile && <p className="mb-3 px-3 font-mono text-[10px] uppercase tracking-[0.2em] nav-heading">Workspace</p>}<NavItem to="/" icon={<LayoutDashboard size={18} />} label="Dashboard" />{items.map((item) => <NavItem key={item.to} {...item} />)}</nav>
 }
 
 function NavItem({ to, icon, label }: { to: string; icon: React.ReactNode; label: string }) {
@@ -68,5 +73,5 @@ function NavItem({ to, icon, label }: { to: string; icon: React.ReactNode; label
 }
 
 export function FullPageMessage({ title, detail, action }: { title: string; detail?: string; action?: React.ReactNode }) {
-  return <main className="login-surface flex min-h-screen items-center justify-center p-6"><section className="console-panel max-w-lg p-9 text-center"><div className="mb-6 flex justify-end"><ThemeToggle /></div><span className="brand-mark mx-auto mb-5"><ShieldCheck size={28} /></span><h1 className="text-2xl font-semibold text-white">{title}</h1>{detail && <p className="mt-3 text-slate-400">{detail}</p>}{action && <div className="mt-6">{action}</div>}</section></main>
+  return <StatusPage standalone title={title} detail={detail} action={action} />
 }

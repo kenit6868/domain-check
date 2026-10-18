@@ -1,4 +1,5 @@
-﻿import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { Theme } from '@radix-ui/themes'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -9,7 +10,7 @@ import { installApiMock, installNetworkFailure } from './httpMock'
 function Location() { return <span data-testid="location">{useLocation().pathname}</span> }
 function renderApp(path = '/') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}><AppRouter /><Location /></MemoryRouter></QueryClientProvider>)
+  return render(<QueryClientProvider client={client}><Theme><MemoryRouter initialEntries={[path]}><AppRouter /><Location /></MemoryRouter></Theme></QueryClientProvider>)
 }
 const me = { id: '11111111-1111-4111-8111-111111111111', display_name: 'Operator', telegram_username: 'operator', status: 'active', timezone: 'Asia/Bangkok', permissions: ['quick_report.view'] }
 function anonymousMock(configured = true) {
@@ -21,6 +22,22 @@ function anonymousMock(configured = true) {
   })
 }
 describe('login routing and dashboard', () => {
+  it('shows a missing page with a Dashboard recovery link for authenticated users', async () => {
+    const restore = installApiMock(() => me)
+    renderApp('/missing-page')
+    expect(await screen.findByRole('heading', { name: 'Trang này không tồn tại' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Về Dashboard/ })).toHaveAttribute('href', '/')
+    expect(screen.getByTestId('location')).toHaveTextContent('/missing-page')
+    restore()
+  })
+  it('shows a permission recovery screen without exposing the restricted page', async () => {
+    const restore = installApiMock(() => me)
+    renderApp('/admin/roles')
+    expect(await screen.findByRole('heading', { name: 'Truy cập bị giới hạn' })).toBeInTheDocument()
+    expect(screen.getByText('403 · TRUY CẬP HẠN CHẾ')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Về Dashboard/ })).toHaveAttribute('href', '/')
+    restore()
+  })
   afterEach(() => { cleanup(); vi.restoreAllMocks() })
   it.each(['/', '/quick-report', '/settings/mail', '/admin/users', '/admin/roles', '/unknown'])('redirects anonymous %s to the dedicated login', async (path) => {
     const restore = anonymousMock()

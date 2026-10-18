@@ -121,6 +121,7 @@ class PreviewService:
                     "subject": row.subject,
                     "text_body": row.text_body,
                     "html_body": row.html_body,
+                    **({'in_reply_to': row.in_reply_to, 'references': row.references} if row.in_reply_to else {}),
                     **({"sender_email": row.sender_email, "sender_name": row.sender_name,
                         "sender_label": row.sender_label} if row.sender_email is not None else {}),
                 }

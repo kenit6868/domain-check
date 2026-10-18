@@ -1,3 +1,4 @@
+import { Theme } from '@radix-ui/themes'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -10,7 +11,7 @@ import { installApiMock } from './httpMock'
 function renderAdmin(path = '/admin/users') {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <MemoryRouter initialEntries={[path]}><AppRouter /></MemoryRouter>
+      <Theme><MemoryRouter initialEntries={[path]}><AppRouter /></MemoryRouter></Theme>
     </QueryClientProvider>,
   )
 }
@@ -45,7 +46,7 @@ describe('admin pages', () => {
     await userEvent.type(screen.getByLabelText('SMTP password'), 'fixture-password')
     await userEvent.clear(screen.getByLabelText('SMTP port'))
     await userEvent.type(screen.getByLabelText('SMTP port'), '465')
-    expect(screen.getByLabelText('Transport')).toHaveValue('implicit_tls')
+    expect(screen.getByLabelText('Transport')).toHaveTextContent('Implicit TLS')
     await userEvent.click(screen.getByRole('button', { name: 'Lưu tài khoản' }))
     expect(await screen.findByText('sender@example.test', { selector: 'h2' })).toBeInTheDocument()
     expect(submitted).toMatchObject({ label: 'sender@example.test', smtp_username: 'sender@example.test', smtp_port: 465, smtp_transport: 'implicit_tls', imap: { host: '' } })

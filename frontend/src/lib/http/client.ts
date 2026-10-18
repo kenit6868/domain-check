@@ -4,7 +4,7 @@ import { normalizeApiError } from './errors'
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
-function readCookie(name: string): string {
+export function readCookie(name: string): string {
   const prefix = `${name}=`
   const entry = document.cookie.split('; ').find((item) => item.startsWith(prefix))
   return entry ? decodeURIComponent(entry.slice(prefix.length)) : ''
