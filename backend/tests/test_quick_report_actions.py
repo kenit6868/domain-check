@@ -17,7 +17,7 @@ from xml.etree import ElementTree as ET
 
 from sqlalchemy import select
 
-from quick_report_actions import build_nictop_workbook, submit_netcraft
+from domaincheck.engine.quick_report_actions import build_nictop_workbook, submit_netcraft
 from domaincheck.application.quick_report_actions import ActionConflict, QuickReportActions
 from domaincheck.application.quick_reports import QuickReportNotFound, QuickReportService
 from domaincheck.infrastructure.artifacts import FilesystemArtifactStore
@@ -50,7 +50,7 @@ class ExportAndTransportTests(unittest.TestCase):
         response.__enter__.return_value.status = 201
         opener = MagicMock()
         opener.open.return_value = response
-        with patch("quick_report_actions.urllib.request.build_opener", return_value=opener):
+        with patch("domaincheck.engine.quick_report_actions.urllib.request.build_opener", return_value=opener):
             result = submit_netcraft({"email": "fixture@example.test", "urls": []})
         self.assertEqual(result, {"state": "SUBMITTED", "code": "accepted", "http_status": 201})
         self.assertEqual(opener.open.call_args.kwargs, {"timeout": 15})
@@ -66,7 +66,7 @@ class ExportAndTransportTests(unittest.TestCase):
         ]:
             opener = MagicMock()
             opener.open.side_effect = failure
-            with patch("quick_report_actions.urllib.request.build_opener", return_value=opener):
+            with patch("domaincheck.engine.quick_report_actions.urllib.request.build_opener", return_value=opener):
                 result = submit_netcraft({})
             self.assertEqual(result["state"], expected)
             self.assertNotIn("secret", repr(result))

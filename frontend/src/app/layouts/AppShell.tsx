@@ -11,6 +11,7 @@ import { ApiError } from '../../lib/http/errors'
 import { StatusPage } from '../../components/shared/StatusPage'
 import { RefreshCw } from 'lucide-react'
 import { toast } from '../../lib/notifications'
+import { WorkerHealthNotice } from '../../components/shared/WorkerHealthNotice'
 
 export function AppShell() {
   const queryClient = useQueryClient()
@@ -30,6 +31,7 @@ export function AppShell() {
     return <FullPageMessage title="Tài khoản đang chờ duyệt" detail="Quản trị viên cần kích hoạt tài khoản trước khi bạn có thể dùng công cụ." />
   }
   const permissions = me.data.permissions
+  const usesWorkers = permissions.some((code) => ['quick_report.view', 'check_domain.view', 'domain_worker.view', 'cloudflare_worker.view'].includes(code))
   return (
     <div className="app-surface min-h-screen">
       <aside className="sidebar-panel fixed inset-y-0 left-0 z-20 hidden w-60 p-3 lg:block">
@@ -43,7 +45,7 @@ export function AppShell() {
           <div className="header-actions flex items-center gap-3"><ThemeToggle /><div className="profile-pill flex min-w-0"><span className="profile-avatar" aria-hidden="true">{me.data.display_name.trim().slice(0, 1).toUpperCase()}</span><div className="min-w-0 max-w-36 sm:max-w-52"><span className="block truncate text-xs font-medium">{me.data.display_name}</span>{me.data.telegram_username && <span className="block truncate text-[11px] text-slate-500">@{me.data.telegram_username.replace(/^@+/, '')}</span>}</div>{Boolean(me.data.roles?.length) && <div className="flex max-w-32 flex-wrap items-center gap-1 sm:max-w-48" aria-label="Role">{me.data.roles?.map((role) => <span key={role} className="inline-flex max-w-full items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold leading-4 text-indigo-700 dark:border-indigo-400/25 dark:bg-indigo-400/10 dark:text-indigo-300" title={role}><span className="truncate">{role}</span></span>)}</div>}</div><Button className="icon-button" aria-label="Đăng xuất" loading={logout.isPending} onClick={() => { logout.mutate() }}><LogOut size={18} /></Button></div>
         </header>
         <div className="mobile-navigation overflow-x-auto px-3 py-2 lg:hidden"><Navigation permissions={permissions} mobile /></div>
-        <main className="workspace-main mx-auto max-w-[1600px] p-3 sm:p-4"><Suspense fallback={<div className="data-panel p-4" role="status">Đang tải trang…</div>}><Outlet context={{ me: me.data }} /></Suspense></main>
+        <main className="workspace-main mx-auto max-w-[1600px] p-3 sm:p-4">{usesWorkers && <WorkerHealthNotice scope={`${me.data.id}:${[...permissions].sort().join(',')}`} />}<Suspense fallback={<div className="data-panel p-4" role="status">Đang tải trang…</div>}><Outlet context={{ me: me.data }} /></Suspense></main>
       </div>
     </div>
   )

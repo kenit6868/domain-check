@@ -1,0 +1,98 @@
+# Use with compose.yaml and --env-file backend/.env (see docs/team-deployment.md).
+x-backend: &backend
+  image: domaincheck-backend:${DOMAINCHECK_RELEASE:-local}
+  env_file: ./.env
+  environment: &environment
+    DOMAINCHECK_ENVIRONMENT: production
+    DOMAINCHECK_DATABASE_URL: ${DOMAINCHECK_CONTAINER_DATABASE_URL:?Set DOMAINCHECK_CONTAINER_DATABASE_URL for the db service}
+    DOMAINCHECK_REDIS_URL: redis://redis:6379/0
+    DOMAINCHECK_ARTIFACT_ROOT: /var/lib/domaincheck/artifacts
+    DOMAINCHECK_CLOUDFLARE_RUNNER_URL: http://cloudflare-runner:8789
+    DOMAINCHECK_CLOUDFLARE_RUNNER_HOST: 0.0.0.0
+  volumes:
+    - artifacts-data:/var/lib/domaincheck/artifacts
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 30m
+  depends_on: &dependencies
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  migrate:
+    <<: *backend
+    build: .
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *backend
+    build: .
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=5)"]
+      interval: 15s
+      timeout: 6s
+      start_period: 30s
+      retries: 3
+
+  quick-report:
+    <<: *backend
+    command: ["python", "-m", "domaincheck.workers.cli", "--job-type", "quick_report"]
+
+  check-domain:
+    <<: *backend
+    command: ["python", "-m", "domaincheck.workers.cli", "--job-type", "check_domain"]
+
+  precheck:
+    <<: *backend
+    command: ["python", "-m", "domaincheck.workers.cli", "--job-type", "domain_worker_precheck"]
+    shm_size: 1gb
+
+  evidence:
+    <<: *backend
+    # Browser capture is enabled explicitly in the team deployment .env.
+    command: ["python", "-m", "domaincheck.workers.cli", "--job-type", "browser_evidence"]
+    shm_size: 1gb
+
+  send-mail:
+    <<: *backend
+    command: ["python", "-m", "domaincheck.workers.cli", "--job-type", "domain_worker_send"]
+
+  cloudflare-runner:
+    <<: *backend
+    command: ["python", "-m", "domaincheck.cloudflare_runner"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8789/health/live', timeout=5)"]
+      interval: 15s
+      timeout: 6s
+      retries: 3
+
+  web:
+    build:
+      context: ../frontend
+      args:
+        VITE_FORM_ASSISTANT_EXTENSION_ID: ${VITE_FORM_ASSISTANT_EXTENSION_ID:?Set the installed public extension ID}
+    environment:
+      DOMAINCHECK_PUBLIC_HOST: ${DOMAINCHECK_PUBLIC_HOST:?Set the public HTTPS hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  artifacts-data:
+  caddy-data:
+  caddy-config:

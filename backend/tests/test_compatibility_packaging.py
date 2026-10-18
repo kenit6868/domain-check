@@ -28,31 +28,32 @@ assert any(g['channel'] == 'cdn' for g in guides)
 assert any(g['channel'] == 'registrar' and 'To: abuse@namecheap.com' in g['draft'] for g in guides)
 assert any(g['channel'] == 'registry' and g['form_url'] for g in guides)
 assert any(g['channel'] == 'registry' and 'To: abuse@registry.example' in g['draft'] for g in guides)
-from domaincheck.core.worker_precheck import email_examples, LegacyWorkerPrecheckAdapter
-LegacyWorkerPrecheckAdapter.validate_runtime()
+from domaincheck.core.worker_precheck import email_examples, DomainWorkerPrecheckAdapter
+DomainWorkerPrecheckAdapter.validate_runtime()
 examples = email_examples('fixture.cc', 'https://fixture.cc/path?q=1', {
     'recipients': [{'channel': 'hosting', 'email': 'abuse@host.example'}],
     'hosting_ip': '8.8.8.8', 'origin_ip_whois': {'org': 'Fixture Host', 'abuse_email': 'abuse@host.example'}},
     {'contact_name': 'Tester', 'contact_email': 'test@example.com'})
 assert examples[0]['advisory'] and 'Reported URL: https://fixture.cc/path?q=1' in examples[0]['body']
 from domaincheck.core.email_content import bundled_logo_bytes
-from domaincheck.application.sent_copy import SentCopyService, LegacySentCopyAdapter
+from domaincheck.application.sent_copy import SentCopyService, ImapSentCopyAdapter
 from domaincheck.application.evidence_review import EvidenceReviewService, EvidenceReviewSender
 from domaincheck.application.cloaking_review import CloakingReviewService, CloakingReviewSender
 from domaincheck.application.provider_replies import ProviderRepliesService, ProviderReplySender
-import provider_replies
+from domaincheck.engine import provider_replies
 assert provider_replies.MODULE_VERSION >= 12
 assert provider_replies.parse_message('1', 'a@example.com', b'From: abuse@dynadot.com' + bytes([13,10]) + b'Subject: Request' + bytes([13,10,13,10]) + b'Please provide the full URL.').request_type == 'full_url'
 from domaincheck.application.cloudflare_runner import CloudflareRunner
 from domaincheck.cloudflare_runner import create_runner_app
-from cloudflare_dashboard_session import CloudflareDashboardConfig, build_dashboard_payload
-from cloudflare_abuse_api import build_phishing_payload
+from domaincheck.engine.cloudflare_dashboard_session import CloudflareDashboardConfig, build_dashboard_payload
+from domaincheck.engine.cloudflare_abuse_api import build_phishing_payload
 assert CloudflareDashboardConfig.from_mapping({'cloudflare_account_id': 'a' * 32}).account_id == 'a' * 32
 from domaincheck.core.review_capture import capture_review
 from domaincheck.application.delivery_dispatch import dispatch_intent
-import inspect, phishing_toolkit
+import inspect
+from domaincheck.engine import phishing_toolkit
 assert 'message_id' in inspect.signature(phishing_toolkit._imap_save_sent).parameters
-from browser_evidence import format_email_evidence_manifest
+from domaincheck.engine.browser_evidence import format_email_evidence_manifest
 assert '--- Observed Phishing Behavior and Supporting Evidence ---' in format_email_evidence_manifest({'evidence_type': 'manual_upload'})
 assert bundled_logo_bytes().startswith(bytes([255, 216, 255]))
 from email.message import EmailMessage
@@ -95,15 +96,19 @@ assert any(p['id']=='xyz_registry_abuse' for p in dto.checks[0].providers)
             names = set(archive.namelist())
             metadata = archive.read(next(name for name in names if name.endswith('.dist-info/METADATA'))).decode()
             self.assertIn('Requires-Dist: playwright==1.62.0', metadata)
-        self.assertTrue({'phishing_toolkit.py', 'cloaking_detector.py', 'browser_evidence.py',
-            'quick_report_actions.py', 'cloudflare_dashboard_session.py', 'cloudflare_abuse_api.py'} <= names)
+        modules = {'phishing_toolkit.py', 'cloaking_detector.py', 'browser_evidence.py',
+            'quick_report_actions.py', 'provider_replies.py', 'cloudflare_dashboard_session.py', 'cloudflare_abuse_api.py'}
+        self.assertTrue({f'domaincheck/engine/{name}' for name in modules} <= names)
+        self.assertFalse(modules & names)
+        self.assertFalse(any(name.startswith(('compat/', 'legacy_tests/', 'pages/')) for name in names))
+        self.assertNotIn('Requires-Dist: streamlit', metadata)
         self.assertFalse(any(name.endswith('config.ini') or '/.env' in name or
             name.startswith(('data/', 'reports/')) for name in names))
         script = '''
 import sys, sysconfig
 sys.path.insert(0, sys.argv[1])
 sys.path.append(sysconfig.get_paths()['purelib'])
-import phishing_toolkit
+from domaincheck.engine import phishing_toolkit
 from domaincheck.core.quick_report_routes import report_forms
 assert phishing_toolkit.__file__.startswith(sys.argv[1])
 assert len(report_forms('fixture.monster', {'registrar':'Dynadot'})) == 2

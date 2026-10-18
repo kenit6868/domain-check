@@ -25,7 +25,7 @@ afterEach(cleanup)
 
 it('shows only authorized personal statistics and tools', async () => {
   const calls: string[] = []
-  const restore = installApiMock((config) => { calls.push(config.url ?? ''); return fixture })
+  const restore = installApiMock((config) => { if (config.url === '/health/workers') return { services: [] }; calls.push(config.url ?? ''); return fixture })
   const client = mount()
   try {
     expect(await screen.findByText('Xu hướng hoạt động')).toBeVisible()
@@ -41,7 +41,7 @@ it('shows only authorized personal statistics and tools', async () => {
 
 it('defaults authorized admins to system scope and supports user filters', async () => {
   const calls: string[] = []
-  const restore = installApiMock((config) => { calls.push(config.url ?? ''); return { ...fixture, scope: 'all', user_total: 2, pending_users: 1, users: [{ id: 'other', name: 'Other Operator', status: 'active', checked_urls: 7, sent_emails: 2, attention: 0 }], workers: [{ id: 'job', owner_name: 'Other Operator', feature: 'domain_worker', state: 'running', total: 10, completed: 3, stale: false, href: null }], events: [{ id: 'event', action: 'domain_worker.request_start', outcome: 'accepted', at: fixture.updated_at }] } })
+  const restore = installApiMock((config) => { if (config.url === '/health/workers') return { services: [] }; calls.push(config.url ?? ''); return { ...fixture, scope: 'all', user_total: 2, pending_users: 1, users: [{ id: 'other', name: 'Other Operator', status: 'active', checked_urls: 7, sent_emails: 2, attention: 0 }], workers: [{ id: 'job', owner_name: 'Other Operator', feature: 'domain_worker', state: 'running', total: 10, completed: 3, stale: false, href: null }], events: [{ id: 'event', action: 'domain_worker.request_start', outcome: 'accepted', at: fixture.updated_at }] } })
   const client = mount(['dashboard.view', 'dashboard.view_all'])
   try {
     expect(await screen.findByText('Other Operator', { selector: 'td' })).toBeVisible()
@@ -59,7 +59,7 @@ it('defaults authorized admins to system scope and supports user filters', async
 
 it('removes cached system statistics immediately after dashboard access is removed', async () => {
   const calls: string[] = []
-  const restore = installApiMock((config) => { calls.push(config.url ?? ''); return { ...fixture, scope: 'all', user_total: 54321 } })
+  const restore = installApiMock((config) => { if (config.url === '/health/workers') return { services: [] }; calls.push(config.url ?? ''); return { ...fixture, scope: 'all', user_total: 54321 } })
   const client = mount(['dashboard.view', 'dashboard.view_all', 'domain_worker.view'])
   try {
     await screen.findByText('Tài khoản hệ thống')
@@ -74,7 +74,7 @@ it('removes cached system statistics immediately after dashboard access is remov
 
 it('keeps useful tool shortcuts without fetching unauthorized statistics', async () => {
   const calls: string[] = []
-  const restore = installApiMock((config) => { calls.push(config.url ?? ''); throw new Error('Unexpected protected request') })
+  const restore = installApiMock((config) => { if (config.url === '/health/workers') return { services: [] }; calls.push(config.url ?? ''); throw new Error('Unexpected protected request') })
   const client = mount(['mail_accounts.view_own'])
   try {
     expect(await screen.findByRole('heading', { name: 'Truy cập nhanh' })).toBeVisible()

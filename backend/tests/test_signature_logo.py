@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -16,17 +17,13 @@ from domaincheck.ports.artifacts import ArtifactIntegrityError
 
 class SignatureContentTests(unittest.TestCase):
     def test_inline_mime_and_html_match_legacy_and_preserve_plain_body(self):
-        import phishing_toolkit as toolkit
+        expected = json.loads((Path(__file__).parent / 'fixtures/signature-content.json').read_text(encoding='utf-8'))
         data = bundled_logo_bytes()
-        path = Path(__file__).parents[1] / 'src/domaincheck/assets/email/logo-win.jpg'
-        body = 'Review <example> & evidence\n\nRegards,\nOperator\noperator@example.com\n'
-        old, new = EmailMessage(), EmailMessage()
-        with patch.object(toolkit, '_signature_logo_path', return_value=str(path)), \
-             patch.object(toolkit, 'make_msgid', return_value='<logo-fixture>'):
-            toolkit.set_report_email_content(old, body, {})
+        body = expected['body']
+        new = EmailMessage()
         set_email_content(new, body, InlineLogo(data, 'image/jpeg', 'logo-fixture'))
         self.assertEqual(new.get_body(preferencelist=('plain',)).get_content(), body)
-        self.assertEqual(new.get_body(preferencelist=('html',)).get_content(), old.get_body(preferencelist=('html',)).get_content())
+        self.assertEqual(new.get_body(preferencelist=('html',)).get_content(), expected['html'])
         image = [part for part in new.walk() if part.get_content_maintype() == 'image'][0]
         self.assertEqual(image['Content-ID'], '<logo-fixture>')
         self.assertEqual(image.get_content_disposition(), 'inline')

@@ -1,0 +1,4 @@
+{
+  "body": "Review <example> & evidence\n\nRegards,\nOperator\noperator@example.com\n",
+  "html": "<div style=\"font-family:Arial,sans-serif;font-size:14px;line-height:1.45;color:#111;\">Review &lt;example&gt; &amp; evidence<br>\n&nbsp;<br>\n<img src=\"cid:logo-fixture\" alt=\"Brand logo\" width=\"64\" height=\"64\" style=\"display:block;width:64px;height:64px;object-fit:contain;margin:0 0 8px 0;border:0;\" /><br>\nRegards,<br>\nOperator<br>\noperator@example.com</div>\n"
+}

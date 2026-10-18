@@ -17,7 +17,7 @@ from PIL import Image
 from domaincheck.api.domain_checks import request_capture
 from domaincheck.application.domain_checks import DomainCheckService
 from domaincheck.application.evidence import EvidenceNotFound, EvidenceService
-from domaincheck.core.evidence import CaptureFailed, LegacyBrowserCaptureAdapter, capture_failure_code
+from domaincheck.core.evidence import CaptureFailed, EngineBrowserCaptureAdapter, capture_failure_code
 from domaincheck.infrastructure.artifacts import FilesystemArtifactStore
 from domaincheck.infrastructure.db.models import User
 from domaincheck.infrastructure.db.session import Database
@@ -50,7 +50,7 @@ class EvidenceWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
              patch('domaincheck.core.evidence.importlib.import_module', return_value=fake):
             with self.assertRaisesRegex(CaptureFailed, 'browser_runtime_missing'):
-                LegacyBrowserCaptureAdapter().capture('https://example.com/', staging_root=Path(directory))
+                EngineBrowserCaptureAdapter().capture('https://example.com/', staging_root=Path(directory))
 
     def test_evidence_routes_are_permission_gated_and_capture_is_disabled_by_default(self):
         paths = create_app(Settings(_env_file=None)).openapi()["paths"]
@@ -81,7 +81,7 @@ class EvidenceWorkflowTests(unittest.TestCase):
             redact_url=lambda value: "redacted" if "secret" in value else value)
         with tempfile.TemporaryDirectory() as directory, \
              patch("domaincheck.core.evidence.importlib.import_module", return_value=fake):
-            uploads, manifest = LegacyBrowserCaptureAdapter().capture(
+            uploads, manifest = EngineBrowserCaptureAdapter().capture(
                 "https://example.com/login", staging_root=Path(directory))
             self.assertEqual(len(uploads), 1)
             self.assertEqual(uploads[0].data, png)
@@ -95,7 +95,7 @@ class EvidenceWorkflowTests(unittest.TestCase):
             fake = SimpleNamespace(capture_normal_report_evidence=capture)
             with patch("domaincheck.core.evidence.importlib.import_module", return_value=fake):
                 with self.assertRaises(CaptureFailed):
-                    LegacyBrowserCaptureAdapter().capture("https://example.com/", staging_root=Path(directory))
+                    EngineBrowserCaptureAdapter().capture("https://example.com/", staging_root=Path(directory))
             self.assertEqual(capture.call_args.kwargs, {"headless": True})
 
     def test_visible_capture_passes_headless_false_without_changing_shared_defaults(self):
@@ -104,7 +104,7 @@ class EvidenceWorkflowTests(unittest.TestCase):
             fake = SimpleNamespace(capture_normal_report_evidence=capture)
             with patch('domaincheck.core.evidence.importlib.import_module', return_value=fake):
                 with self.assertRaises(CaptureFailed):
-                    LegacyBrowserCaptureAdapter(headless=False).capture('https://example.com/', staging_root=Path(directory))
+                    EngineBrowserCaptureAdapter(headless=False).capture('https://example.com/', staging_root=Path(directory))
             self.assertEqual(capture.call_args.kwargs, {'headless': False})
 
     def test_projection_keeps_dom_narrative_facts_without_html_or_credentials(self):
@@ -136,7 +136,7 @@ class EvidenceWorkflowTests(unittest.TestCase):
                 "domaincheck.core.evidence.importlib.import_module",
                 return_value=SimpleNamespace(capture_normal_report_evidence=capture)):
             with self.assertRaises(CaptureFailed):
-                LegacyBrowserCaptureAdapter(browser_proxy=proxy).capture(
+                EngineBrowserCaptureAdapter(browser_proxy=proxy).capture(
                     "https://example.com/", staging_root=Path(directory))
         self.assertEqual(capture.call_args.kwargs, {"headless": True, "browser_proxy": proxy})
 
@@ -146,7 +146,7 @@ class EvidenceWorkflowTests(unittest.TestCase):
                 {"success": False, "terminal": True})
             with patch("domaincheck.core.evidence.importlib.import_module", return_value=terminal):
                 with self.assertRaises(CaptureFailed) as error:
-                    LegacyBrowserCaptureAdapter().capture("https://example.com/", staging_root=Path(directory))
+                    EngineBrowserCaptureAdapter().capture("https://example.com/", staging_root=Path(directory))
             self.assertTrue(error.exception.terminal)
             outside = Path(directory) / "outside.png"
             outside.write_bytes(png_bytes())
@@ -158,7 +158,7 @@ class EvidenceWorkflowTests(unittest.TestCase):
                 validate_evidence_artifacts=lambda _raw: {"valid": True, "manifest": {}})
             with patch("domaincheck.core.evidence.importlib.import_module", return_value=fake):
                 with self.assertRaises(CaptureFailed):
-                    LegacyBrowserCaptureAdapter().capture("https://example.com/", staging_root=Path(directory))
+                    EngineBrowserCaptureAdapter().capture("https://example.com/", staging_root=Path(directory))
 
 
 

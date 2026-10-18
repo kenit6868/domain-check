@@ -12,7 +12,7 @@ from domaincheck.core.quick_report_routes import report_forms
 
 def build_report_guidance(*, domain: str, target_url: str, result: dict, profile: dict) -> list[dict]:
     """Reuse legacy pure formatters and routing; never submit or write drafts."""
-    toolkit = importlib.import_module("phishing_toolkit")
+    toolkit = importlib.import_module("domaincheck.engine.phishing_toolkit")
     config = {key: str(profile.get(key) or "") for key in
               ("brand_name", "contact_name", "contact_email", "company_name",
                "business_registration_no", "signature_role")}

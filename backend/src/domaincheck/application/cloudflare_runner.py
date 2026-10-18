@@ -13,7 +13,10 @@ from domaincheck.infrastructure.db.models import Artifact, CloudflareRecord, Per
 
 
 class CloudflareRunner:
-    def __init__(self, factory, store, *, checker=None, submitter=None, enabled=False, now=None):
+    def __init__(self, factory, store, *, checker=None, submitter=None, enabled=False, now=None, slots=2):
+        if not 1 <= slots <= 4:
+            raise ValueError('Cloudflare runner slots must be between 1 and 4')
+        self.capacity = asyncio.Semaphore(slots)
         self.factory, self.store = factory, store
         self.checker, self.submitter, self.enabled = checker, submitter, enabled
         self.now = now or (lambda: datetime.now(UTC))
@@ -49,7 +52,7 @@ class CloudflareRunner:
             resolved = None
             cookie = cookie or self.cookies.get(identity, '')
             if cookie:
-                from cloudflare_dashboard_session import CloudflareDashboardConfig, CloudflareDashboardSessionError, _account_id_from_cookie, _headers
+                from domaincheck.engine.cloudflare_dashboard_session import CloudflareDashboardConfig, CloudflareDashboardSessionError, _account_id_from_cookie, _headers
                 import re
                 configured = (await service.settings())['account_id']
                 try: _headers(cookie)
@@ -131,140 +134,151 @@ class CloudflareRunner:
             row = await service.batch(session, identity)
             targets = row.sanitized_state['urls']
             cfg, profile_version = await service.config(session)
-        import phishing_toolkit as toolkit
+        from domaincheck.engine import phishing_toolkit as toolkit
         from domaincheck.core.cloudflare_check import check
         checker = self.checker or check
         for url in targets:
-            async with self.factory() as session, session.begin():
-                row = await service.batch(session, identity)
-                if row.sanitized_state['phase'] != 'CHECKING' or row.sanitized_state.get('runner_id') != self.runner_id: return
-                if row.business_day != service.day() or not await self.allowed(session, service.owner, 'cloudflare_worker.precheck'):
-                    row.sanitized_state = {**row.sanitized_state, 'phase': 'INTERRUPTED', 'error': 'scope_changed'}
-                    return
-                row.sanitized_state = {**row.sanitized_state, 'current_id': url}
-                prior = await session.scalar(select(CloudflareRecord).where(CloudflareRecord.owner_user_id == service.owner,
-                    CloudflareRecord.canonical_url_key == digest(url), CloudflareRecord.state.in_(['SUBMITTED', 'ALREADY_SUBMITTED', 'UNKNOWN', 'SUBMITTING']))
-                    .order_by(CloudflareRecord.created_at.desc()).limit(1))
-                if prior:
-                    row.sanitized_state = {**row.sanitized_state,
-                        'record_ids': [*row.sanitized_state['record_ids'], str(prior.id)],
-                        'excluded_record_ids': [*row.sanitized_state.get('excluded_record_ids', []), str(prior.id)],
-                        'processed': row.sanitized_state['processed'] + 1}
-                    continue
-            try:
-                result = await asyncio.to_thread(checker, url, cfg)
-                state = 'READY' if result.get('cloudflare') else 'NOT_CLOUDFLARE'
-                error = None
-                if result.get('_error'): state, error = 'CHECK_FAILED', 'precheck_failed'
-            except Exception:
-                state, error = 'CHECK_FAILED', 'precheck_failed'
-            draft = toolkit.generate_cloudflare_report_text(url.split('/')[2], cfg, url) if state == 'READY' else ''
-            raw = json.dumps({'draft': draft, 'config': cfg, 'profile_version': profile_version}, ensure_ascii=False).encode()
-            blob = self.store.store_preview_payload(owner_user_id=service.owner, preview_id=uuid4(), data=raw)
-            try:
+            async with self.capacity:
                 async with self.factory() as session, session.begin():
-                    await service.lock(session)
                     row = await service.batch(session, identity)
-                    if row.sanitized_state['phase'] != 'CHECKING' or row.sanitized_state.get('runner_id') != self.runner_id:
-                        self.store.delete(storage_key=blob.storage_key)
+                    if row.sanitized_state['phase'] != 'CHECKING' or row.sanitized_state.get('runner_id') != self.runner_id: return
+                    if row.business_day != service.day() or not await self.allowed(session, service.owner, 'cloudflare_worker.precheck'):
+                        row.sanitized_state = {**row.sanitized_state, 'phase': 'INTERRUPTED', 'error': 'scope_changed'}
                         return
-                    record = await session.scalar(select(CloudflareRecord).where(CloudflareRecord.owner_user_id == service.owner,
-                        CloudflareRecord.business_day == row.business_day, CloudflareRecord.canonical_url_key == digest(url)))
-                    session.add(Artifact(id=blob.artifact_id, owner_user_id=service.owner, kind='cloudflare_worker:payload',
-                        mime_type=blob.mime_type, byte_size=blob.byte_size, sha256=blob.sha256, storage_key=blob.storage_key, immutable=True))
-                    if record is None:
-                        record = CloudflareRecord(id=uuid4(), owner_user_id=service.owner, full_url=url,
-                            canonical_url_key=digest(url), business_day=row.business_day, report_version=digest(draft),
-                            idempotency_key=digest(f'{row.business_day}:{url}'), request_hash=blob.sha256, state=state)
-                        session.add(record)
-                    record.state, record.report_version, record.request_hash = state, digest(draft), blob.sha256
-                    record.sanitized_result = {'artifact_id': str(blob.artifact_id), 'storage_key': blob.storage_key,
-                        'sha256': blob.sha256, 'byte_size': blob.byte_size, 'attempts': 0, 'error': error}
-                    row.sanitized_state = {**row.sanitized_state, 'record_ids': [*row.sanitized_state['record_ids'], str(record.id)],
-                        'processed': row.sanitized_state['processed'] + 1,
-                        'excluded_record_ids': [*row.sanitized_state.get('excluded_record_ids', []), *([str(record.id)] if state != 'READY' else [])]}
-            except BaseException:
-                self.store.delete(storage_key=blob.storage_key)
-                raise
+                    row.sanitized_state = {**row.sanitized_state, 'current_id': url}
+                    prior = await session.scalar(select(CloudflareRecord).where(CloudflareRecord.owner_user_id == service.owner,
+                        CloudflareRecord.canonical_url_key == digest(url), CloudflareRecord.state.in_(['SUBMITTED', 'ALREADY_SUBMITTED', 'UNKNOWN', 'SUBMITTING']))
+                        .order_by(CloudflareRecord.created_at.desc()).limit(1))
+                    if prior:
+                        row.sanitized_state = {**row.sanitized_state,
+                            'record_ids': [*row.sanitized_state['record_ids'], str(prior.id)],
+                            'excluded_record_ids': [*row.sanitized_state.get('excluded_record_ids', []), str(prior.id)],
+                            'processed': row.sanitized_state['processed'] + 1}
+                        continue
+                try:
+                    result = await asyncio.to_thread(checker, url, cfg)
+                    state = 'READY' if result.get('cloudflare') else 'NOT_CLOUDFLARE'
+                    error = None
+                    if result.get('_error'): state, error = 'CHECK_FAILED', 'precheck_failed'
+                except Exception:
+                    state, error = 'CHECK_FAILED', 'precheck_failed'
+                draft = toolkit.generate_cloudflare_report_text(url.split('/')[2], cfg, url) if state == 'READY' else ''
+                raw = json.dumps({'draft': draft, 'config': cfg, 'profile_version': profile_version}, ensure_ascii=False).encode()
+                blob = self.store.store_preview_payload(owner_user_id=service.owner, preview_id=uuid4(), data=raw)
+                try:
+                    async with self.factory() as session, session.begin():
+                        await service.lock(session)
+                        row = await service.batch(session, identity)
+                        if row.sanitized_state['phase'] != 'CHECKING' or row.sanitized_state.get('runner_id') != self.runner_id:
+                            self.store.delete(storage_key=blob.storage_key)
+                            return
+                        record = await session.scalar(select(CloudflareRecord).where(CloudflareRecord.owner_user_id == service.owner,
+                            CloudflareRecord.business_day == row.business_day, CloudflareRecord.canonical_url_key == digest(url)))
+                        session.add(Artifact(id=blob.artifact_id, owner_user_id=service.owner, kind='cloudflare_worker:payload',
+                            mime_type=blob.mime_type, byte_size=blob.byte_size, sha256=blob.sha256, storage_key=blob.storage_key, immutable=True))
+                        if record is None:
+                            record = CloudflareRecord(id=uuid4(), owner_user_id=service.owner, full_url=url,
+                                canonical_url_key=digest(url), business_day=row.business_day, report_version=digest(draft),
+                                idempotency_key=digest(f'{row.business_day}:{url}'), request_hash=blob.sha256, state=state)
+                            session.add(record)
+                        record.state, record.report_version, record.request_hash = state, digest(draft), blob.sha256
+                        record.sanitized_result = {'artifact_id': str(blob.artifact_id), 'storage_key': blob.storage_key,
+                            'sha256': blob.sha256, 'byte_size': blob.byte_size, 'attempts': 0, 'error': error}
+                        row.sanitized_state = {**row.sanitized_state, 'record_ids': [*row.sanitized_state['record_ids'], str(record.id)],
+                            'processed': row.sanitized_state['processed'] + 1,
+                            'excluded_record_ids': [*row.sanitized_state.get('excluded_record_ids', []), *([str(record.id)] if state != 'READY' else [])]}
+                except BaseException:
+                    self.store.delete(storage_key=blob.storage_key)
+                    raise
         async with self.factory() as session, session.begin():
             row = await service.batch(session, identity)
             if row.sanitized_state['phase'] == 'CHECKING':
                 row.sanitized_state = {**row.sanitized_state, 'phase': 'CHECKED', 'current_id': None}
 
     async def send(self, service, identity):
-        from cloudflare_dashboard_session import (submit_dashboard_report, CloudflareDashboardSessionError,
+        while True:
+            # Release capacity between records and while paused/delayed; consent,
+            # ownership and profile bindings are rechecked inside each step.
+            async with self.capacity:
+                result = await self._send_step(service, identity)
+            if result is None:
+                return
+            if result == 'waiting':
+                await asyncio.sleep(.5)
+
+    async def _send_step(self, service, identity):
+        from domaincheck.engine.cloudflare_dashboard_session import (submit_dashboard_report, CloudflareDashboardSessionError,
             CloudflareDashboardRateLimitError, CloudflareDashboardUnknownError, CloudflareDashboardDuplicateError,
             CloudflareDashboardError)
         submitter = self.submitter or submit_dashboard_report
-        while True:
-            waiting = False
-            async with self.factory() as session, session.begin():
-                await service.lock(session)
-                row = await service.batch(session, identity)
-                data = dict(row.sanitized_state)
-                if data.get('runner_id') != self.runner_id: return
-                if data['phase'] in {'CANCELLED', 'COMPLETED', 'INTERRUPTED'}: return
-                if row.business_day != service.day():
-                    row.sanitized_state = {**data, 'phase': 'CANCELLED', 'error': 'day_changed'}
+        waiting = False
+        async with self.factory() as session, session.begin():
+            await service.lock(session)
+            row = await service.batch(session, identity)
+            data = dict(row.sanitized_state)
+            if data.get('runner_id') != self.runner_id: return
+            if data['phase'] in {'CANCELLED', 'COMPLETED', 'INTERRUPTED'}: return
+            if row.business_day != service.day():
+                row.sanitized_state = {**data, 'phase': 'CANCELLED', 'error': 'day_changed'}
+                return
+            if not await self.allowed(session, service.owner, data.get('permission', 'cloudflare_worker.start')):
+                row.sanitized_state = {**data, 'phase': 'CANCELLED', 'error': 'permission_revoked'}
+                return
+            records = await service.rows(session, row)
+            next_at = data.get('next_run_at')
+            waiting = data['phase'] in {'PAUSED', 'WAITING_FOR_SESSION'} or (next_at and datetime.fromisoformat(next_at) > self.now())
+            if not waiting:
+                record = next((record for record in records if record.state == 'QUEUED'), None)
+                if record is None:
+                    row.sanitized_state = {**data, 'phase': 'COMPLETED', 'current_id': None, 'next_run_at': None}
                     return
-                if not await self.allowed(session, service.owner, data.get('permission', 'cloudflare_worker.start')):
-                    row.sanitized_state = {**data, 'phase': 'CANCELLED', 'error': 'permission_revoked'}
-                    return
-                records = await service.rows(session, row)
-                next_at = data.get('next_run_at')
-                waiting = data['phase'] in {'PAUSED', 'WAITING_FOR_SESSION'} or (next_at and datetime.fromisoformat(next_at) > self.now())
-                if not waiting:
-                    record = next((record for record in records if record.state == 'QUEUED'), None)
-                    if record is None:
-                        row.sanitized_state = {**data, 'phase': 'COMPLETED', 'current_id': None, 'next_run_at': None}
+                if identity not in self.cookies:
+                    row.sanitized_state = {**data, 'phase': 'WAITING_FOR_SESSION', 'error': 'cookie_required'}
+                    waiting = True
+                else:
+                    payload = await service.verified_payload(session, record)
+                    _, version = await service.config(session)
+                    if payload['profile_version'] != version:
+                        row.sanitized_state = {**data, 'phase': 'CANCELLED', 'error': 'profile_changed_recheck'}
                         return
-                    if identity not in self.cookies:
-                        row.sanitized_state = {**data, 'phase': 'WAITING_FOR_SESSION', 'error': 'cookie_required'}
-                        waiting = True
-                    else:
-                        payload = await service.verified_payload(session, record)
-                        _, version = await service.config(session)
-                        if payload['profile_version'] != version:
-                            row.sanitized_state = {**data, 'phase': 'CANCELLED', 'error': 'profile_changed_recheck'}
-                            return
-                        cookie, target, draft = self.cookies[identity], record.full_url, payload['draft']
-                        cfg = {**payload['config'], 'cloudflare_account_id': data['account_id']}
-                        record.state = 'SUBMITTING'
-                        record.sanitized_result = {**record.sanitized_result, 'attempts': record.sanitized_result.get('attempts', 0) + 1, 'error': None}
-                        record_id = record.id
-                        row.sanitized_state = {**data, 'phase': 'SENDING', 'current_id': str(record_id), 'next_run_at': None}
-            if waiting:
-                await asyncio.sleep(.5)
-                continue
-            # Intent is committed before network I/O; no blind retry after a lost response.
-            state, error, report_id, pause = 'SUBMITTED', None, None, None
-            try:
-                result = await asyncio.to_thread(submitter, target, draft, cfg, cookie)
-                report_id = str(result.get('report_id') or '')[:500]
-            except CloudflareDashboardSessionError:
-                state, error, pause = 'QUEUED', 'cookie_rejected', 'WAITING_FOR_SESSION'
-                self.cookies.pop(identity, None)
-            except CloudflareDashboardRateLimitError:
-                state, error, pause = 'QUEUED', 'provider_rate_limit_or_challenge', 'PAUSED'
-            except CloudflareDashboardDuplicateError:
-                state = 'ALREADY_SUBMITTED'
-            except CloudflareDashboardUnknownError:
-                state, error, pause = 'UNKNOWN', 'submission_unconfirmed', 'PAUSED'
-            except CloudflareDashboardError:
-                state, error = 'FAILED', 'provider_rejected'
-            except Exception:
-                state, error, pause = 'UNKNOWN', 'submission_unconfirmed', 'PAUSED'
-            async with self.factory() as session, session.begin():
-                row = await service.batch(session, identity)
-                record = await session.get(CloudflareRecord, record_id)
-                record.state, record.provider_report_id = state, report_id
-                record.sanitized_result = {**record.sanitized_result, 'error': error}
-                service.audit(session, 'checkpoint', record_id, {'state': state})
-                data = dict(row.sanitized_state)
-                if data.get('runner_id') != self.runner_id: return
-                phase = data['phase'] if data['phase'] in {'CANCELLED', 'PAUSED'} else (pause or 'SENDING')
-                row.sanitized_state = {**data, 'phase': phase, 'current_id': None,
-                    'error': error, 'next_run_at': (self.now() + timedelta(seconds=data['delay_seconds'])).isoformat()}
+                    cookie, target, draft = self.cookies[identity], record.full_url, payload['draft']
+                    cfg = {**payload['config'], 'cloudflare_account_id': data['account_id']}
+                    record.state = 'SUBMITTING'
+                    record.sanitized_result = {**record.sanitized_result, 'attempts': record.sanitized_result.get('attempts', 0) + 1, 'error': None}
+                    record_id = record.id
+                    row.sanitized_state = {**data, 'phase': 'SENDING', 'current_id': str(record_id), 'next_run_at': None}
+        if waiting:
+            return 'waiting'
+        # Intent is committed before network I/O; no blind retry after a lost response.
+        state, error, report_id, pause = 'SUBMITTED', None, None, None
+        try:
+            result = await asyncio.to_thread(submitter, target, draft, cfg, cookie)
+            report_id = str(result.get('report_id') or '')[:500]
+        except CloudflareDashboardSessionError:
+            state, error, pause = 'QUEUED', 'cookie_rejected', 'WAITING_FOR_SESSION'
+            self.cookies.pop(identity, None)
+        except CloudflareDashboardRateLimitError:
+            state, error, pause = 'QUEUED', 'provider_rate_limit_or_challenge', 'PAUSED'
+        except CloudflareDashboardDuplicateError:
+            state = 'ALREADY_SUBMITTED'
+        except CloudflareDashboardUnknownError:
+            state, error, pause = 'UNKNOWN', 'submission_unconfirmed', 'PAUSED'
+        except CloudflareDashboardError:
+            state, error = 'FAILED', 'provider_rejected'
+        except Exception:
+            state, error, pause = 'UNKNOWN', 'submission_unconfirmed', 'PAUSED'
+        async with self.factory() as session, session.begin():
+            row = await service.batch(session, identity)
+            record = await session.get(CloudflareRecord, record_id)
+            record.state, record.provider_report_id = state, report_id
+            record.sanitized_result = {**record.sanitized_result, 'error': error}
+            service.audit(session, 'checkpoint', record_id, {'state': state})
+            data = dict(row.sanitized_state)
+            if data.get('runner_id') != self.runner_id: return
+            phase = data['phase'] if data['phase'] in {'CANCELLED', 'PAUSED'} else (pause or 'SENDING')
+            row.sanitized_state = {**data, 'phase': phase, 'current_id': None,
+                'error': error, 'next_run_at': (self.now() + timedelta(seconds=data['delay_seconds'])).isoformat()}
+        return 'continue'
 
     async def close(self):
         for task in self.tasks.values(): task.cancel()

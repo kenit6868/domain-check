@@ -11,7 +11,7 @@ from fastapi import HTTPException, Response
 from pydantic import SecretStr
 
 from domaincheck.application.domain_checks import DomainCheckNotFound, DomainCheckService, DomainCheckWorker
-from domaincheck.core.investigation import LegacyInvestigationAdapter, sanitize_result, validate_target
+from domaincheck.core.investigation import DomainInvestigationAdapter, sanitize_result, validate_target
 from domaincheck.infrastructure.db.models import User
 from domaincheck.infrastructure.db.session import Database
 from domaincheck.main import create_app
@@ -33,8 +33,8 @@ class InvestigationBoundaryTests(unittest.TestCase):
             asyncio.run(create_checks(body, request, Response(), None, actor))
         self.assertEqual(missing_key.exception.status_code, 409)
 
-    def test_full_legacy_probe_can_run_without_global_logs_drafts_or_evidence(self):
-        import phishing_toolkit as toolkit
+    def test_web_probe_performs_no_global_file_io(self):
+        from domaincheck.engine import phishing_toolkit as toolkit
         probe = {"verdict": "NO_SIGNAL", "profiles": {}, "manual_review_required": False}
         with patch.object(toolkit, "get_cert_info", return_value={"ip": "8.8.8.8"}), \
              patch.object(toolkit, "get_whois_info", return_value={"registrar": "Example Registrar",
@@ -48,9 +48,7 @@ class InvestigationBoundaryTests(unittest.TestCase):
              patch.object(toolkit, "lookup_registry_contact", return_value={"source": "not_found"}), \
              patch.object(toolkit, "get_rdap_abuse_email", return_value={}), \
              patch.object(toolkit.cloaking_detector, "probe_http_cloaking", return_value=probe) as cloaking, \
-             patch.object(toolkit, "log_case", side_effect=AssertionError("legacy log write")), \
-             patch.object(toolkit, "generate_email_drafts", side_effect=AssertionError("legacy draft write")), \
-             patch.object(toolkit, "generate_registry_draft", side_effect=AssertionError("legacy draft write")):
+             patch("builtins.open", side_effect=AssertionError("unexpected global file IO")):
             result = toolkit.run_check("https://example.com/login", False,
                 {"vt_api_key": "", "gsb_api_key": ""}, persist=False,
                 create_drafts=False, capture_cloaking_evidence=False)
@@ -177,7 +175,7 @@ class InvestigationBoundaryTests(unittest.TestCase):
     def test_adapter_uses_legacy_pipeline_without_shared_file_artifacts(self):
         toolkit = SimpleNamespace(run_check=lambda *args, **kwargs: (args, kwargs))
         with patch("domaincheck.core.investigation.importlib.import_module", return_value=toolkit):
-            args, kwargs = LegacyInvestigationAdapter().run("https://example.com/login",
+            args, kwargs = DomainInvestigationAdapter().run("https://example.com/login",
                 submit_vt=False, config={"vt_api_key": ""})
         self.assertEqual(args, ("https://example.com/login", False, {"vt_api_key": ""}))
         self.assertEqual(kwargs, {"persist": False, "create_drafts": False,

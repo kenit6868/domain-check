@@ -18,7 +18,7 @@ def main():
     try:
         values = json.loads(sys.stdin.read(65536))
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            import phishing_toolkit
+            from domaincheck.engine import phishing_toolkit
             result = phishing_toolkit.run_cdn_check(values['url'], values['config'])
         sys.stdout.write(json.dumps({'cloudflare': bool(result.get('cloudflare'))}))
     except Exception:

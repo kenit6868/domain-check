@@ -26,6 +26,7 @@ from domaincheck.api.link_status import router as link_status_router
 from domaincheck.api.audit_log import router as audit_log_router
 from domaincheck.api.dashboard import router as dashboard_router
 from domaincheck.api.form_tasks import router as form_tasks_router
+from domaincheck.api.health import router as health_router
 from domaincheck.application.context import SystemClock
 from domaincheck.core.mail import AllowlistedMailConnectionTester, StandardMailConnectionTester
 from domaincheck.infrastructure.auth.oidc import RedisOIDCStateStore, TelegramOIDCClient
@@ -144,6 +145,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return LiveResponse(status="ok", service="domaincheck-api")
 
     app.include_router(auth_router, prefix=settings.api_prefix)
+    app.include_router(health_router, prefix=settings.api_prefix)
     app.include_router(audit_log_router, prefix=settings.api_prefix)
     app.include_router(dashboard_router, prefix=settings.api_prefix)
     app.include_router(admin_router, prefix=settings.api_prefix)

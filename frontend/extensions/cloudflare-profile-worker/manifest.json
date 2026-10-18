@@ -1,0 +1,79 @@
+{
+  "manifest_version": 3,
+  "name": "PhishingTool Web Form Assistant",
+  "version": "3.1.0",
+  "description": "Fills supported official abuse forms from owner-bound web tasks. Manual submission only.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "PhishingTool Web Form Assistant",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "host_permissions": [
+    "https://abuse.cloudflare.com/*",
+    "https://safebrowsing.google.com/*",
+    "https://www.microsoft.com/*",
+    "https://chongluadao.vn/*",
+    "https://safe.coccoc.com/*",
+    "https://legalportal.godaddy.com/*",
+    "https://registry.co/*",
+    "https://gen.xyz/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "externally_connectable": {
+    "matches": [
+      "https://*/*",
+      "http://localhost/*",
+      "http://127.0.0.1/*"
+    ]
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://abuse.cloudflare.com/*",
+        "https://safebrowsing.google.com/*",
+        "https://www.microsoft.com/*",
+        "https://chongluadao.vn/*",
+        "https://safe.coccoc.com/*",
+        "https://legalportal.godaddy.com/*",
+        "https://registry.co/*",
+        "https://gen.xyz/*"
+      ],
+      "js": [
+        "adapters/cloudflare.js",
+        "adapters/google_gsb.js",
+        "adapters/microsoft_smartscreen.js",
+        "adapters/chongluadao.js",
+        "adapters/coccoc_safe.js",
+        "adapters/godaddy_phishing.js",
+        "adapters/registry_co.js",
+        "adapters/xyz_registry.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

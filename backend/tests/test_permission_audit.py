@@ -56,6 +56,7 @@ class PermissionAuditTests(unittest.IsolatedAsyncioTestCase):
                     if not protected:
                         self.assertIn(full_path, {
                             '/api/v1/health/live', '/api/v1/auth/telegram/start',
+                            '/api/v1/health/ready', '/api/v1/health/workers',
                             '/api/v1/auth/telegram/status', '/api/v1/auth/telegram/callback',
                             '/api/v1/me', '/api/v1/auth/logout', '/api/v1/artifacts/{artifact_id}',
                             '/api/v1/cache/clear', '/api/v1/form-tasks/exchange',

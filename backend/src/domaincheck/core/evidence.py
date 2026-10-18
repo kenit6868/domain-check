@@ -41,8 +41,8 @@ class BrowserCaptureAdapter(Protocol):
     def capture(self, target: str, *, staging_root: Path) -> tuple[list[ImageUpload], dict]: ...
 
 
-class LegacyBrowserCaptureAdapter:
-    """Use legacy passive/DOM logic in an isolated temporary directory."""
+class EngineBrowserCaptureAdapter:
+    """Capture passive/DOM evidence in an isolated application staging directory."""
     def __init__(self, *, browser_proxy: dict | None = None, headless: bool = True) -> None:
         self._browser_proxy = browser_proxy
         self._headless = headless
@@ -61,7 +61,7 @@ class LegacyBrowserCaptureAdapter:
             raise RuntimeError("Chromium could not start; run python -m playwright install chromium in the worker environment") from exc
 
     def capture(self, target: str, *, staging_root: Path) -> tuple[list[ImageUpload], dict]:
-        browser = importlib.import_module("browser_evidence")
+        browser = importlib.import_module("domaincheck.engine.browser_evidence")
         options = {"headless": self._headless}
         if self._browser_proxy is not None:
             options["browser_proxy"] = self._browser_proxy
@@ -96,7 +96,7 @@ class LegacyBrowserCaptureAdapter:
 
 def capture_manifest(result: dict, legacy_manifest: dict) -> dict:
     """Retain factual narrative inputs, excluding local paths, HTML and raw errors."""
-    browser = importlib.import_module("browser_evidence")
+    browser = importlib.import_module("domaincheck.engine.browser_evidence")
     urls = ("requested_url", "landing_url", "final_url")
     manifest = {key: browser.redact_url(str(result.get(key) or legacy_manifest.get(key) or "")) for key in urls}
     manifest.update({

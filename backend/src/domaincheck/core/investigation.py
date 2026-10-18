@@ -75,13 +75,13 @@ class InvestigationAdapter(Protocol):
     def run(self, target: str, *, submit_vt: bool, config: dict) -> dict: ...
 
 
-class LegacyInvestigationAdapter:
+class DomainInvestigationAdapter:
     @staticmethod
     def validate_runtime() -> None:
-        from domaincheck.core.quick_report import LegacyQuickReportAdapter
-        LegacyQuickReportAdapter.validate_runtime()
+        from domaincheck.core.quick_report import DomainQuickReportAdapter
+        DomainQuickReportAdapter.validate_runtime()
 
     def run(self, target: str, *, submit_vt: bool, config: dict) -> dict:
-        toolkit = importlib.import_module("phishing_toolkit")
+        toolkit = importlib.import_module("domaincheck.engine.phishing_toolkit")
         return toolkit.run_check(target, submit_vt, config, persist=False,
                                  create_drafts=False, capture_cloaking_evidence=False)

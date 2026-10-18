@@ -15,7 +15,7 @@ from domaincheck.infrastructure.db.models import Artifact, Delivery, DeliveryAtt
 from domaincheck.infrastructure.db.owned import OwnedRepository
 
 
-class LegacySentCopyAdapter:
+class ImapSentCopyAdapter:
     def __init__(self, endpoints):
         from domaincheck.core.mail.connectivity import AllowlistedMailConnectionTester
         self.policy = AllowlistedMailConnectionTester(None, endpoints)
@@ -28,7 +28,7 @@ class LegacySentCopyAdapter:
             self.policy._check(account['imap_host'], account['imap_port'])
         except Exception:
             return 'endpoint_denied'
-        import phishing_toolkit
+        from domaincheck.engine import phishing_toolkit
         error = phishing_toolkit._imap_save_sent(account, raw_message, message_id=message_id)
         return 'saved' if error is None else 'failed'
 

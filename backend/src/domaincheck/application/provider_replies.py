@@ -8,7 +8,7 @@ from dataclasses import replace
 from email.utils import parseaddr
 from uuid import UUID, uuid4
 
-import provider_replies as legacy
+from domaincheck.engine import provider_replies as legacy
 from sqlalchemy import func, select
 
 from domaincheck.application.deliveries import DeliveryService
@@ -360,8 +360,8 @@ class ProviderRepliesService:
             attachments = [image.id for image in images]
             if evidence:
                 if not values.get('browser_evidence'):
-                    import browser_evidence
-                    import phishing_toolkit
+                    from domaincheck.engine import browser_evidence
+                    from domaincheck.engine import phishing_toolkit
                     body = phishing_toolkit._insert_before_email_signature(body, browser_evidence.format_email_evidence_manifest(evidence.manifest))
                 blob = self.store.store_evidence_manifest(owner_user_id=self.owner, evidence_set_id=evidence.id, data=canonical_payload_bytes(evidence.manifest))
                 self.session.add(Artifact(id=blob.artifact_id, owner_user_id=self.owner, evidence_set_id=evidence.id,

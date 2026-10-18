@@ -51,7 +51,7 @@ class CloakingPreviewService(DomainWorkerPreviewService):
         observed.update(verdict=observed.get('verdict') if observed.get('verdict') in {'LIKELY', 'POSSIBLE'} else 'POSSIBLE',
                         target_url=check.requested_url)
         observed['operator_evidence'] = {'confirmed_difference': True, 'acquisition_url': check.requested_url}
-        return importlib.import_module('cloaking_detector').format_evidence_block(observed, operator_confirmed=True)
+        return importlib.import_module('domaincheck.engine.cloaking_detector').format_evidence_block(observed, operator_confirmed=True)
 
 
 class CloakingReviewService(EvidenceReviewService):
@@ -112,7 +112,7 @@ class CloakingReviewService(EvidenceReviewService):
         if manifest.get('requested_url') != case.full_url or manifest.get('terminal'):
             raise CaptureFailed('invalid_capture_artifacts')
         if decision == 'confirmed_cloaking':
-            manifest = {**manifest, 'cloaking': importlib.import_module('cloaking_detector').merge_playwright_result(
+            manifest = {**manifest, 'cloaking': importlib.import_module('domaincheck.engine.cloaking_detector').merge_playwright_result(
                 checks[0].result.get('cloaking') or {}, manifest.get('cloaking') or {})}
         evidence_id = uuid4()
         images = self.store.store_evidence_images(owner_user_id=self.owner, evidence_set_id=evidence_id,

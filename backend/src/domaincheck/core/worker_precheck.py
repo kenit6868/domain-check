@@ -15,7 +15,7 @@ REVIEW_VERDICTS = {"LIKELY", "POSSIBLE", "INCONCLUSIVE"}
 
 
 def valid_recipients(rows: list[dict]) -> list[dict]:
-    toolkit = importlib.import_module("phishing_toolkit")
+    toolkit = importlib.import_module("domaincheck.engine.phishing_toolkit")
     result, seen = [], set()
     for row in rows:
         if row.get("channel") not in {"registrar", "registry", "hosting"}:
@@ -44,18 +44,18 @@ def disposition(recipients: list[dict], cloaking: dict) -> str:
     return "evidence_review"
 
 
-class LegacyWorkerPrecheckAdapter:
+class DomainWorkerPrecheckAdapter:
     @staticmethod
     def validate_runtime():
-        toolkit = importlib.import_module("phishing_toolkit")
+        toolkit = importlib.import_module("domaincheck.engine.phishing_toolkit")
         required = ("resolve_worker_report_recipients", "render_registrar_email_draft",
                     "render_registry_email_draft", "render_hosting_email_draft")
         if not all(callable(getattr(toolkit, name, None)) for name in required):
             raise RuntimeError("Reinstall the backend package and restart its API/worker")
 
     def run(self, target: str, domain: str) -> dict:
-        toolkit = importlib.import_module("phishing_toolkit")
-        detector = importlib.import_module("cloaking_detector")
+        toolkit = importlib.import_module("domaincheck.engine.phishing_toolkit")
+        detector = importlib.import_module("domaincheck.engine.cloaking_detector")
 
         def contacts():
             with ThreadPoolExecutor(max_workers=5) as pool:
@@ -104,8 +104,8 @@ class LegacyWorkerPrecheckAdapter:
 
 def email_examples(domain: str, target: str, result: dict, config: dict) -> list[dict]:
     """Advisory drafts only. Use exact legacy email pools, never webform text."""
-    LegacyWorkerPrecheckAdapter.validate_runtime()
-    toolkit = importlib.import_module("phishing_toolkit")
+    DomainWorkerPrecheckAdapter.validate_runtime()
+    toolkit = importlib.import_module("domaincheck.engine.phishing_toolkit")
     rows = []
     for recipient in valid_recipients(result.get("recipients") or []):
         channel = recipient["channel"]

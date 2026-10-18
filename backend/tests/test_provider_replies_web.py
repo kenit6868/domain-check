@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import UUID, uuid4
 
-import provider_replies as legacy
+from domaincheck.engine import provider_replies as legacy
 from sqlalchemy import select
 import tests.test_worker_send as fixtures
 import tests.test_evidence_review as evidence

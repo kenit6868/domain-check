@@ -117,7 +117,7 @@ class CloudflareWorkerWebTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.svc().view(identity))['batch']['account_id'], self.account_id)
 
     async def test_new_precheck_accepts_another_cookie_account_but_retry_keeps_old_batch_binding(self):
-        from cloudflare_dashboard_session import CloudflareDashboardError
+        from domaincheck.engine.cloudflare_dashboard_session import CloudflareDashboardError
         identity = await self.prepared()
         self.outcomes = [CloudflareDashboardError('definite rejection')]
         await self.start(identity)
@@ -148,7 +148,7 @@ class CloudflareWorkerWebTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.svc().view(identity))['records'][0]['state'], 'SUBMITTED')
 
     async def test_exact_payload_success_duplicate_and_recheck_cannot_resubmit(self):
-        from cloudflare_dashboard_session import CloudflareDashboardDuplicateError
+        from domaincheck.engine.cloudflare_dashboard_session import CloudflareDashboardDuplicateError
         identity = await self.prepared(['https://example.com/a', 'https://example.com/b'])
         drafts = [row['draft'] for row in (await self.svc().view(identity))['records']]
         self.outcomes = [{'report_id': 'accepted-123'}, CloudflareDashboardDuplicateError('duplicate')]
@@ -166,7 +166,7 @@ class CloudflareWorkerWebTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.calls), 2)
 
     async def test_cookie_expiry_replacement_resumes_same_item_without_persisting_secret(self):
-        from cloudflare_dashboard_session import CloudflareDashboardSessionError
+        from domaincheck.engine.cloudflare_dashboard_session import CloudflareDashboardSessionError
         identity = await self.prepared()
         self.outcomes = [CloudflareDashboardSessionError('must not persist Cookie secret')]
         await self.start(identity)
@@ -185,7 +185,7 @@ class CloudflareWorkerWebTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('must not persist', persisted)
 
     async def test_unknown_blocks_retry_and_resume_only_sends_remaining_urls(self):
-        from cloudflare_dashboard_session import CloudflareDashboardUnknownError
+        from domaincheck.engine.cloudflare_dashboard_session import CloudflareDashboardUnknownError
         identity = await self.prepared(['https://example.com/a', 'https://example.com/b'])
         self.outcomes = [CloudflareDashboardUnknownError('timeout')]
         await self.start(identity)
@@ -197,7 +197,7 @@ class CloudflareWorkerWebTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.calls), 2)
 
     async def test_failed_retry_keeps_success_and_profile_hash_changes_block_send(self):
-        from cloudflare_dashboard_session import CloudflareDashboardError
+        from domaincheck.engine.cloudflare_dashboard_session import CloudflareDashboardError
         identity = await self.prepared(['https://example.com/a', 'https://example.com/b'])
         self.outcomes = [{'report_id': 'one'}, CloudflareDashboardError('definite rejection')]
         await self.start(identity)
@@ -262,7 +262,7 @@ class CloudflareWorkerWebTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone((await self.svc().view())['batch'])
 
     async def test_rate_limit_pauses_and_live_batch_blocks_new_precheck(self):
-        from cloudflare_dashboard_session import CloudflareDashboardRateLimitError
+        from domaincheck.engine.cloudflare_dashboard_session import CloudflareDashboardRateLimitError
         identity = await self.prepared()
         self.outcomes = [CloudflareDashboardRateLimitError('challenge')]
         await self.start(identity)
@@ -335,7 +335,7 @@ class CloudflareWorkerWebTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(asyncio.shield(self.runner.tasks[identity]), 8)
         self.assertEqual(len(self.calls), 1)
         second = await self.prepared(['https://example.com/second'])
-        from cloudflare_dashboard_session import CloudflareDashboardRateLimitError
+        from domaincheck.engine.cloudflare_dashboard_session import CloudflareDashboardRateLimitError
         self.outcomes = [CloudflareDashboardRateLimitError('pause')]
         await self.start(second)
         await self.phase(second, 'PAUSED')
@@ -346,7 +346,7 @@ class CloudflareWorkerWebTests(unittest.IsolatedAsyncioTestCase):
         await other.close()
 
     async def test_revoked_permission_and_changed_account_block_before_next_request(self):
-        from cloudflare_dashboard_session import CloudflareDashboardRateLimitError
+        from domaincheck.engine.cloudflare_dashboard_session import CloudflareDashboardRateLimitError
         identity = await self.prepared()
         self.outcomes = [CloudflareDashboardRateLimitError('pause')]
         await self.start(identity)
@@ -379,7 +379,7 @@ class CloudflareWorkerWebTests(unittest.IsolatedAsyncioTestCase):
 class CloudflareCoreTests(unittest.TestCase):
     def test_dashboard_transport_cookie_account_and_reporter_email_are_independent(self):
         from unittest.mock import Mock
-        from cloudflare_dashboard_session import submit_dashboard_report
+        from domaincheck.engine.cloudflare_dashboard_session import submit_dashboard_report
         transport = Mock()
         response = Mock(status_code=200, reason='OK')
         response.json.return_value = {'success': True, 'result': {'id': 'fixture-report'}}
@@ -396,7 +396,7 @@ class CloudflareCoreTests(unittest.TestCase):
         self.assertEqual(second.kwargs['json']['email2'], 'profile@example.com')
 
     def test_cookie_account_parser_handles_wrappers_and_uses_account_fields_only(self):
-        from cloudflare_dashboard_session import _account_id_from_cookie, CloudflareDashboardConfig, CloudflareDashboardError
+        from domaincheck.engine.cloudflare_dashboard_session import _account_id_from_cookie, CloudflareDashboardConfig, CloudflareDashboardError
         account = 'a' * 32
         other = 'b' * 32
         samples = [account, json.dumps(account), json.dumps({'id': account, 'user_id': other}),
@@ -460,7 +460,7 @@ class CloudflareCoreTests(unittest.TestCase):
             self.assertEqual(check('https://example.com/', {'brand_name': 'Fixture'}), {'cloudflare': True})
         self.assertEqual(run.call_args.kwargs['timeout'], 180)
         self.assertNotIn('cookie', run.call_args.kwargs['input'])
-        from cloudflare_dashboard_session import submit_dashboard_report
+        from domaincheck.engine.cloudflare_dashboard_session import submit_dashboard_report
         response = Mock(status_code=200, reason='OK')
         response.json.return_value = {'success': True, 'result': {'id': 'fixture-id'}}
         transport = Mock(); transport.post.return_value = response

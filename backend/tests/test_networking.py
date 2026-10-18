@@ -5,7 +5,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import browser_evidence
+from domaincheck.engine import browser_evidence
 from fastapi import HTTPException
 from uuid import uuid4
 from domaincheck.core.networking import EgressDenied, EgressProxy, PublicEgressPolicy

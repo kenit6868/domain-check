@@ -1,3 +1,5 @@
+> Current architecture and commands: [technical guide](technical-guide.md). Desktop/root/compat instructions in historical entries below are retired.
+
 # Vận hành foundation web
 
 Domain Worker nay giữ batch hiện tại từ backend qua F5/nhiều tab. Precheck/chờ xác
@@ -52,7 +54,7 @@ Logo mặc định WIN được đóng gói trong backend; nút áp dụng ở c
 artifact thuộc owner, không đọc config.ini, không truyền local path vào draft.
 
 DW-01: `/domain-worker` precheck owned tối đa 100 full URL; gửi thường đã có batch riêng.
-Chạy `run_domain_worker_precheck.bat` từ root hoặc CLI với
+Chạy `backend/scripts/run_domain_worker_precheck.bat` từ root hoặc CLI với
 `--job-type domain_worker_precheck`; worker `all` phiên bản mới cũng nhận loại này.
 Không restart worker đang chạy job; cần cài lại backend venv khi cập nhật helper
 legacy. F5 chỉ GET job cũ, không enqueue lại. Dừng là cooperative, pending được giữ
@@ -373,7 +375,7 @@ restart active SMTP workers. No real SMTP/IMAP actions were used during implemen
 
 ### Cloudflare Dashboard session runner (2026-10-18)
 
-Run `run_cloudflare_worker.bat` or backend `python -m domaincheck.cloudflare_runner`.
+Run `backend/scripts/run_cloudflare_worker.bat` or backend `python -m domaincheck.cloudflare_runner`.
 The runner binds 127.0.0.1:8789, requires the API's existing master key, and holds a
 PostgreSQL singleton lock for its lifetime. API instances use the same private
 DOMAINCHECK_CLOUDFLARE_RUNNER_URL. Its token is derived from the key and never sent

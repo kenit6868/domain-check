@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import io
 import os
 import tempfile
@@ -18,7 +19,7 @@ from sqlalchemy import func, select
 
 from domaincheck.api.domain_worker import serialize
 from domaincheck.application.domain_worker import DomainPrecheckWorker, DomainWorkerService, WorkerNotFound
-from domaincheck.core.worker_precheck import LegacyWorkerPrecheckAdapter, disposition, email_examples, valid_recipients
+from domaincheck.core.worker_precheck import DomainWorkerPrecheckAdapter, disposition, email_examples, valid_recipients
 from domaincheck.infrastructure.artifacts import FilesystemArtifactStore
 from domaincheck.infrastructure.db.models import CaseSource, Check, ReviewCase, User
 from domaincheck.infrastructure.db.session import Database
@@ -44,8 +45,8 @@ class WorkerCoreTests(unittest.TestCase):
         self.assertEqual(rows, [{"channel": "registrar", "email": "abuse@example.com"}])
 
     def test_lookup_and_http_cloaking_are_parallel_and_do_not_write_legacy_state(self):
-        import phishing_toolkit as toolkit
-        import cloaking_detector as detector
+        from domaincheck.engine import phishing_toolkit as toolkit
+        from domaincheck.engine import cloaking_detector as detector
         barrier = threading.Barrier(2)
         def who(_domain):
             barrier.wait(timeout=3)
@@ -62,28 +63,27 @@ class WorkerCoreTests(unittest.TestCase):
              patch.object(toolkit, "scan_common_subdomains", return_value={}), \
              patch.object(detector, "probe_http_cloaking", side_effect=probe), \
              patch.object(toolkit, "run_check", side_effect=AssertionError("full pipeline")), \
-             patch.object(toolkit, "log_case", side_effect=AssertionError("legacy write")):
-            result = LegacyWorkerPrecheckAdapter().run("https://example.com/login?a=1", "example.com")
+             patch("builtins.open", side_effect=AssertionError("unexpected global file IO")):
+            result = DomainWorkerPrecheckAdapter().run("https://example.com/login?a=1", "example.com")
         self.assertEqual(result["disposition"], "cloaking_review")
         self.assertEqual(result["recipients"][0]["email"], "abuse@namecheap.com")
         self.assertNotIn("private", str(result))
         self.assertNotIn("secret", str(result))
 
-    def test_email_bodies_match_legacy_written_drafts_including_exact_full_url(self):
-        import phishing_toolkit as toolkit
+    def test_email_bodies_match_frozen_pre_cutover_drafts_including_exact_full_url(self):
+        from domaincheck.engine import phishing_toolkit as toolkit
         cfg = {"brand_name": "Fixture", "contact_name": "Operator", "contact_email": "operator@example.com"}
         domain, target = "fixture.com", "https://fixture.com/login?a=1"
         registry = {"source": "static_table", "registry": "Fixture Registry", "abuse_email": "abuse@registry.example"}
         hosting = {"org": "Fixture Host", "abuse_email": "abuse@hosting.example", "asn": "AS123"}
         who = {"registrar": "Namecheap", "emails": ["abuse@namecheap.com"]}
         recipients = toolkit.resolve_worker_report_recipients(who, {}, registry, hosting)
-        with tempfile.TemporaryDirectory() as directory, patch.object(toolkit, "REPORTS_DIR", directory):
-            paths = toolkit.generate_email_drafts(domain, {}, who, {}, cfg, target)
-            paths.append(toolkit.generate_registry_draft(domain, registry, cfg, target))
-            paths.append(toolkit.generate_hosting_draft(domain, "8.8.8.8", hosting, cfg))
-            paths = [p for p in paths if p and any(channel in p for channel in ("registrar", "registry", "hosting"))]
-            toolkit.append_reported_url_to_drafts(paths, target)
-            old = {Path(p).read_text(encoding="utf-8") for p in paths}
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 10, 18, 12, tzinfo=tz)
+        old = set(json.loads((Path(__file__).parent / "fixtures/worker-email-drafts.json").read_text(encoding="utf-8")))
+        with patch.object(toolkit, "datetime", FixedDatetime):
             examples = email_examples(domain, target, {"recipients": recipients, "whois": who,
                 "registry_contact": registry, "hosting_ip": "8.8.8.8", "origin_ip_whois": hosting}, cfg)
         self.assertEqual({item["draft"] for item in examples}, old)

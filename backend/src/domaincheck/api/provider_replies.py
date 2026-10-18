@@ -15,7 +15,7 @@ from domaincheck.api.dependencies import get_db_session, require_permission
 from domaincheck.application.provider_replies import ProviderRepliesService, ProviderReplySender
 from domaincheck.application.previews import PreviewConflict
 from domaincheck.application.mail_settings import MailSettingsNotFound
-from domaincheck.application.sent_copy import LegacySentCopyAdapter
+from domaincheck.application.sent_copy import ImapSentCopyAdapter
 from domaincheck.application.worker_review import review_lock_key
 from domaincheck.core.mail.sending import SmtpReportSender
 from domaincheck.core.provider_mail import ProviderMailboxAdapter
@@ -262,6 +262,6 @@ async def send(case_id: UUID, body: Send, request: Request, response: Response,
     sender = ProviderReplySender(request.app.state.database.session_factory, request.app.state.artifact_store,
         getattr(request.app.state, 'provider_reply_sender', None) or SmtpReportSender(settings.mail_egress_endpoints),
         request.app.state.secret_envelope, now=request.app.state.clock.now,
-        sent_copier=getattr(request.app.state, 'provider_reply_sent_copier', None) or LegacySentCopyAdapter(settings.mail_egress_endpoints))
+        sent_copier=getattr(request.app.state, 'provider_reply_sent_copier', None) or ImapSentCopyAdapter(settings.mail_egress_endpoints))
     try: return await sender.send(actor.user_id, actor.user_id, actor.timezone, case_id, **body.model_dump())
     except Exception as exc: raise failure(exc) from exc

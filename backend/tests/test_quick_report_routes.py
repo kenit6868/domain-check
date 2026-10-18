@@ -8,7 +8,7 @@ from uuid import uuid4
 from unittest.mock import patch
 
 from httpx import ASGITransport, AsyncClient
-import phishing_toolkit as toolkit
+from domaincheck.engine import phishing_toolkit as toolkit
 from domaincheck.core.quick_report_routes import report_forms
 from domaincheck.core.form_tasks import available_providers
 from domaincheck.application.quick_reports import QuickReportService

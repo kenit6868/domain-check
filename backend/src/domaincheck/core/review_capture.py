@@ -6,7 +6,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from domaincheck.core.evidence import CaptureFailed, LegacyBrowserCaptureAdapter, capture_failure_code
+from domaincheck.core.evidence import CaptureFailed, EngineBrowserCaptureAdapter, capture_failure_code
 from domaincheck.core.investigation import sanitize_result
 from domaincheck.ports.artifacts import ImageUpload
 
@@ -41,9 +41,9 @@ def _capture(target, decision, directory, display_mode='headless'):
     root = Path(directory).resolve()
     internal = []
     if decision == 'not_cloaking':
-        images, manifest = LegacyBrowserCaptureAdapter(headless=display_mode != 'headed').capture(target, staging_root=root)
+        images, manifest = EngineBrowserCaptureAdapter(headless=display_mode != 'headed').capture(target, staging_root=root)
     elif decision == 'confirmed_cloaking':
-        import cloaking_detector as detector
+        from domaincheck.engine import cloaking_detector as detector
         result = detector.probe_playwright_cloaking(target, timeout_ms=15_000, evidence_root=str(root))
         if result.get('verdict') == 'BLOCKED_OR_UNAVAILABLE' or (result.get('site_state') or {}).get('all_profiles_terminal'):
             raise CaptureFailed('terminal_page')

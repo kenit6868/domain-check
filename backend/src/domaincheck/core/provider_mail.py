@@ -8,8 +8,7 @@ from time import monotonic
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import provider_replies as legacy
-
+from domaincheck.engine import provider_replies as legacy
 from domaincheck.core.mail.connectivity import AllowlistedMailConnectionTester
 
 

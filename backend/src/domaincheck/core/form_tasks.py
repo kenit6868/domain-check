@@ -52,7 +52,7 @@ class QuickReportFormTaskAdapter:
 
     def build(self, provider: str, *, target_url: str, domain: str, config: dict) -> ProviderFormTask:
         if provider == "google_gsb":
-            toolkit = importlib.import_module("phishing_toolkit")
+            toolkit = importlib.import_module("domaincheck.engine.phishing_toolkit")
             draft = toolkit.generate_safebrowsing_report_text(domain, config, target_url)
             return ProviderFormTask(
                 provider=provider,
@@ -69,7 +69,7 @@ class QuickReportFormTaskAdapter:
             )
         if provider not in PROVIDER_FORMS:
             raise ValueError("Unsupported Quick Report form provider")
-        toolkit = importlib.import_module("phishing_toolkit")
+        toolkit = importlib.import_module("domaincheck.engine.phishing_toolkit")
         if provider == "cloudflare":
             draft = toolkit.generate_cloudflare_report_text(domain, config, target_url)
         elif provider in {"registry_co_phishing", "xyz_registry_abuse"}:

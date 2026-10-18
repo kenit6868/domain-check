@@ -69,6 +69,6 @@ class SmtpReportSender:
                     return 'failed', stage, 'smtp_connection_failed'
             finally:
                 if server is not None:
-                    from phishing_toolkit import _close_smtp_server
+                    from domaincheck.engine.phishing_toolkit import _close_smtp_server
                     _close_smtp_server(server)
         return 'failed', 'connect', 'smtp_connection_failed'

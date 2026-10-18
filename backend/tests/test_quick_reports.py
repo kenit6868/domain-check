@@ -12,7 +12,7 @@ from domaincheck.application.quick_reports import (
     QuickReportNotFound, QuickReportService, QuickReportWorker, canonical_target,
     quick_report_workflow_identity,
 )
-from domaincheck.core.quick_report import LegacyQuickReportAdapter, sanitize_quick_report_result
+from domaincheck.core.quick_report import DomainQuickReportAdapter, sanitize_quick_report_result
 from domaincheck.infrastructure.db.models import User, Job
 from domaincheck.infrastructure.db.session import Database
 from domaincheck.main import create_app
@@ -58,7 +58,7 @@ class FakeAdapter:
 class QuickReportDomainTests(unittest.TestCase):
     def test_worker_checks_dependencies_before_connecting_or_claiming_jobs(self):
         from domaincheck.workers import cli
-        with patch.object(LegacyQuickReportAdapter, 'validate_runtime', side_effect=RuntimeError('missing dependencies')), patch.object(cli, 'Database') as database:
+        with patch.object(DomainQuickReportAdapter, 'validate_runtime', side_effect=RuntimeError('missing dependencies')), patch.object(cli, 'Database') as database:
             with self.assertRaises(RuntimeError):
                 asyncio.run(cli.run(once=True, poll_seconds=2))
             database.assert_not_called()
@@ -69,10 +69,10 @@ class QuickReportDomainTests(unittest.TestCase):
             run_cdn_check=lambda target, config: calls.append((target, config)) or {"domain": "example.test"}
         )
         with patch("domaincheck.core.quick_report.importlib.import_module", return_value=toolkit) as imported:
-            result = LegacyQuickReportAdapter().run(
+            result = DomainQuickReportAdapter().run(
                 "https://example.test/login", {"cloaking_vantage_points": []},
             )
-        imported.assert_called_once_with("phishing_toolkit")
+        imported.assert_called_once_with("domaincheck.engine.phishing_toolkit")
         self.assertEqual(calls, [("https://example.test/login", {"cloaking_vantage_points": []})])
         self.assertEqual(result, {"domain": "example.test"})
 

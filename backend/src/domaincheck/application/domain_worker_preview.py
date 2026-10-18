@@ -29,7 +29,7 @@ class DomainWorkerPreviewService:
     feature = 'domain_worker'
 
     def evidence_block(self, check, manifest):
-        return importlib.import_module('browser_evidence').format_email_evidence_manifest(manifest)
+        return importlib.import_module('domaincheck.engine.browser_evidence').format_email_evidence_manifest(manifest)
     def __init__(self, session, store, *, owner, actor, timezone, request_id, now):
         self.session, self.store, self.owner = session, store, owner
         self.timezone, self.now = timezone, now
@@ -93,7 +93,7 @@ class DomainWorkerPreviewService:
                 or evidence.manifest.get("navigation_verified")):
             raise PreviewConflict("DOM destination evidence is incomplete")
         if evidence.manifest.get('evidence_type') == 'dom_destination_opened':
-            browser = importlib.import_module('browser_evidence')
+            browser = importlib.import_module('domaincheck.engine.browser_evidence')
             control = evidence.manifest.get('control') or {}
             navigation = evidence.manifest.get('navigation') or {}
             if (not control.get('found') or not control.get('label')
@@ -203,8 +203,8 @@ class DomainWorkerPreviewService:
 
 def prepare_deliveries(check, examples, config, accounts, manifest, logo_cid, *, evidence_block=None):
     """Render the shared legacy personalization, then escape the exact HTML body."""
-    toolkit = importlib.import_module("phishing_toolkit")
-    browser = importlib.import_module('browser_evidence')
+    toolkit = importlib.import_module("domaincheck.engine.phishing_toolkit")
+    browser = importlib.import_module('domaincheck.engine.browser_evidence')
     block = browser.format_email_evidence_manifest(manifest) if evidence_block is None else evidence_block
     result = []
     for account in accounts:

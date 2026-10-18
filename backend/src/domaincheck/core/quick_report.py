@@ -18,8 +18,8 @@ class QuickReportAdapter(Protocol):
     def run(self, target: str, config: dict) -> dict: ...
 
 
-class LegacyQuickReportAdapter:
-    """Temporary facade to the characterized Python core; never loads config itself."""
+class DomainQuickReportAdapter:
+    """Use the packaged checking engine with explicitly resolved configuration."""
 
     @staticmethod
     def validate_runtime() -> None:
@@ -29,10 +29,10 @@ class LegacyQuickReportAdapter:
             except ImportError as exc:
                 raise RuntimeError("Quick Report worker dependencies are missing; install backend dependencies before starting the worker") from exc
         # Import before claiming jobs so packaging failures cannot fail user items.
-        importlib.import_module("phishing_toolkit")
+        importlib.import_module("domaincheck.engine.phishing_toolkit")
 
     def run(self, target: str, config: dict) -> dict:
-        toolkit = importlib.import_module("phishing_toolkit")
+        toolkit = importlib.import_module("domaincheck.engine.phishing_toolkit")
         return toolkit.run_cdn_check(target, config)
 
 

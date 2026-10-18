@@ -45,15 +45,30 @@ class Settings(BaseSettings):
     netcraft_submit_enabled: bool = False
     cloudflare_submit_enabled: bool = True
     cloudflare_runner_url: str = "http://127.0.0.1:8789"
+    cloudflare_runner_host: str = '127.0.0.1'
+    cloudflare_runner_slots: int = Field(default=2, ge=1, le=4)
     vt_api_key: SecretStr | None = None
     gsb_api_key: SecretStr | None = None
     browser_capture_enabled: bool = False
+    worker_quick_report_slots: int = Field(default=2, ge=1, le=8)
+    worker_check_domain_slots: int = Field(default=2, ge=1, le=8)
+    worker_domain_worker_precheck_slots: int = Field(default=2, ge=1, le=4)
+    worker_domain_worker_send_slots: int = Field(default=2, ge=1, le=4)
+    worker_browser_evidence_slots: int = Field(default=1, ge=1, le=4)
+    worker_items_per_turn: int = Field(default=1, ge=1, le=50)
     browser_egress_proxy_url: SecretStr | None = None
     mail_connectivity_enabled: bool = False
     mail_egress_endpoints: tuple[str, ...] = ()
     secret_master_key: SecretStr | None = None
     secret_key_version: int = 1
     bootstrap_telegram_subject: str | None = None
+
+    def worker_slots(self) -> dict[str, int]:
+        slots = {name: getattr(self, f'worker_{name}_slots') for name in (
+            'quick_report', 'check_domain', 'domain_worker_precheck', 'domain_worker_send')}
+        if self.browser_capture_enabled:
+            slots['browser_evidence'] = self.worker_browser_evidence_slots
+        return slots
 
     @field_validator("artifact_root", mode="after")
     @classmethod

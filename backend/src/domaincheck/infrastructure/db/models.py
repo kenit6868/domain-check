@@ -194,7 +194,12 @@ class Job(Base, IdMixin, TimestampMixin, VersionMixin):
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     result_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    __table_args__ = (UniqueConstraint("owner_user_id", "id"),)
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "id"),
+        Index('ix_jobs_queue_claim', 'job_type', 'state', 'heartbeat_at', 'created_at', 'id'),
+        Index('ix_jobs_owner_active', 'owner_user_id', 'job_type', 'state', 'lease_expires_at'),
+        Index('ix_jobs_owner_service', 'owner_user_id', 'job_type', 'heartbeat_at'),
+    )
 
 
 class JobItem(Base, IdMixin, TimestampMixin, VersionMixin):

@@ -258,7 +258,7 @@ class ReviewCaptureTests(unittest.TestCase):
             path = Path(directory) / 'profile.png'; path.write_bytes(evidence.image().data)
             observed = {'verdict': 'POSSIBLE', 'screenshots': [{'path': str(path), 'profile': 'desktop_direct'}, {'path': str(path), 'profile': 'googlebot_smartphone'}],
                 'profiles': {'desktop': {'screenshot_path': str(path), 'title': 'Fixture'}}}
-            with patch('cloaking_detector.probe_playwright_cloaking', return_value=observed) as probe:
+            with patch('domaincheck.engine.cloaking_detector.probe_playwright_cloaking', return_value=observed) as probe:
                 _capture('https://example.com/path', 'confirmed_cloaking', directory)
             self.assertEqual(probe.call_args.kwargs['timeout_ms'], 15_000)
             data = json.loads((Path(directory) / 'result.json').read_text(encoding='utf-8'))

@@ -4,7 +4,8 @@ import hashlib
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import DateTime, cast, exists, or_, select, update
+from sqlalchemy import DateTime, cast, exists, func, or_, select, update, text
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from domaincheck.domain.jobs import ITEM_FINAL_STATES, JOB_TERMINAL_STATES, validate_code, validate_result_metadata
@@ -78,6 +79,7 @@ class JobRepository:
         worker_token: str,
         lease_seconds: int = 60,
         job_types: frozenset[str] | None = None,
+        fair_owner: bool = False,
         now: datetime | None = None,
     ) -> Job | None:
         if not worker_token:
@@ -85,6 +87,11 @@ class JobRepository:
         if not 5 <= lease_seconds <= 900:
             raise ValueError("lease_seconds must be between 5 and 900")
         observed = now or datetime.now(UTC)
+        if fair_owner:
+            # Serialize only the short claim transaction across worker replicas.
+            # The next statement sees preceding committed claims (READ COMMITTED),
+            # preventing two slots from taking batches of the same owner/type.
+            await self._session.execute(text('SELECT pg_advisory_xact_lock(7348291741284)'))
         conditions = [
             Job.stop_requested.is_(False),
             or_(
@@ -94,13 +101,27 @@ class JobRepository:
         ]
         if job_types:
             conditions.append(Job.job_type.in_(job_types))
+        if fair_owner:
+            active = aliased(Job)
+            conditions.append(~exists().where(
+                active.owner_user_id == Job.owner_user_id,
+                active.job_type == Job.job_type,
+                active.id != Job.id,
+                active.state.in_(('running', 'stopping')),
+                active.lease_expires_at >= observed,
+            ))
+            previous = aliased(Job)
+            last_served = select(func.max(previous.heartbeat_at)).where(
+                previous.owner_user_id == Job.owner_user_id, previous.job_type == Job.job_type,
+            ).correlate(Job).scalar_subquery()
         conditions.append(or_(Job.job_type != 'domain_worker_send',
             Job.result_metadata['next_run_at'].astext.is_(None),
             cast(Job.result_metadata['next_run_at'].astext, DateTime(timezone=True)) <= observed))
         job = await self._session.scalar(
             select(Job)
             .where(*conditions)
-            .order_by(Job.created_at, Job.id)
+            .order_by(*((last_served.asc().nulls_first(), Job.heartbeat_at.asc().nulls_first()) if fair_owner else ()),
+                      Job.created_at, Job.id)
             .with_for_update(skip_locked=True)
             .limit(1)
         )
@@ -113,6 +134,13 @@ class JobRepository:
         job.version += 1
         await self._session.flush()
         return job
+
+    async def release_for_drain(self, *, job_id: UUID, worker_token: str, now: datetime) -> None:
+        await self._session.execute(update(Job).where(
+            Job.id == job_id, Job.lease_token == worker_token, Job.state == 'running',
+            Job.stop_requested.is_(False), Job.lease_expires_at >= now,
+        ).values(state='queued', stage='pending', lease_token=None, lease_expires_at=None,
+                 version=Job.version + 1))
 
     async def heartbeat(
         self,

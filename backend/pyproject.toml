@@ -12,6 +12,7 @@ dependencies = [
   "asyncpg==0.32.0",
   "cryptography==50.0.2",
   "fastapi==0.143.1",
+  "httpx==0.28.1",
   "pillow==12.3.0",
   "playwright==1.62.0",
   "pydantic-settings==2.16.0",
@@ -30,29 +31,18 @@ dependencies = [
 ]
 
 [project.scripts]
+domaincheck-backend = "domaincheck.server:main"
 domaincheck-admin = "domaincheck.cli:main"
 domaincheck-cloudflare-runner = "domaincheck.cloudflare_runner:main"
 
 domaincheck-worker = "domaincheck.workers.cli:main"
 
 [project.optional-dependencies]
-test = [
-  "httpx==0.28.1",
-]
+test = []
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/domaincheck"]
-dev-mode-dirs = ["src", "compat"]
-
-# Explicit compatibility modules, without config.ini or runtime data.
-[tool.hatch.build.targets.wheel.force-include]
-"compat/phishing_toolkit.py" = "phishing_toolkit.py"
-"compat/cloaking_detector.py" = "cloaking_detector.py"
-"compat/browser_evidence.py" = "browser_evidence.py"
-"compat/quick_report_actions.py" = "quick_report_actions.py"
-"compat/provider_replies.py" = "provider_replies.py"
-"compat/cloudflare_dashboard_session.py" = "cloudflare_dashboard_session.py"
-"compat/cloudflare_abuse_api.py" = "cloudflare_abuse_api.py"
+dev-mode-dirs = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

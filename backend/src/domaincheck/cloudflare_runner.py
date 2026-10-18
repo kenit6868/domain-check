@@ -11,12 +11,14 @@ import requests
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, SecretStr
 from sqlalchemy import text
+from redis.asyncio import Redis
 
 from domaincheck.application.cloudflare_runner import CloudflareRunner
 from domaincheck.application.cloudflare_worker import CloudflareConflict
 from domaincheck.infrastructure.artifacts import FilesystemArtifactStore
 from domaincheck.infrastructure.db.session import Database
 from domaincheck.settings import Settings
+from domaincheck.workers.runtime import publish_health
 
 
 def bridge_token(settings):
@@ -65,7 +67,7 @@ def create_runner_app(settings=None, manager=None):
     token = bridge_token(settings)
     database = Database(settings.database_url)
     manager = manager or CloudflareRunner(database.session_factory, FilesystemArtifactStore(settings.artifact_root),
-        enabled=settings.cloudflare_submit_enabled)
+        enabled=settings.cloudflare_submit_enabled, slots=settings.cloudflare_runner_slots)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -74,14 +76,22 @@ def create_runner_app(settings=None, manager=None):
             claimed = await connection.scalar(text('SELECT pg_try_advisory_lock(7348291741283)'))
             if not claimed: raise RuntimeError('A Cloudflare runner is already active for this database')
             await connection.commit()
-            try: yield
+            redis = Redis.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=3, socket_timeout=3)
+            try:
+                async with publish_health(redis, 'cloudflare_runner'):
+                    yield
             finally:
                 await manager.close()
+                await redis.aclose()
                 await connection.execute(text('SELECT pg_advisory_unlock(7348291741283)'))
                 await connection.commit()
         await database.dispose()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.get('/health/live')
+    async def live():
+        return {'status': 'ok'}
 
     from fastapi.exceptions import RequestValidationError
     from fastapi.responses import JSONResponse
@@ -111,7 +121,9 @@ def create_runner_app(settings=None, manager=None):
 
 def main():
     import uvicorn
-    uvicorn.run(create_runner_app(), host='127.0.0.1', port=8789, access_log=False)
+    from domaincheck.settings import get_settings
+    settings = get_settings()
+    uvicorn.run(create_runner_app(settings), host=settings.cloudflare_runner_host, port=8789, access_log=False)
 
 
 if __name__ == '__main__': main()

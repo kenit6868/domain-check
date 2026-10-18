@@ -55,6 +55,7 @@ it('refuses form submission with view-only Check Domain permission', async () =>
   const restore = installApiMock((config) => {
     requests.push(config.url ?? '')
     if (config.url === '/me') return { ...me, permissions: ['check_domain.view'] }
+    if (config.url === '/health/workers') return { services: [] }
     throw new Error('Unexpected protected request')
   })
   try {
@@ -63,6 +64,6 @@ it('refuses form submission with view-only Check Domain permission', async () =>
     expect(input).toBeDisabled()
     fireEvent.change(input, { target: { value: 'https://example.com/' } })
     fireEvent.submit(input.closest('form') as HTMLFormElement)
-    expect(requests.every((url) => url === '/me')).toBe(true)
+    expect(requests.every((url) => url === '/me' || url === '/health/workers')).toBe(true)
   } finally { restore() }
 })

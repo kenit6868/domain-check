@@ -33,7 +33,7 @@ class QuickReportActions:
 
     @staticmethod
     async def _submit(payload):
-        helper = importlib.import_module("quick_report_actions")
+        helper = importlib.import_module("domaincheck.engine.quick_report_actions")
         return await asyncio.to_thread(helper.submit_netcraft, payload)
 
     async def _check(self, session, check_id):
@@ -99,7 +99,7 @@ class QuickReportActions:
                 email = profile.contact_email.strip() if profile else ""
                 if not re.fullmatch(r"[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+", email):
                     raise ActionConflict("Configure a valid contact email in your organization profile first")
-                helper = importlib.import_module("phishing_toolkit")
+                helper = importlib.import_module("domaincheck.engine.phishing_toolkit")
                 reason = helper.generate_community_report_text(check.domain, {"brand_name": profile.brand_name}, check.requested_url)
                 payload = {"email": email, "urls": [{"url": check.requested_url, "country": "VN", "reason": reason}]}
                 raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
@@ -205,6 +205,6 @@ class QuickReportActions:
             if not targets:
                 raise ActionConflict("No completed .top targets are available for export")
             profile = await session.get(UserSettings, self.owner)
-            helper = importlib.import_module("quick_report_actions")
+            helper = importlib.import_module("domaincheck.engine.quick_report_actions")
             return helper.build_nictop_workbook(targets, brand_name=profile.brand_name if profile else "",
                 detected_date=operation.job.business_day.isoformat())

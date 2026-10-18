@@ -317,7 +317,7 @@ class DomainSendWorker:
             await DeliveryRecoveryRepository(session).mark_expired_unknown(now=self.now())
             await repo.recover_expired_stops(now=self.now(), job_types=frozenset({'domain_worker_send'}))
             job = await repo.claim_next(worker_token=token, lease_seconds=60,
-                job_types=frozenset({'domain_worker_send'}), now=self.now())
+                job_types=frozenset({'domain_worker_send'}), now=self.now(), fair_owner=True)
             if job is None:
                 return None
             await repo.recover_interrupted_items(job=job, worker_token=token, now=self.now())

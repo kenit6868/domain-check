@@ -185,7 +185,7 @@ async def form_drafts(check_id: UUID, response: Response, include_providers: boo
     profile = await session.get(UserSettings, actor.user_id)
     config = {field: getattr(profile, field) for field in ('brand_name', 'contact_name', 'contact_email', 'company_name', 'business_registration_no', 'signature_role')}
     config['registry_contact'] = check.result.get('registry_contact')
-    toolkit = importlib.import_module('phishing_toolkit')
+    toolkit = importlib.import_module('domaincheck.engine.phishing_toolkit')
     drafts = []
     if include_providers:
         from domaincheck.core.form_tasks import QuickReportFormTaskAdapter

@@ -5,7 +5,7 @@ import importlib
 
 def report_forms(domain: str, result: dict) -> list[dict]:
     """Use the legacy contact tables verbatim; no lookup or provider request."""
-    toolkit = importlib.import_module('phishing_toolkit')
+    toolkit = importlib.import_module('domaincheck.engine.phishing_toolkit')
     forms = []
     registrar = str(result.get('registrar') or '').strip()
     for key, url in toolkit.WEB_FORM_REGISTRARS.items():

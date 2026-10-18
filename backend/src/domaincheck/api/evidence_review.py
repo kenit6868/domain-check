@@ -10,7 +10,7 @@ from domaincheck.api.dependencies import get_db_session, require_permission
 from domaincheck.application.evidence_review import EvidenceReviewSender, EvidenceReviewService
 from domaincheck.application.previews import PreviewConflict, PreviewNotFound
 from domaincheck.core.mail.sending import SmtpReportSender
-from domaincheck.application.sent_copy import LegacySentCopyAdapter
+from domaincheck.application.sent_copy import ImapSentCopyAdapter
 from domaincheck.infrastructure.db.models import Artifact
 from domaincheck.infrastructure.db.owned import OwnedRepository
 from domaincheck.ports.artifacts import ArtifactIntegrityError, ArtifactValidationError, ImageUpload
@@ -104,7 +104,7 @@ async def send(case_id: UUID, body: Send, request: Request, response: Response,
     sender = EvidenceReviewSender(request.app.state.database.session_factory, request.app.state.artifact_store,
         getattr(request.app.state, 'evidence_review_sender', None) or SmtpReportSender(settings.mail_egress_endpoints),
         request.app.state.secret_envelope, now=request.app.state.clock.now,
-        sent_copier=getattr(request.app.state, 'evidence_review_sent_copier', None) or LegacySentCopyAdapter(settings.mail_egress_endpoints))
+        sent_copier=getattr(request.app.state, 'evidence_review_sent_copier', None) or ImapSentCopyAdapter(settings.mail_egress_endpoints))
     try:
         return await sender.send(owner=actor.user_id, actor=actor.user_id, timezone=actor.timezone, case_id=case_id, **body.model_dump())
     except (ValueError, LookupError, FileNotFoundError, ArtifactIntegrityError) as exc:

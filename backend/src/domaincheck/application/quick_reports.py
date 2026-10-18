@@ -169,6 +169,8 @@ class QuickReportWorker:
             raise ValueError("heartbeat_seconds must be between 0 and 30")
         self._heartbeat_seconds = heartbeat_seconds
         self._job_type = job_type
+        self.should_drain = lambda: False
+        self.items_per_turn = None
 
     async def run_next(self, worker_token: str) -> UUID | None:
         async with self._sessions() as session:
@@ -176,17 +178,24 @@ class QuickReportWorker:
                 repo = JobRepository(session)
                 await repo.recover_expired_stops(now=self._now(), job_types=frozenset({self._job_type}))
                 job = await repo.claim_next(worker_token=worker_token, job_types=frozenset({self._job_type}),
-                                            now=self._now())
+                                            now=self._now(), fair_owner=True)
                 if job is None:
                     return None
                 await repo.recover_interrupted_items(job=job, worker_token=worker_token, now=self._now())
                 items = await repo.list_claimed_items(job, worker_token=worker_token)
                 job_id, owner_id = job.id, job.owner_user_id
                 pending_ids = [item.id for item in items if item.state == "pending"]
-        failures = 0
-        for item_id in pending_ids:
-            outcome = await self._run_item(owner_id, job_id, item_id, worker_token)
-            failures += outcome == "failed"
+        for index, item_id in enumerate(pending_ids):
+            if self.should_drain() or (self.items_per_turn is not None and index >= self.items_per_turn):
+                # Finish/checkpoint the current item, then release only pending
+                # work for the replacement process. No user stop/reset/retry.
+                async with self._sessions() as session, session.begin():
+                    repo = JobRepository(session)
+                    job = await repo.get_for_owner(owner_id, job_id)
+                    if job and not job.stop_requested:
+                        await repo.release_for_drain(job_id=job_id, worker_token=worker_token, now=self._now())
+                        return job_id
+            await self._run_item(owner_id, job_id, item_id, worker_token)
         async with self._sessions() as session:
             async with session.begin():
                 repo = JobRepository(session)
@@ -203,7 +212,7 @@ class QuickReportWorker:
                 )
                 await repo.finalize_job(
                     job_id=job_id, worker_token=worker_token, expected_version=job.version,
-                    state=terminal, stage="completed", result_metadata={**(job.result_metadata or {}), "failed_count": failures},
+                    state=terminal, stage="completed", result_metadata={**(job.result_metadata or {}), "failed_count": sum(item.state == 'failed' for item in items)},
                     now=self._now(),
                 )
         return job_id

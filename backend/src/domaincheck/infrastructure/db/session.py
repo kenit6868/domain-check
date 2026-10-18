@@ -8,6 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 class Database:
     def __init__(self, database_url: str, *, echo: bool = False, **engine_options: Any):
+        engine_options.setdefault('pool_size', 5)
+        engine_options.setdefault('max_overflow', 2)
+        engine_options.setdefault('pool_timeout', 30)
         self.engine: AsyncEngine = create_async_engine(
             database_url,
             echo=echo,
