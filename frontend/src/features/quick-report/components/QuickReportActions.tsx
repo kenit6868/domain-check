@@ -34,7 +34,7 @@ export function NetcraftAction({ checkId, compact = false }: { checkId: string; 
   const locked = value && ['SUBMITTED', 'UNKNOWN', 'SENDING'].includes(value.state)
   const error = send.error ?? status.error
   return <div className={compact ? 'contents' : 'border-t border-slate-200 p-3 dark:border-slate-800'}>
-    <div className="flex flex-wrap items-center gap-2"><Button className="primary-button report-action inline-flex items-center gap-2" aria-label={value?.state === 'FAILED' ? 'Thử gửi lại Netcraft' : 'Gửi API Netcraft'} loading={send.isPending} disabled={Boolean(locked) || send.isPending || status.isPending || status.isError || value?.submit_enabled === false} onClick={() => { send.mutate() }}>
+    <div className="flex flex-wrap items-center gap-2"><Button data-provider="netcraft" className="primary-button report-action inline-flex items-center gap-2" aria-label={value?.state === 'FAILED' ? 'Thử gửi lại Netcraft' : 'Gửi API Netcraft'} loading={send.isPending} disabled={Boolean(locked) || send.isPending || status.isPending || status.isError || value?.submit_enabled === false} onClick={() => { send.mutate() }}>
       <Send size={14} /><span>Netcraft · {value?.state === 'FAILED' ? 'Thử gửi lại' : 'Gửi API'}</span>
     </Button>{value && value.state !== 'PREVIEW' && <span className="text-xs text-slate-500" role="status">{labels[value.state]}</span>}
     {value?.submit_enabled === false && <span className="text-xs text-slate-500">API chưa bật</span>}</div>

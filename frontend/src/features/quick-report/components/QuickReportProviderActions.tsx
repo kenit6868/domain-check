@@ -50,6 +50,7 @@ export function QuickReportProviderActions({ check, canOpenForm, extension }: { 
     group === 'general' || (group === 'infrastructure' ? providers.some((provider) => provider.id === 'cloudflare') : check.report_forms?.some((form) => form.channel === group)))
   const autoButton = (provider: typeof providers[number], label: string, icon: ReactNode) => <Button key={provider.id}
     className="primary-button report-action inline-flex items-center gap-2"
+    data-provider={provider.id}
     title={connected ? 'Tự điền qua extension; bạn kiểm tra và gửi thủ công' : 'Kết nối Web Form Assistant để tự điền'}
     aria-label={`${label} — Mở và tự điền`} disabled={!connected || open.isPending}
     loading={open.isPending && open.variables === provider.id} onClick={() => { open.mutate(provider.id) }}>
@@ -59,8 +60,8 @@ export function QuickReportProviderActions({ check, canOpenForm, extension }: { 
     <div className="grid items-start gap-2 md:grid-cols-[repeat(var(--report-columns),minmax(0,1fr))]" style={{ '--report-columns': Math.max(1, groups.length - 1) } as React.CSSProperties} aria-label="Kênh báo cáo">
       {canOpenForm && groups.map((group) => <div key={group} className={`min-w-0 rounded-lg border border-slate-200 p-2 dark:border-slate-800 ${group === 'general' ? 'md:col-span-full' : ''}`}>
         <h3 className="mb-2 text-xs font-semibold">{group === 'general' ? 'Báo cáo chung' : group === 'infrastructure' ? 'CDN' : group === 'registrar' ? 'Registrar' : 'Registry'}</h3>
-        <div className="flex flex-wrap content-start items-start gap-1.5">
-        {ORDER.filter((id) => group === 'general' ? id !== 'cloudflare' : group === 'infrastructure' && id === 'cloudflare').map((id) => {
+        <div className={`flex flex-wrap content-start items-start ${group === 'general' ? 'gap-x-3 gap-y-3' : 'gap-1.5'}`}>
+        {ORDER.filter((id) => group === 'general' ? id === 'google_gsb' || id === 'microsoft_smartscreen' : group === 'infrastructure' && id === 'cloudflare').map((id) => {
           const provider = providers.find((item) => item.id === id)
           return provider ? autoButton(provider, provider.label, ICONS[id]) : null
         })}
@@ -73,6 +74,12 @@ export function QuickReportProviderActions({ check, canOpenForm, extension }: { 
             title="Mở form thủ công" href={form.form_url} target="_blank" rel="noopener noreferrer">{icon}<span className="max-w-52 truncate">{label}</span></a></Button>
         }))}
         {group === 'general' && <NetcraftAction checkId={check.id} compact />}
+        {group === 'general' && <div className="flex w-full flex-wrap items-start gap-3">
+          {(['chongluadao', 'coccoc_safe'] as const).map((id) => {
+            const provider = providers.find((item) => item.id === id)
+            return provider ? autoButton(provider, provider.label, ICONS[id]) : null
+          })}
+        </div>}
         </div>
         <QuickReportDraftPanel wide={group === 'general'} drafts={(drafts.data ?? []).filter((item) => item.channel === group)} loading={drafts.isPending} {...(drafts.error ? { error: drafts.error.message } : {})} />
       </div>)}

@@ -1,5 +1,6 @@
 ﻿import { Navigate, Route, Routes } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
+import { PageTitle } from './PageTitle'
 
 import { NotFoundPage } from '../../components/shared/StatusPage'
 import { AppShell } from '../layouts/AppShell'
@@ -21,6 +22,7 @@ const AuditLogPage = lazy(async () => ({ default: (await import('../../features/
 
 export function AppRouter() {
   return (
+    <><PageTitle />
     <Suspense fallback={<div className="app-surface min-h-screen p-8" role="status">Đang tải giao diện…</div>}><Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<AppShell />}>
@@ -41,6 +43,6 @@ export function AppRouter() {
         <Route path="/settings/mail" element={<MailSettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
-    </Routes></Suspense>
+    </Routes></Suspense></>
   )
 }

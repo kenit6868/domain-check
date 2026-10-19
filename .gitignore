@@ -21,3 +21,5 @@ frontend/.env
 # Generated compatibility copy for existing unpacked Chrome installs.
 chrome_extension/
 *.egg-info/
+.idea
+.vscode

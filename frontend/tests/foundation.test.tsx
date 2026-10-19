@@ -1,6 +1,7 @@
 import { Theme } from '@radix-ui/themes'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AppRouter } from '../src/app/router/AppRouter'
@@ -22,6 +23,23 @@ function anonymousMock(configured = true) {
   })
 }
 describe('login routing and dashboard', () => {
+  it('opens mobile navigation as a dialog and closes on Escape or a selected link', async () => {
+    const restore = installApiMock((config) => { if (config.url === '/me') return me; throw new Error('Unexpected request') })
+    const user = userEvent.setup()
+    renderApp()
+    const opener = await screen.findByRole('button', { name: 'Mở menu' })
+    await user.click(opener)
+    const dialog = screen.getByRole('dialog', { name: 'Menu điều hướng' })
+    expect(within(dialog).getByRole('button', { name: 'Đóng menu' })).toHaveFocus()
+    expect(within(dialog).queryByRole('link', { name: 'Người dùng' })).not.toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => { expect(screen.queryByRole('dialog')).not.toBeInTheDocument() })
+    expect(opener).toHaveFocus()
+    await user.click(opener)
+    await user.click(within(screen.getByRole('dialog')).getByRole('link', { name: 'Dashboard' }))
+    await waitFor(() => { expect(screen.queryByRole('dialog')).not.toBeInTheDocument() })
+    restore()
+  })
   it('shows a missing page with a Dashboard recovery link for authenticated users', async () => {
     const restore = installApiMock(() => me)
     renderApp('/missing-page')
