@@ -129,9 +129,10 @@ class CloudflareService:
                 if row.sanitized_state['phase'] in ACTIVE:
                     raise CloudflareConflict('Finish or cancel the current Cloudflare batch first')
             identity = uuid4()
+            epoch = await self.cache_epoch(session)
             row = ReviewSnapshot(id=identity, owner_user_id=self.owner, feature=FEATURE, context_key=str(identity),
                 business_day=self.day(), sanitized_state={'phase': 'CHECKING', 'urls': targets,
-                'invalid': invalid, 'duplicates': duplicates, 'record_ids': [], 'processed': 0,
+                'invalid': invalid, 'duplicates': duplicates, 'record_ids': [], 'processed': 0, 'cache_epoch': epoch,
                 'excluded_record_ids': [], 'heartbeat': self.now().isoformat(), 'delay_seconds': 30, 'current_id': None, 'error': None})
             session.add(row)
             self.audit(session, 'precheck', identity, {'url_count': len(targets)})
@@ -189,6 +190,8 @@ class CloudflareService:
                 data['phase'] = 'CANCELLED' if action == 'cancel' else 'PAUSED'
             else:
                 if row.business_day != self.day(): raise CloudflareConflict('Recheck URLs for the current day')
+                if data.get('cache_epoch', '') != await self.cache_epoch(session):
+                    raise CloudflareConflict('Cache was cleared; recheck URLs before sending')
                 if phase in {'CANCELLED', 'CHECKING', 'INTERRUPTED'}: raise CloudflareConflict('Batch cannot be started')
                 if phase in {'SENDING', 'SEND_QUEUED'}: raise CloudflareConflict('Batch is already sending')
                 if not confirmed: raise CloudflareConflict('Review the reports and confirm submission')
@@ -215,6 +218,18 @@ class CloudflareService:
                 row.sanitized_state = {**row.sanitized_state, 'phase': 'INTERRUPTED' if checking else 'WAITING_FOR_SESSION',
                     'error': 'runner_unavailable', 'heartbeat': None}
 
+    async def cache_epoch(self, session, *, reset=False):
+        row = await session.scalar(select(ReviewSnapshot).where(
+            ReviewSnapshot.owner_user_id == self.owner,
+            ReviewSnapshot.feature == 'cloudflare_cache', ReviewSnapshot.context_key == str(self.day())))
+        if reset:
+            if row is None:
+                row = ReviewSnapshot(owner_user_id=self.owner, feature='cloudflare_cache',
+                    context_key=str(self.day()), business_day=self.day(), sanitized_state={})
+                session.add(row)
+            row.sanitized_state = {'epoch': str(uuid4())}
+        return row.sanitized_state.get('epoch', '') if row else ''
+
     async def clear(self):
         async with self.factory() as session, session.begin():
             await self.lock(session)
@@ -222,6 +237,7 @@ class CloudflareService:
                 ReviewSnapshot.feature == FEATURE, ReviewSnapshot.business_day == self.day())))
             if any(row.sanitized_state['phase'] in ACTIVE for row in rows):
                 raise CloudflareConflict('Stop the current batch before clearing')
+            await self.cache_epoch(session, reset=True)
             for row in rows:
                 # Hide editable workspace, preserve records and accepted/unknown audit history.
                 row.business_day = None

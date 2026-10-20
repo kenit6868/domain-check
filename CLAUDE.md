@@ -12,6 +12,8 @@ Removed: desktop config loader/CLI/CT/brandscan, old form-browser opener, JSON b
 
 Keep RBAC/CSRF/session refresh/audit allowlists, day/account/owner scope, immutable profile/evidence/MIME hashes, SMTP intent/checkpoint/UNKNOWN and Sent reconciliation. Provider acceptance differs from HTTP command acceptance/takedown. No external send/mailbox/probe on render.
 
+Cloudflare accepted-result dedupe is owner/day/cache-epoch scoped (account timezone). Clearing today's cache rotates its epoch and hides old batches; it never overwrites accepted report records or permits commands on cleared batches. UNKNOWN/SUBMITTING stay protected across days and resets. Payload/report hashes stay bound to content; cache epoch is a separate persisted field, including the record uniqueness scope. Provider-side dedupe remains independent.
+
 Extension source is frontend/extensions/cloudflare-profile-worker. Version 3.1.0 removes localhost bridge-fetch/task tokens and the auto-submit branch; only exact-origin capability-exchanged fill_only tasks are accepted. Optional local Application origins remain supported for development. Vite packages build/dev ZIP from the manifest version. Existing unpacked Chrome IDs may depend on their old path; backend/scripts/sync_installed_extension.py can explicitly refresh an ignored installed-path copy. It never edits profiles or reloads Chrome. This is generated current-extension runtime, not a second source/application.
 
 Configuration is backend/.env and DB-owned mail settings. Keep secret/runtime directories at their current locations. backend/compose.yaml keeps the domaincheck project/volume names with env_file relative to backend.

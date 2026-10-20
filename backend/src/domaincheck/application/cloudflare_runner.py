@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from domaincheck.application.cloudflare_worker import CloudflareConflict, CloudflareService, digest
 from domaincheck.infrastructure.db.models import Artifact, CloudflareRecord, Permission, RolePermission, User, UserRole
@@ -147,7 +147,11 @@ class CloudflareRunner:
                         return
                     row.sanitized_state = {**row.sanitized_state, 'current_id': url}
                     prior = await session.scalar(select(CloudflareRecord).where(CloudflareRecord.owner_user_id == service.owner,
-                        CloudflareRecord.canonical_url_key == digest(url), CloudflareRecord.state.in_(['SUBMITTED', 'ALREADY_SUBMITTED', 'UNKNOWN', 'SUBMITTING']))
+                        CloudflareRecord.canonical_url_key == digest(url), or_(
+                            CloudflareRecord.state.in_(['UNKNOWN', 'SUBMITTING']),
+                            and_(CloudflareRecord.business_day == row.business_day,
+                                CloudflareRecord.cache_epoch == row.sanitized_state.get('cache_epoch', ''),
+                                CloudflareRecord.state.in_(['SUBMITTED', 'ALREADY_SUBMITTED']))))
                         .order_by(CloudflareRecord.created_at.desc()).limit(1))
                     if prior:
                         row.sanitized_state = {**row.sanitized_state,
@@ -173,13 +177,16 @@ class CloudflareRunner:
                             self.store.delete(storage_key=blob.storage_key)
                             return
                         record = await session.scalar(select(CloudflareRecord).where(CloudflareRecord.owner_user_id == service.owner,
-                            CloudflareRecord.business_day == row.business_day, CloudflareRecord.canonical_url_key == digest(url)))
+                            CloudflareRecord.business_day == row.business_day,
+                            CloudflareRecord.cache_epoch == row.sanitized_state.get('cache_epoch', ''),
+                            CloudflareRecord.canonical_url_key == digest(url)))
                         session.add(Artifact(id=blob.artifact_id, owner_user_id=service.owner, kind='cloudflare_worker:payload',
                             mime_type=blob.mime_type, byte_size=blob.byte_size, sha256=blob.sha256, storage_key=blob.storage_key, immutable=True))
                         if record is None:
                             record = CloudflareRecord(id=uuid4(), owner_user_id=service.owner, full_url=url,
                                 canonical_url_key=digest(url), business_day=row.business_day, report_version=digest(draft),
-                                idempotency_key=digest(f'{row.business_day}:{url}'), request_hash=blob.sha256, state=state)
+                                cache_epoch=row.sanitized_state.get('cache_epoch', ''),
+                                idempotency_key=digest(f'{row.business_day}:{url}:{row.sanitized_state.get("cache_epoch", "")}'), request_hash=blob.sha256, state=state)
                             session.add(record)
                         record.state, record.report_version, record.request_hash = state, digest(draft), blob.sha256
                         record.sanitized_result = {'artifact_id': str(blob.artifact_id), 'storage_key': blob.storage_key,

@@ -273,7 +273,72 @@ class CloudflareWorkerWebTests(unittest.IsolatedAsyncioTestCase):
         await self.svc().clear()
         self.assertIsNone((await self.svc().view())['batch'])
         newer = await self.prepared()
-        self.assertEqual((await self.svc().view(newer))['records'][0]['state'], 'SUBMITTED')
+        self.assertEqual((await self.svc().view(newer))['records'][0]['state'], 'READY')
+        self.assertEqual((await self.svc().view(identity))['records'][0]['state'], 'SUBMITTED')
+
+    async def test_daily_dedupe_resets_next_day_and_clear_preserves_history(self):
+        from unittest.mock import Mock
+        self.runner.checker = Mock(return_value={'cloudflare': True})
+        identity = await self.prepared()
+        await self.start(identity)
+        await asyncio.wait_for(asyncio.shield(self.runner.tasks[identity]), 8)
+        original = (await self.svc().view(identity))['records'][0]
+        same_day = await self.prepared()
+        self.assertTrue((await self.svc().view(same_day))['records'][0]['excluded'])
+        self.assertEqual(self.runner.checker.call_count, 1)
+        self.now += timedelta(days=1)
+        next_day = await self.prepared()
+        fresh = (await self.svc().view(next_day))['records'][0]
+        self.assertEqual(self.runner.checker.call_count, 2)
+        self.assertEqual(fresh['state'], 'READY')
+        self.assertNotEqual(fresh['id'], original['id'])
+        await self.start(next_day)
+        await asyncio.wait_for(asyncio.shield(self.runner.tasks[next_day]), 8)
+        await self.svc().clear()
+        reset = await self.prepared()
+        reset_record = (await self.svc().view(reset))['records'][0]
+        self.assertEqual(reset_record['state'], 'READY')
+        self.assertFalse(reset_record['excluded'])
+        self.assertNotEqual(reset_record['id'], fresh['id'])
+        await self.start(reset)
+        await asyncio.wait_for(asyncio.shield(self.runner.tasks[reset]), 8)
+        duplicate = await self.prepared()
+        self.assertTrue((await self.svc().view(duplicate))['records'][0]['excluded'])
+        for old in (identity, next_day, reset):
+            self.assertEqual((await self.svc().view(old))['records'][0]['state'], 'SUBMITTED')
+        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(self.runner.checker.call_count, 3)
+
+    async def test_provider_duplicate_is_scoped_to_day_and_each_cache_reset(self):
+        from domaincheck.engine.cloudflare_dashboard_session import CloudflareDashboardDuplicateError
+        identity = await self.prepared()
+        self.outcomes = [CloudflareDashboardDuplicateError('duplicate')]
+        await self.start(identity)
+        await asyncio.wait_for(asyncio.shield(self.runner.tasks[identity]), 8)
+        self.assertEqual((await self.svc().view(identity))['records'][0]['state'], 'ALREADY_SUBMITTED')
+        self.now += timedelta(days=1)
+        newer = await self.prepared()
+        self.assertEqual((await self.svc().view(newer))['records'][0]['state'], 'READY')
+        for _ in range(2):
+            await self.svc().clear()
+            reset = await self.prepared()
+            self.assertEqual((await self.svc().view(reset))['records'][0]['state'], 'READY')
+            self.assertEqual((await self.svc().view(identity))['records'][0]['state'], 'ALREADY_SUBMITTED')
+
+    async def test_clear_keeps_unknown_protected_and_blocks_old_ready_batch(self):
+        identity = await self.prepared()
+        await self.svc().clear()
+        with self.assertRaises(CloudflareConflict): await self.start(identity)
+        fresh = await self.prepared()
+        async with self.db.session_factory() as session, session.begin():
+            record = (await self.svc().rows(session, await self.svc().batch(session, fresh)))[0]
+            record.state = 'UNKNOWN'
+        await self.svc().clear()
+        self.now += timedelta(days=1)
+        newer = await self.prepared()
+        self.assertEqual((await self.svc().view(newer))['records'][0]['state'], 'UNKNOWN')
+        self.assertTrue((await self.svc().view(newer))['records'][0]['excluded'])
+        self.assertEqual(self.calls, [])
 
     async def test_api_owned_permissions_csrf_flag_and_private_runner_auth(self):
         from domaincheck.api.dependencies import current_user

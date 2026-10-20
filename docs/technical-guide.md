@@ -35,6 +35,8 @@ Provider Replies synchronization is explicit and account-scoped; parser/formatte
 
 Source: frontend/extensions/cloudflare-profile-worker. Version 3.1.0 removes the old local bridge and automatic-submit branch, retaining exact-origin token exchange and fill_only tasks. Vite emits the downloadable ZIP and embeds manifest version; bump manifest.version and rebuild FE when releasing extension changes. The browser can download/install or replace files and explicitly Reload. Never install, reload, change profiles or submit automatically.
 
+Cloudflare Worker cache: migration `0007_cloudflare_cache_epoch` adds a separate cache epoch to records and their uniqueness constraint, preserving existing history with the empty epoch. Apply `alembic upgrade head` from backend before starting updated API/runner; stop only when active jobs have drained. No live migration or worker restart is performed by a source change. Accepted-result dedupe is scoped to owner, account-local business day and current cache epoch. Clearing today's cache rotates the epoch under the owner lock and prevents sending cleared batches; subsequent precheck creates fresh records without changing old payloads/results. UNKNOWN/SUBMITTING remain protected across epochs/days. Cloudflare can independently reject a duplicate report. Downgrade refuses conflicting historical rows rather than deleting them.
+
 An existing profile may depend on chrome_extension/ as its unpacked installation path. python backend/scripts/sync_installed_extension.py refreshes that ignored generated copy to keep its ID/path working. It is not old product source. New installs can use the FE source or ZIP; confirm extension ID and exact Application origin.
 
 ## Tests and safe release

@@ -52,6 +52,11 @@ Chạy test trực tiếp và toàn bộ backend unittest cho thay đổi engine
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-10-20 — Cloudflare Worker chống trùng kết quả đã gửi theo owner/ngày/cache epoch.
+  Sang ngày mới hoặc xóa cache hôm nay cho phép check mới và xác nhận gửi lại;
+  giữ nguyên lịch sử. UNKNOWN/SUBMITTING vẫn khóa xuyên ngày/reset để đối soát.
+  Migration 0007 thêm cache epoch; không chạy migration hoặc restart worker thật.
+
 - 2026-10-18 — Gỡ ứng dụng cũ theo phạm vi web hiện có; 7 module đang dùng vào domaincheck.engine; bỏ root wrappers/compat/Streamlit/CLI desktop/PyInstaller/test legacy. Giữ 50 characterization browser/cloaking và fixture nội dung mail. Extension 3.1.0 bỏ bridge local/auto-submit, giữ task web fill_only. Backend PostgreSQL/Redis sạch + fresh wheel 374/374, frontend 154/154; build/typecheck/lint/compileall/pip check đạt. Hai cây source build độc lập, wheel khớp SHA; không đổi DB production, secret/runtime hoặc profile. Báo cáo docs/testing/web-only-cutover-2026-10-18.md.
 
 ## Recent change ? 2026-10-18

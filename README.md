@@ -58,6 +58,8 @@ CLI quản trị còn được hỗ trợ: `python -m domaincheck.cli sync-rbac`
 
 Dashboard theo quyền; Check Domain; Quick Report; Domain Worker; Cloaking Review; Domain Evidence Review; Cloudflare Worker; Check Link Status; Phản hồi NCC; Cấu hình mail; Audit Log; quản lý người dùng/role. Không khôi phục menu chỉ có ở bản cũ như Lead Triage, thống kê IMAP legacy, brand scan hoặc case-log CSV.
 
+Cloudflare Worker chống trùng URL đã gửi trong ngày theo múi giờ tài khoản. Sang ngày mới, URL được kiểm tra mới. Nút **Xóa cache kiểm tra hôm nay** bắt đầu lại cache chống trùng của ngày hiện tại, cho phép kiểm tra và xác nhận gửi lại; lịch sử report vẫn được giữ nguyên. Các URL đang gửi hoặc chưa rõ kết quả vẫn bị khóa để đối soát. Cloudflare có thể tiếp tục từ chối report trùng theo chính sách riêng của nhà cung cấp.
+
 Preview/draft tiếng Anh; evidence và SMTP ledger giữ scope user/account/ngày. Chỉ thao tác explicit mới gửi/submit hoặc đồng bộ mailbox, không thực hiện khi render/reload.
 
 ## Extension Quick Report

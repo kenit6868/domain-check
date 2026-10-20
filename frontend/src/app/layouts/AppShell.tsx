@@ -91,7 +91,7 @@ function MobileNavigation({ children }: { children: ReactNode }) {
     return () => { desktop.removeEventListener('change', closeOnDesktop) }
   }, [])
   return <Dialog.Root open={open} onOpenChange={setOpen}>
-    <Dialog.Trigger><Button className="icon-button lg:hidden" aria-label="Mở menu" aria-expanded={open}><Menu size={20} /></Button></Dialog.Trigger>
+    <span className="flex shrink-0 lg:hidden"><Dialog.Trigger><Button className="icon-button" aria-label="Mở menu" aria-expanded={open}><Menu size={20} /></Button></Dialog.Trigger></span>
     <Dialog.Content className="mobile-sidebar sidebar-panel" aria-describedby={undefined} onClick={(event) => {
       if (event.target instanceof Element && event.target.closest('a[href]')) setOpen(false)
     }}>

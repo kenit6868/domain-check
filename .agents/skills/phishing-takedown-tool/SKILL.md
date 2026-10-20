@@ -102,6 +102,13 @@ create/migrate runtime folders or write global CSV/JSON state.
   fixed codes. Keep profile/payload bindings, accepted/unknown protection and
   durable checkpoints; never resend by editing report text.
 
+- Cloudflare Worker accepted-result dedupe is owner/day/cache-epoch scoped using
+  the account timezone. New days and explicit cache clears permit fresh checks
+  and newly confirmed submissions, preserving previous records and exact hashes.
+  Cache clears rotate a separate persisted epoch under the owner lock; cleared
+  batches cannot send. UNKNOWN/SUBMITTING remain protected across days/resets;
+  never reset their outcomes or silently bypass provider-side duplicate checks.
+
 ## Quick Report and presentation
 
 - Netcraft direct API action is explicit preview-then-submit with existing guards,

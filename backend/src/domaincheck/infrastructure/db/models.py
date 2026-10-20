@@ -352,6 +352,7 @@ class CloudflareRecord(Base, IdMixin, TimestampMixin, VersionMixin):
     full_url: Mapped[str] = mapped_column(Text, nullable=False)
     canonical_url_key: Mapped[str] = mapped_column(String(128), nullable=False)
     business_day: Mapped[date] = mapped_column(Date, nullable=False)
+    cache_epoch: Mapped[str] = mapped_column(String(36), nullable=False, default='', server_default='')
     report_version: Mapped[str] = mapped_column(String(80), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -360,7 +361,7 @@ class CloudflareRecord(Base, IdMixin, TimestampMixin, VersionMixin):
     sanitized_result: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     __table_args__ = (
         ForeignKeyConstraint(["owner_user_id", "job_item_id"], ["job_items.owner_user_id", "job_items.id"], ondelete="RESTRICT"),
-        UniqueConstraint("owner_user_id", "business_day", "canonical_url_key", "report_version"),
+        UniqueConstraint("owner_user_id", "business_day", "canonical_url_key", "report_version", "cache_epoch", name="uq_cf_record_cache_epoch"),
         UniqueConstraint("owner_user_id", "idempotency_key"),
     )
 
