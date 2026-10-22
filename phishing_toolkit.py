@@ -496,6 +496,12 @@ CCTLD_REGISTRY_CONTACTS = {
     "tv": {"registry": "Verisign", "abuse_email": None, "report_webform": None, "note": "Không có kênh registry riêng — báo nhà đăng ký."},
     "best": {"registry": "domains.best", "abuse_email": None, "report_webform": "https://domains.best/contact?type=abuse", "note": "Không có kênh registry riêng — báo nhà đăng ký."},
     "bond": {"registry": "shortdot.bond", "abuse_email": None, "report_webform": "https://shortdot.bond/report-abuse", "note": "Không có kênh registry riêng — báo nhà đăng ký."},
+    "hk.com":   {"registry": "UDR Limited", "abuse_email": None, "report_webform": "https://www.udr.hk.com/report-abuse", "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của UDR"},
+    "hk.org":   {"registry": "UDR Limited", "abuse_email": None, "report_webform": "https://www.udr.hk.com/report-abuse", "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của UDR"},
+    "ltd.hk":   {"registry": "UDR Limited", "abuse_email": None, "report_webform": "https://www.udr.hk.com/report-abuse", "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của UDR"},
+    "inc.hk":   {"registry": "UDR Limited", "abuse_email": None, "report_webform": "https://www.udr.hk.com/report-abuse", "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của UDR"},
+    "africa.com":   {"registry": "DNS Africa / Gateway SRS", "abuse_email": "abuse@dns.business", "report_webform": None, "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của DNS Africa / Gateway SRS"},
+    "radio.am":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
 }
 
 # Bảng tĩnh abuse email của các registrar phổ biến — dùng làm fallback khi WHOIS không trả về email.
