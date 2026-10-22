@@ -25,17 +25,19 @@ BLOCKED_KEYS = frozenset({
 })
 
 
-def validate_target(value: str) -> tuple[str, str]:
+def validate_target(value: str, *, allow_fragment: bool = False) -> tuple[str, str]:
     from domaincheck.application.quick_reports import canonical_target
 
     raw = value.strip()
     original = urlsplit(raw if "://" in raw else f"https://{raw}")
-    if original.username or original.password or original.fragment:
-        raise ValueError("Check Domain target cannot contain userinfo or a fragment")
+    if original.username is not None or original.password is not None:
+        raise ValueError("Target URL cannot contain userinfo")
+    if original.fragment and not allow_fragment:
+        raise ValueError("Target URL cannot contain a fragment")
     canonical, host = canonical_target(value)
+    if allow_fragment and original.fragment:
+        canonical += f"#{original.fragment}"
     parsed = urlsplit(canonical)
-    if parsed.username or parsed.password or parsed.fragment:
-        raise ValueError("Check Domain target cannot contain userinfo or a fragment")
     if parsed.port not in (None, 80, 443):
         raise ValueError("Check Domain target port must be 80 or 443")
     try:

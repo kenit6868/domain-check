@@ -30,6 +30,35 @@ function view(path = '/domain-worker') { return render(<QueryClientProvider clie
   <Theme><MemoryRouter initialEntries={[path]}><AppRouter /></MemoryRouter></Theme></QueryClientProvider>) }
 afterEach(() => { cleanup(); sessionStorage.clear(); vi.restoreAllMocks() })
 
+it('explicitly clears the negative contact cache without starting a precheck', async () => {
+  let clears = 0
+  let creates = 0
+  const restore = installApiMock((config) => {
+    if (config.url === '/me') return { ...me, permissions: [...me.permissions, 'domain_worker.clear_cache'] }
+    if (config.url === '/domain-worker/workspace') return { business_day: '2026-10-22', current_id: null, send_job_id: null, phase: 'idle', locked: false, history: [] }
+    if (config.url === '/domain-worker/accounts') return accounts
+    if (config.url === '/domain-worker/readiness') return { ready: true, missing: [] }
+    if (config.url === '/domain-worker/cache/clear' && config.method === 'post') {
+      clears += 1
+      return { business_day: '2026-10-22', cleared_count: 2 }
+    }
+    if (config.url === '/domain-worker/prechecks') { creates += 1; return operation }
+    throw new Error(`Unexpected ${config.url ?? ''}`)
+  })
+  try {
+    view()
+    const clear = await screen.findByRole('button', { name: 'Xóa cache không có email' })
+    await waitFor(() => { expect(clear).toBeEnabled() })
+    expect(clears).toBe(0)
+    await userEvent.type(screen.getByLabelText('Danh sách URL'), 'https://example.com/')
+    await userEvent.click(clear)
+    expect(await screen.findByText(/Đã xóa cache 2 kết quả/)).toBeVisible()
+    expect(screen.getByLabelText('Danh sách URL')).toHaveValue('https://example.com/')
+    expect(clears).toBe(1)
+    expect(creates).toBe(0)
+  } finally { restore() }
+})
+
 it('drops yesterday URL and saved selection but allows explicitly opening history', async () => {
   sessionStorage.setItem(key, operationId)
   const calls: string[] = []

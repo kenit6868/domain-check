@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 import { Button } from '../../components/shared/Button'
 import type { Me } from '../auth/types'
-import { closePrecheck, controlPrecheck, createPrecheck, getWorkerAccounts, getWorkerWorkspace, getPrecheck, getReadiness, getSendSummary, type WorkerOperation } from './api'
+import { clearWorkerCache, closePrecheck, controlPrecheck, createPrecheck, getWorkerAccounts, getWorkerWorkspace, getPrecheck, getReadiness, getSendSummary, type WorkerOperation } from './api'
 import { SendBatchPanel } from './SendBatchPanel'
 import { PrecheckProgress } from './WorkerProgress'
 
@@ -74,8 +74,12 @@ export function DomainWorkerPage() {
     onSuccess: (data) => { client.setQueryData(queryKey, data); void client.invalidateQueries({ queryKey: workspaceKey }) } })
   const close = useMutation({ mutationFn: () => closePrecheck(id), onSuccess: (data) => {
     client.setQueryData(queryKey, data); void client.invalidateQueries({ queryKey: workspaceKey }) } })
+  const clearCache = useMutation({ mutationFn: clearWorkerCache, onSuccess: () => {
+    setSubmission(null)
+    void client.invalidateQueries({ queryKey: workspaceKey })
+  } })
   const processing = Boolean(workspace.data?.locked) || Boolean(operation.data?.is_current_day && active.has(operation.data.state))
-  const busy = create.isPending || control.isPending || close.isPending || processing || !workspace.isSuccess
+  const busy = clearCache.isPending || create.isPending || control.isPending || close.isPending || processing || !workspace.isSuccess
   const filtered = submission?.noJob ? submission.summary : operation.data?.input_summary
   const sendSummary = useQuery({ queryKey: ['domain-worker-send-summary', me.id, id], enabled: false,
     queryFn: ({ signal }) => getSendSummary(id, signal) })
@@ -103,11 +107,15 @@ export function DomainWorkerPage() {
         placeholder="Mỗi dòng một full URL, tối đa 100 URL" onChange={(event) => { setInput(event.target.value) }} /></label>
       <div className="flex flex-wrap items-center gap-2"><Button className="primary-button" type="submit" loading={create.isPending}
         disabled={busy || !input.trim() || !selectedAccounts.length || selectedAccounts.length > 100 || !accounts.isSuccess || !readiness.data?.ready || !me.permissions.includes('domain_worker.precheck')}>Precheck danh sách</Button>
-        <span className="text-xs text-slate-500">URL trùng được gộp; giữ nguyên path/query và thứ tự nhập.</span></div>
+        {me.permissions.includes('domain_worker.clear_cache') && <Button type="button" disabled={busy} loading={clearCache.isPending}
+          onClick={() => { clearCache.mutate() }}>Xóa cache không có email</Button>}
+        <span className="text-xs text-slate-500">URL trùng được gộp; giữ nguyên path/query và thứ tự nhập. Xóa cache để kiểm tra lại domain đã bị bỏ qua vì không có email hôm nay.</span></div>
       {readiness.isPending && <p role="status" className="text-xs">Đang kiểm tra hồ sơ tổ chức…</p>}
       {readiness.isError && <p className="error-notice" role="alert">Không tải được hồ sơ. <Button onClick={() => { void readiness.refetch() }}>Thử lại</Button></p>}
       {readiness.data && !readiness.data.ready && <p className="text-xs text-amber-700 dark:text-amber-300">Cần hoàn thiện thương hiệu, tên và email liên hệ tại <Link className="underline" to="/settings/mail">cấu hình mail</Link> trước khi precheck.</p>}
     </form>
+    {clearCache.isSuccess && <p role="status" className="data-panel p-3 text-sm">Đã xóa cache {clearCache.data.cleared_count} kết quả không có email trong ngày. Bạn có thể precheck lại; lịch sử và trạng thái gửi được giữ nguyên.</p>}
+    {clearCache.error && <p role="alert" className="error-notice">{clearCache.error.message}</p>}
     {(create.error || control.error || close.error) && <p role="alert" className="error-notice">{(create.error ?? control.error ?? close.error)?.message}</p>}
     {submission?.noJob && <p role="status" className="data-panel p-3 text-sm">{submission.summary?.processing_count ? 'Không tạo job mới: còn mục chưa rõ kết quả gửi, cần đối soát trước khi tiếp tục.' : submission.summary?.no_email_count ? 'Không có domain mới cần precheck. Các domain đã kiểm tra hôm nay không có email hoặc đã gửi thành công. Không tạo job mới.' : 'Tất cả domain đã gửi thành công trong ngày. Không tạo job mới.'}</p>}
     {filtered && <section className="data-panel p-3 text-xs" aria-label="Kết quả lọc danh sách">

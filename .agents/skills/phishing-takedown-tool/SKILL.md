@@ -62,9 +62,20 @@ create/migrate runtime folders or write global CSV/JSON state.
 
 ## Domain Worker and review
 
+- Explicit Domain Worker negative-contact cache clear uses existing
+  domain_worker.clear_cache permission, CSRF and owner batch lock. Invalidate
+  only today's excluded_no_email cache provenance, retain original checks and
+  all delivery/evidence history. Reject active/paused/awaiting-send batches.
+  No clear means the existing daily no-email reuse remains; never use reset to
+  bypass sent/sending/unknown protections or automatically enqueue a new check.
+
 - v4 precheck resolves contacts and cloaking in parallel by full URL. No-email
   cases are excluded before review; normal cases need valid Browser Evidence to
   become ready. Cloaking/evidence-review cases never enter automatic normal send.
+- Domain Worker accepts fragment routes such as /wap/#/register. Preserve the
+  fragment in URL identity, precheck, review and browser navigation; do not strip
+  it to pass validation. Continue denying userinfo and private egress. Existing
+  evidence URL secret redaction remains in place.
 - Account scope is chosen before precheck and retained in job/review sources.
   Workspace restores only today's work using backend account timezone; stale
   query/storage selection cannot restore yesterday automatically. Historical

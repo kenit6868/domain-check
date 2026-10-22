@@ -52,6 +52,16 @@ Chạy test trực tiếp và toàn bộ backend unittest cho thay đổi engine
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-10-22 — Domain Worker có nút xóa cache không có email trong ngày của owner.
+  Chỉ invalidate provenance, giữ kết quả/lịch sử và khóa delivery sent/unknown.
+  Dùng quyền clear_cache có sẵn, CSRF và batch lock; không reset khi còn batch
+  active/paused/awaiting-send. Không cần migration hoặc đổi grant.
+
+- 2026-10-21 — Domain Worker nhận URL có fragment như `/wap/#/register`,
+  giữ route trong identity/precheck/review và browser navigation. Egress vẫn chặn
+  userinfo/private host; giữ redaction URL evidence. Không cần migration hoặc
+  build FE; worker đang chạy cần nạp lại code sau khi hoàn tất job.
+
 - 2026-10-20 — Cloudflare Worker chống trùng kết quả đã gửi theo owner/ngày/cache epoch.
   Sang ngày mới hoặc xóa cache hôm nay cho phép check mới và xác nhận gửi lại;
   giữ nguyên lịch sử. UNKNOWN/SUBMITTING vẫn khóa xuyên ngày/reset để đối soát.

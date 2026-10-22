@@ -23,6 +23,12 @@ API startup seeds the permission catalog under the existing transaction/advisory
 
 Domain Worker workspace restores only today's work according to backend account timezone. Prior batches remain history/read-only; new-day work requires precheck again. Do not delete jobs to clear the UI. Active locks/checkpoints survive the day boundary until safe stop/recovery.
 
+Domain Worker accepts browser fragment routes such as `https://example.com/wap/#/register`.
+The full route is retained for URL identity, precheck, review and browser navigation;
+existing evidence URL secret redaction still applies. The 2026-10-21 input fix needs
+no migration or frontend build. Source workers must load the updated code: let active
+jobs finish, stop the supervisor gracefully and start it again with `python -m domaincheck`.
+
 ## Evidence and delivery
 
 HTTP cloaking compares profiles before isolated passive browser verification. Confirmed cloaking needs validated approved evidence; no-email cases never enter review. Normal Browser Evidence and cloaking evidence are separate. Verified navigation remains the existing opt-in constrained browser flow. Never enter credentials, submit forms or download files during capture.
@@ -54,3 +60,17 @@ Double-click backend/run_all_workers.bat once to start both the all-job worker a
 From backend run .venv/Scripts/python.exe -m domaincheck, or double-click backend/run_backend.bat. This runs API + per-type workers + Cloudflare runner with inherited logs and environment under one development supervisor. PostgreSQL/Redis and FE remain separate. Pass --reload for API-only development reload; restart the stack when worker code changes. A child exit stops the development stack with nonzero status. Ctrl+C/SIGTERM signals child groups and waits without forced termination. Guard port 8790 prevents duplicate supervisors on the same host (override --supervisor-port consistently if needed). It cannot detect workers launched manually: stop those when idle first. No production processes are restarted by this code change. --dry-run prints commands only. Raw uvicorn and individual worker launchers remain for explicit separate-service deployment, never combined with this supervisor.
 
 Production team deployment now has independent API/worker/Cloudflare/FE services under compose.production.yaml, migration-before-start, graceful worker drain, private artifact storage and worker health. Use [the team deployment guide](team-deployment.md) as the current production procedure; the earlier worker-only shortcuts are optional tools for explicitly split local deployments. Existing host artifacts must be migrated explicitly before switching to the new volume. No automatic copy or live cutover is performed by source changes.
+
+## Xóa cache không có email — Domain Worker
+
+Sau khi bổ sung địa chỉ email liên hệ cho domain, bấm **Xóa cache không có email**
+rồi chạy **Precheck danh sách**. Backend bỏ hiệu lực kết quả không có email của
+chính người dùng trong ngày theo timezone tài khoản. Không bấm xóa thì giữ cách
+lọc cũ. Không tự tạo job hay gửi email khi xóa.
+
+API: `POST /api/v1/domain-worker/cache/clear`, quyền `domain_worker.clear_cache`
+đã có trong catalog; kiểm tra CSRF và khóa batch tại backend. Trả 409 nếu batch
+đang chạy, tạm dừng hoặc còn chờ gửi. Hoàn thành/kết thúc batch trước khi xóa.
+Kết quả cũ vẫn nằm trong lịch sử; sent/unknown/sending và evidence không bị xóa.
+Không cần migration; nạp code BE/worker sau khi job đang có hoàn tất và build FE
+khi triển khai. Không thay grant tự động.

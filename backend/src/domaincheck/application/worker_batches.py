@@ -176,7 +176,7 @@ async def filter_sent_inputs(session, owner, day, accounts, parsed):
             reason = 'already_sent'; summary['sent_count'] += 1
         elif expected and all(state in {'sent', 'sending', 'unknown'} for state in expected):
             reason = 'uncertain_delivery'; summary['processing_count'] += 1
-        elif not keys.get(domain) and (previous := latest.get(domain)) is not None and previous.status == 'succeeded' and previous.result.get('disposition') == 'excluded_no_email' and not valid_recipients(previous.result.get('recipients') or []):
+        elif not keys.get(domain) and (previous := latest.get(domain)) is not None and previous.status == 'succeeded' and previous.result.get('disposition') == 'excluded_no_email' and not previous.cache_provenance.get('no_email_cache_cleared_at') and not valid_recipients(previous.result.get('recipients') or []):
             reason = 'no_email'; summary['no_email_count'] += 1
         if reason:
             summary['excluded'].append({'requested_url': url[:512], 'reason': reason})

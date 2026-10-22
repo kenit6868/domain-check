@@ -40,6 +40,18 @@ class EgressPolicyTests(unittest.TestCase):
         with self.assertRaises(EgressDenied):
             policy.validate_url("https://example.com/asset")
 
+    def test_fragment_routes_allow_public_hosts_without_bypassing_egress_guards(self):
+        policy = PublicEgressPolicy(resolver=lambda *_a, **_k: ["93.184.216.34"])
+        self.assertTrue(policy.browser_request_allowed('https://example.com/wap/#/register'))
+        for target in ('https://127.0.0.1/#/register', 'https://example.com:8080/#/register',
+                       'https://user:pass@example.com/#/register', 'https://@example.com/#/register',
+                       'file:///etc/passwd#/register'):
+            with self.subTest(target=target), self.assertRaises(EgressDenied):
+                policy.validate_url(target)
+        private = PublicEgressPolicy(resolver=lambda *_a, **_k: ['127.0.0.1'])
+        with self.assertRaises(EgressDenied):
+            private.validate_url('https://example.com/wap/#/register')
+
     def test_redirect_to_private_address_is_blocked_before_second_request(self):
         policy = PublicEgressPolicy(self.proxy, resolver=lambda *_a, **_k: ["93.184.216.34"])
         response = SimpleNamespace(status_code=302, headers={"Location": "http://127.0.0.1/private"},

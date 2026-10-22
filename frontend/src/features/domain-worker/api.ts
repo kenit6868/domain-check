@@ -12,6 +12,10 @@ const operation = z.object({ id: z.uuid(), state: z.string(), stage: z.string(),
     excluded: z.array(z.object({ requested_url: z.string(), reason: z.string() })) }).nullable().optional() })
 export type WorkerOperation = z.infer<typeof operation>
 export type WorkerItem = z.infer<typeof item>
+export async function clearWorkerCache() {
+  return z.object({ business_day: z.string(), cleared_count: z.number() }).parse(
+    await request({ url: '/domain-worker/cache/clear', method: 'POST' }))
+}
 export async function createPrecheck(targets: string[], senderAccountIds: string[]) {
   return operation.extend({ id: z.uuid().nullable(), no_job: z.boolean().optional() }).parse(await request({ url: '/domain-worker/prechecks', method: 'POST', data: { targets, sender_account_ids: senderAccountIds } }))
 }

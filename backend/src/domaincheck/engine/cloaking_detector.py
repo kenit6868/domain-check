@@ -135,7 +135,7 @@ def _ensure_url(target: str) -> str:
         parsed = urlsplit(value)
     if not parsed.hostname:
         return ""
-    return urlunsplit((parsed.scheme.lower(), parsed.netloc, parsed.path or "/", parsed.query, ""))
+    return urlunsplit((parsed.scheme.lower(), parsed.netloc, parsed.path or "/", parsed.query, parsed.fragment))
 
 
 def _vi_vn_url(target_url: str) -> str:

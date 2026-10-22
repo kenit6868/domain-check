@@ -40,11 +40,32 @@ class DomainWorkerService:
         return JobService(self.session, owner_user_id=self.owner, actor_user_id=self.actor,
                           request_id=self.request_id)
 
+    async def clear_no_email_cache(self):
+        """Invalidate only today's negative contact cache; retain all history."""
+        await guard_batch(self.session, self.owner, self.now, self.timezone)
+        day = business_day(self.now, self.timezone)
+        rows = list(await self.session.scalars(select(Check).where(
+            Check.owner_user_id == self.owner, Check.workflow == 'domain_worker',
+            Check.business_day == day, Check.status == 'succeeded',
+            Check.result['disposition'].astext == 'excluded_no_email').with_for_update()))
+        count = 0
+        for check in rows:
+            if valid_recipients(check.result.get('recipients') or []) or check.cache_provenance.get('no_email_cache_cleared_at'):
+                continue
+            check.cache_provenance = {**check.cache_provenance, 'no_email_cache_cleared_at': self.now.isoformat()}
+            check.version += 1
+            count += 1
+        from domaincheck.infrastructure.db.models import AuditEvent
+        self.session.add(AuditEvent(owner_user_id=self.owner, actor_user_id=self.actor,
+            action='domain_worker.clear_cache', resource_type='domain_worker', outcome='success',
+            metadata_allowlist={'business_day': str(day), 'cleared_count': count}, request_id=self.request_id))
+        return {'business_day': str(day), 'cleared_count': count}
+
     async def create(self, targets: list[str], sender_account_ids: list[UUID] | None = None) -> WorkerOperation:
         if not 1 <= len(targets) <= 100:
             raise ValueError("Enter between 1 and 100 URLs")
         await guard_batch(self.session, self.owner, self.now, self.timezone)
-        parsed = [validate_target(value) for value in targets]
+        parsed = [validate_target(value, allow_fragment=True) for value in targets]
         accounts = list(dict.fromkeys(sender_account_ids or []))
         if accounts:
             rows = await OwnedRepository(self.session, SenderAccount, self.owner).list(

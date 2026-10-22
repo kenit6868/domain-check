@@ -553,7 +553,7 @@ class CloakingDetectorTests(unittest.TestCase):
         browser = FakeBrowser()
         with tempfile.TemporaryDirectory() as directory:
             result = cd.probe_playwright_cloaking(
-                "https://example.test/", evidence_root=directory,
+                "https://example.test/#/register", evidence_root=directory,
                 _playwright_factory=lambda: FakePlaywright(browser),
             )
             self.assertEqual(result["verdict"], "LIKELY")
@@ -577,7 +577,7 @@ class CloakingDetectorTests(unittest.TestCase):
             browser.contexts[3].kwargs["extra_http_headers"]["Sec-CH-UA-Mobile"], "?1",
         )
         self.assertEqual(
-            browser.contexts[3].page.goto_args[0], "https://example.test/",
+            browser.contexts[3].page.goto_args[0], "https://example.test/#/register",
         )
 
     def test_playwright_likely_upgrades_http_possible(self):

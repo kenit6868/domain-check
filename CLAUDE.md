@@ -12,6 +12,8 @@ Removed: desktop config loader/CLI/CT/brandscan, old form-browser opener, JSON b
 
 Keep RBAC/CSRF/session refresh/audit allowlists, day/account/owner scope, immutable profile/evidence/MIME hashes, SMTP intent/checkpoint/UNKNOWN and Sent reconciliation. Provider acceptance differs from HTTP command acceptance/takedown. No external send/mailbox/probe on render.
 
+Domain Worker explicitly accepts browser fragment routes (for example /wap/#/register), retaining them in full URL identity, precheck, review and browser navigation. Other callers retain their existing input policy. Cloaking URL normalization preserves fragments; public egress validates the actual scheme/host/port/DNS independently of the fragment and still denies userinfo (including empty userinfo). Existing evidence URL secret redaction remains in place. No history, engine version or migration changes are needed for this input fix.
+
 Cloudflare accepted-result dedupe is owner/day/cache-epoch scoped (account timezone). Clearing today's cache rotates its epoch and hides old batches; it never overwrites accepted report records or permits commands on cleared batches. UNKNOWN/SUBMITTING stay protected across days and resets. Payload/report hashes stay bound to content; cache epoch is a separate persisted field, including the record uniqueness scope. Provider-side dedupe remains independent.
 
 Extension source is frontend/extensions/cloudflare-profile-worker. Version 3.1.0 removes localhost bridge-fetch/task tokens and the auto-submit branch; only exact-origin capability-exchanged fill_only tasks are accepted. Optional local Application origins remain supported for development. Vite packages build/dev ZIP from the manifest version. Existing unpacked Chrome IDs may depend on their old path; backend/scripts/sync_installed_extension.py can explicitly refresh an ignored installed-path copy. It never edits profiles or reloads Chrome. This is generated current-extension runtime, not a second source/application.
@@ -29,3 +31,12 @@ Team deployment uses compose.yaml + compose.production.yaml with separate indepe
 worker slots default 2/2/2/2/1 for quick_report/check_domain/domain_worker_precheck/domain_worker_send/browser_evidence; capture remains opt-in. `all` now uses independent polling tasks and includes capture. Each worker shares a bounded DB pool (5+2). CLI workers checkpoint/yield after WORKER_ITEMS_PER_TURN=1, preserving the job and completed items; diagnostic --once retains one-operation behavior. Failed counts are derived from persisted items across turns. Cloudflare limits concurrent per-URL steps to 2 with a private semaphore, releases capacity while paused/delayed, and retains task heartbeat and Cookie isolation. claim_next(fair_owner=True) serializes the short claim transaction under advisory lock 7348291741284, excludes a live same-owner/type batch and orders by the owner's last service across batches before job order. A new batch cannot bypass a waiting owner. No network call occurs under that claim lock. Migration 0006 adds queue/owner indexes only.
 
 Worker SIGINT/SIGTERM drains after the current item, requeues pending items on the same leased job and preserves checkpoints. Domain send retains one-domain-per-claim and uncertain-delivery ledger. Redis slot heartbeat (5s/20s TTL) exposes only permitted group names/state/count at authenticated health/workers. health/ready is DB/cache readiness, distinct from process liveness/worker availability. FE polls every 15s and warns on offline/draining/unknown. Background slot limits do not globally throttle direct review/capture/IMAP/SMTP requests. See docs/team-deployment.md.
+
+## Domain Worker negative-contact cache reset (2026-10-22)
+
+Explicit `POST /api/v1/domain-worker/cache/clear` requires existing
+`domain_worker.clear_cache`, active user, trusted origin and CSRF. Under the
+owner batch lock, invalidate only today's succeeded excluded_no_email checks
+via cache provenance; retain original results/history and delivery protections.
+Busy/paused/awaiting-send batches reject reset. Ordinary precheck retains cached
+negative contacts until explicit reset or the next account-local business day.

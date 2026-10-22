@@ -440,6 +440,48 @@ Capture scope: the destination URL was opened directly from the observed markup;
         await DomainPrecheckWorker(self.db.session_factory, Adapter(), now=lambda: self.now).run_next('only-ef')
         self.assertEqual(observed, ['e.example.com', 'f.example.com'])
 
+    async def test_clear_negative_cache_preserves_history_scope_and_delivery_guards(self):
+        from domaincheck.application.worker_batches import filter_sent_inputs
+        from domaincheck.infrastructure.db.models import Check
+        urls = ['https://a.example.com/', 'https://b.example.com/']
+        source = await self.precheck(urls, no_email_domains={'a.example.com'})
+        await self.start(source, interval_seconds=0)
+        await self.worker.run_next('send-before-clear')
+        async with self.db.session_factory() as session, session.begin():
+            service = DomainWorkerService(session, owner=self.owner, actor=self.owner,
+                timezone='Asia/Bangkok', request_id='test', now=self.now)
+            parsed = [(url, url.split('/')[2]) for url in urls]
+            self.assertEqual((await filter_sent_inputs(session, self.owner, self.now.date(), [self.account], parsed))[0], [])
+            checks = list(await session.scalars(select(Check).where(Check.owner_user_id == self.owner)))
+            original = {row.id: dict(row.result) for row in checks}
+            for owner, now in [(self.other, self.now), (self.owner, self.now + timedelta(days=1))]:
+                other_service = DomainWorkerService(session, owner=owner, actor=owner,
+                    timezone='Asia/Bangkok', request_id='test', now=now)
+                self.assertEqual((await other_service.clear_no_email_cache())['cleared_count'], 0)
+            self.assertEqual((await service.clear_no_email_cache())['cleared_count'], 1)
+            self.assertEqual((await service.clear_no_email_cache())['cleared_count'], 0)
+            self.assertEqual({row.id: row.result for row in checks}, original)
+            accepted, summary = await filter_sent_inputs(session, self.owner, self.now.date(), [self.account], parsed)
+            self.assertEqual(accepted, [parsed[0]])
+            self.assertEqual(summary['sent_count'], 1)
+            delivery = await session.scalar(select(Delivery).where(Delivery.owner_user_id == self.owner))
+            delivery.state = 'unknown'; await session.flush()
+            self.assertEqual((await filter_sent_inputs(session, self.owner, self.now.date(), [self.account], parsed))[1]['processing_count'], 1)
+            refreshed = await service.create([urls[0]], [self.account])
+            refreshed_id = refreshed.job.id
+            with self.assertRaises(JobConflict):
+                await service.clear_no_email_cache()
+        class UpdatedContacts:
+            def run(_self, target, domain):
+                return {'recipients': [{'channel': 'registrar', 'email': 'new-contact@example.com'}],
+                    'cloaking': {'verdict': 'NO_SIGNAL'}}
+        await DomainPrecheckWorker(self.db.session_factory, UpdatedContacts(), now=lambda: self.now).run_next('fresh-contacts')
+        async with self.db.session_factory() as session:
+            service = DomainWorkerService(session, owner=self.owner, actor=self.owner,
+                timezone='Asia/Bangkok', request_id='test', now=self.now)
+            refreshed = await service.get(refreshed_id)
+            self.assertEqual(refreshed.checks[0].result['recipients'][0]['email'], 'new-contact@example.com')
+
     async def test_failed_or_contradictory_no_email_result_is_not_cached(self):
         from domaincheck.infrastructure.db.models import Check
         from domaincheck.application.worker_batches import filter_sent_inputs

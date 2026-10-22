@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from domaincheck.api.domain_worker import serialize
 from domaincheck.application.domain_worker import DomainPrecheckWorker, DomainWorkerService, WorkerNotFound
 from domaincheck.core.worker_precheck import DomainWorkerPrecheckAdapter, disposition, email_examples, valid_recipients
+from domaincheck.core.investigation import validate_target
 from domaincheck.infrastructure.artifacts import FilesystemArtifactStore
 from domaincheck.infrastructure.db.models import CaseSource, Check, ReviewCase, User
 from domaincheck.infrastructure.db.session import Database
@@ -27,6 +28,16 @@ from domaincheck.ports.artifacts import ImageUpload
 
 
 class WorkerCoreTests(unittest.TestCase):
+    def test_fragment_routes_keep_path_query_and_safety_checks(self):
+        target = 'https://Example.COM/wap/?inviteCode=123#/register'
+        self.assertEqual(validate_target(target, allow_fragment=True),
+            ('https://example.com/wap/?inviteCode=123#/register', 'example.com'))
+        for target in ('https://user:pass@example.com/#/register',
+                       'https://@example.com/#/register', 'https://127.0.0.1/#/register',
+                       'https://host.local/#/register', 'https://example.com:8080/#/register'):
+            with self.subTest(target=target), self.assertRaises(ValueError):
+                validate_target(target, allow_fragment=True)
+
     def test_classification_fails_closed_and_no_email_never_queues_cloaking(self):
         recipient = [{"channel": "registrar", "email": "abuse@example.com"}]
         for verdict in ("LIKELY", "POSSIBLE", "INCONCLUSIVE", "UNRECOGNIZED", None):
@@ -54,7 +65,7 @@ class WorkerCoreTests(unittest.TestCase):
         def probe(target, **kwargs):
             barrier.wait(timeout=3)
             self.assertIsNone(kwargs["evidence_root"])
-            self.assertEqual(target, "https://example.com/login?a=1")
+            self.assertEqual(target, "https://example.com/login?a=1#/register")
             return {"verdict": "POSSIBLE", "evidence_path": "private", "password": "secret"}
         with patch.object(toolkit, "get_whois_info", side_effect=who), \
              patch.object(toolkit, "get_rdap_abuse_email", return_value={}), \
@@ -64,7 +75,7 @@ class WorkerCoreTests(unittest.TestCase):
              patch.object(detector, "probe_http_cloaking", side_effect=probe), \
              patch.object(toolkit, "run_check", side_effect=AssertionError("full pipeline")), \
              patch("builtins.open", side_effect=AssertionError("unexpected global file IO")):
-            result = DomainWorkerPrecheckAdapter().run("https://example.com/login?a=1", "example.com")
+            result = DomainWorkerPrecheckAdapter().run("https://example.com/login?a=1#/register", "example.com")
         self.assertEqual(result["disposition"], "cloaking_review")
         self.assertEqual(result["recipients"][0]["email"], "abuse@namecheap.com")
         self.assertNotIn("private", str(result))
@@ -131,6 +142,12 @@ class WorkerApiPermissionTests(unittest.IsolatedAsyncioTestCase):
             response = await client.post('/api/v1/domain-worker/prechecks', headers=headers,
                 json={'targets': ['https://example.com/']})
             self.assertEqual(response.status_code, 403)
+            response = await client.post('/api/v1/domain-worker/cache/clear', headers=headers)
+            self.assertEqual(response.status_code, 403)
+            actor.permissions.add('domain_worker.clear_cache')
+            for invalid in ({}, {'Origin': 'https://untrusted.example', 'X-CSRF-Token': 'fixture-csrf'}):
+                response = await client.post('/api/v1/domain-worker/cache/clear', headers=invalid)
+                self.assertEqual(response.status_code, 403)
             actor.permissions.add('domain_worker.precheck')
             for invalid in ({}, {'Origin': 'https://untrusted.example', 'X-CSRF-Token': 'fixture-csrf'}):
                 response = await client.post('/api/v1/domain-worker/prechecks', headers=invalid,
@@ -155,6 +172,39 @@ class WorkerIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def svc(self, session, owner=None):
         return DomainWorkerService(session, owner=owner or self.a, actor=owner or self.a,
             timezone="Asia/Bangkok", request_id="test", now=self.now)
+
+    async def test_fragment_routes_remain_distinct_through_precheck_capture_and_review(self):
+        targets = ['https://example.com/wap/#/register', 'https://example.com/wap/#/login',
+                   'https://example.com/wap/', 'https://example.com/home?inviteCode=123']
+        probed, captured = [], []
+        class Adapter:
+            def run(_self, target, domain):
+                probed.append(target)
+                cloak = {'verdict': 'POSSIBLE' if target.endswith('#/login') else 'NO_SIGNAL'}
+                return {'recipients': [{'channel': 'registrar', 'email': 'abuse@example.com'}],
+                    'cloaking': cloak, 'disposition': 'evidence_review'}
+        class Capture:
+            def capture(_self, target, **kwargs):
+                captured.append(target)
+                data = io.BytesIO(); Image.new('RGB', (10, 10)).save(data, format='PNG')
+                return [ImageUpload('source.png', 'image/png', data.getvalue())], {'terminal': False}
+        async with self.db.session_factory() as session, session.begin():
+            op = await self.svc(session).create(targets + [targets[0]])
+            job_id = op.job.id
+            self.assertEqual([check.requested_url for check in op.checks], targets)
+            self.assertEqual(len({check.target_id for check in op.checks}), len(targets))
+        with tempfile.TemporaryDirectory() as directory:
+            worker = DomainPrecheckWorker(self.db.session_factory, Adapter(),
+                store=FilesystemArtifactStore(Path(directory)), capture=Capture(), now=lambda: self.now)
+            await worker.run_next('fragment-route-test')
+        self.assertEqual(probed, targets)
+        self.assertEqual(captured, [target for target in targets if not target.endswith('#/login')])
+        async with self.db.session_factory() as session:
+            op = await self.svc(session).get(job_id)
+            self.assertEqual([check.result['disposition'] for check in op.checks],
+                ['ready', 'cloaking_review', 'ready', 'ready'])
+            cases = list(await session.scalars(select(ReviewCase).where(ReviewCase.owner_user_id == self.a)))
+            self.assertEqual({case.full_url for case in cases}, {targets[1]})
 
     async def test_batch_order_owner_no_email_queue_dedupe_and_evidence_gate(self):
         class Adapter:

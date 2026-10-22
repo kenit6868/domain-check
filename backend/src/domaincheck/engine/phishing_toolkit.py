@@ -362,6 +362,12 @@ CCTLD_REGISTRY_CONTACTS = {
             "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6",
             "note": "Áp dụng cho 35+ TLD của XYZ (monster, quest, baby, cars, beauty, hair, homes, game, lol, mom, pics, hosting, audio, diet, ceo...). Nhiều domain cùng lúc gửi email xyz_abuse@gen.xyz. Hiệu quả — thường hôm sau bị khoá.",
     },
+    "cn.com": {
+            "registry": "XYZ.COM LLC",
+            "abuse_email": "xyz_abuse@gen.xyz",
+            "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6",
+            "note": "Áp dụng cho 35+ TLD của XYZ (monster, quest, baby, cars, beauty, hair, homes, game, lol, mom, pics, hosting, audio, diet, ceo...). Nhiều domain cùng lúc gửi email xyz_abuse@gen.xyz. Hiệu quả — thường hôm sau bị khoá.",
+    },
     # XYZ TLD family — cùng registry/abuse contact với .xyz
     "monster":  {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
     "quest":    {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
@@ -378,12 +384,31 @@ CCTLD_REGISTRY_CONTACTS = {
     "audio":    {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
     "diet":     {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
     "ceo":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "auto":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "autos":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "boats":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "car":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "christmas":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "college":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "flowers":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "guitars":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "makeup":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "motorcycles":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "protection":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "rent":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "security":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "skin":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "storage":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "theatre":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "tickets":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
+    "yachts":      {"registry": "XYZ.COM LLC", "abuse_email": "xyz_abuse@gen.xyz", "report_webform": "https://gen.xyz/account/submitticket.php?step=2&deptid=6", "note": None},
     # CentralNic 2-level domains — không phải ccTLD thật, dùng report_webform chung
-    "uk.com":   {"registry": "CentralNic", "abuse_email": None, "report_webform": "https://www.centralnicregistry.com/contact", "note": "Chọn mục Report Abuse. Không phải ccTLD UK — đừng gửi Nominet."},
-    "jpn.com":  {"registry": "CentralNic", "abuse_email": None, "report_webform": "https://www.centralnicregistry.com/contact", "note": "Không phải ccTLD JP — đừng gửi JPRS."},
-    "jp.net":   {"registry": "CentralNic", "abuse_email": None, "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
-    "in.net":   {"registry": "CentralNic", "abuse_email": None, "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
-    "com.co":   {"registry": "CentralNic", "abuse_email": None, "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
+    "uk.com":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": "Chọn mục Report Abuse. Không phải ccTLD UK — đừng gửi Nominet."},
+    "jpn.com":  {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": "Không phải ccTLD JP — đừng gửi JPRS."},
+    "jp.net":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
+    "in.net":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
+    "com.co":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
+    "radio.am":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
     # Alias 2 cấp — trỏ về registry của TLD cha
     "co.in":    {"registry": "NIXI", "note": "Hay không hồi âm — nên đi đường nhà đăng ký."},
     "co.jp":    {"registry": "JPRS", "abuse_email": "abuse@jprs.jp", "note": "Đòi hỏi xác thực nhãn hiệu đăng ký tại Nhật Bản."},
@@ -411,6 +436,11 @@ CCTLD_REGISTRY_CONTACTS = {
     "tv": {"registry": "Verisign", "abuse_email": None, "report_webform": None, "note": "Không có kênh registry riêng — báo nhà đăng ký."},
     "best": {"registry": "domains.best", "abuse_email": None, "report_webform": "https://domains.best/contact?type=abuse", "note": "Không có kênh registry riêng — báo nhà đăng ký."},
     "bond": {"registry": "shortdot.bond", "abuse_email": None, "report_webform": "https://shortdot.bond/report-abuse", "note": "Không có kênh registry riêng — báo nhà đăng ký."},
+    "hk.com":   {"registry": "UDR Limited", "abuse_email": None, "report_webform": "https://www.udr.hk.com/report-abuse", "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của UDR"},
+    "hk.org":   {"registry": "UDR Limited", "abuse_email": None, "report_webform": "https://www.udr.hk.com/report-abuse", "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của UDR"},
+    "ltd.hk":   {"registry": "UDR Limited", "abuse_email": None, "report_webform": "https://www.udr.hk.com/report-abuse", "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của UDR"},
+    "inc.hk":   {"registry": "UDR Limited", "abuse_email": None, "report_webform": "https://www.udr.hk.com/report-abuse", "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của UDR"},
+    "africa.com":   {"registry": "DNS Africa / Gateway SRS", "abuse_email": "abuse@dns.business", "report_webform": None, "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của DNS Africa / Gateway SRS"},
 }
 
 # Bảng tĩnh abuse email của các registrar phổ biến — dùng làm fallback khi WHOIS không trả về email.
@@ -937,7 +967,7 @@ def get_cert_info(domain: str, port: int = 443, timeout: float = 8.0):
 FAKE_TLD_SUFFIXES = {
     "ru.com", "uk.com", "us.com", "eu.com", "gb.com", "gb.net", "de.com",
     "jpn.com", "sa.com", "se.com", "kr.com", "no.com", "qc.com", "br.com",
-    "cn.com", "hu.com", "za.com", "uy.com",
+    "cn.com", "hu.com", "za.com", "uy.com", "radio.am"
 }
 
 

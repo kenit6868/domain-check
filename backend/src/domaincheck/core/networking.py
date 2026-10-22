@@ -90,7 +90,8 @@ class PublicEgressPolicy:
             raise EgressDenied("egress_url_invalid") from exc
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise EgressDenied("egress_url_invalid")
-        if parsed.username or parsed.password or parsed.fragment:
+        # A fragment selects a browser route; it does not change the network host.
+        if parsed.username is not None or parsed.password is not None:
             raise EgressDenied("egress_url_invalid")
         if port not in (None, 80, 443):
             raise EgressDenied("egress_port_denied")

@@ -163,6 +163,17 @@ async def worker_workspace(request: Request, response: Response, session: AsyncS
     return await workspace_state(session, actor.user_id, request.app.state.clock.now(), actor.timezone)
 
 
+@router.post('/cache/clear')
+async def clear_worker_cache(request: Request, response: Response,
+    session: AsyncSession = Depends(get_db_session),
+    actor=Depends(require_permission('domain_worker.clear_cache', csrf=True))):
+    response.headers['Cache-Control'] = 'private, no-store'
+    try:
+        return await service(session, actor, request).clear_no_email_cache()
+    except JobConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.post('/prechecks/{operation_id}/close')
 async def close_precheck(operation_id: UUID, request: Request, response: Response,
     session: AsyncSession = Depends(get_db_session), actor=Depends(require_permission('domain_worker.stop', csrf=True))):
