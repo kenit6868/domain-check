@@ -45,6 +45,16 @@ create/migrate runtime folders or write global CSV/JSON state.
   do not prove domain takedown. Keep OS DNS/public/mixed-IP guards and per-redirect
   checks; bound DNS and probes. Request-local streamed results are not DB history;
   reload clears them, recheck probes fresh, no CSV export.
+  Extract registration names with the offline PSL PRIVATE section, preserving
+  the label above radio.am/africa.com and other private suffixes. Never query
+  parent public RDAP to establish a private child's registration status. Only
+  fixed supported WHOIS routes with an exact Domain Name match may establish
+  private EPP hold; unsupported/missing/mismatched responses stay UNKNOWN.
+  Keep the original website host/URL for DNS/HTTP and handle bare suffix roots
+  as their own public registrations.
+  Launch both probe and nested WHOIS subprocesses with the explicit module
+  domaincheck.core.link_status; __name__ becomes __main__ under -m. Validate
+  changes to this boundary through real subprocesses using offline fixtures.
 - Cloaking always probes HTTP profiles first. Playwright is passive verification,
   includes Googlebot Smartphone and preserves the approved representative pair.
   Terminal Cloudflare/DNS/browser pages are not cloaking; all-terminal results
@@ -121,6 +131,16 @@ create/migrate runtime folders or write global CSV/JSON state.
   never reset their outcomes or silently bypass provider-side duplicate checks.
 
 ## Quick Report and presentation
+
+- WHOIS lookup results expose only explicitly labelled registrar abuse contacts,
+  never an arbitrary email collected from the record. For radio.am/radio.fm,
+  query each registered third-level name at the fixed CentralNic WHOIS endpoint;
+  reject missing/mismatched records and never substitute the parent registration.
+  Registrars vary between names under the same private suffix. Keep WHOIS reads
+  bounded and never follow arbitrary referral hosts. Quick Report resolves
+  explicit WHOIS abuse, RDAP, then static fallback and retains the RDAP registrar
+  for form routing. New checks use the v2 registrar-abuse cache policy; retain
+  historical engine bindings, previews and delivery records.
 
 - Netcraft direct API action is explicit preview-then-submit with existing guards,
   no extra confirmation added by refactor. Other form actions remain fill-only;

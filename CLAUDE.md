@@ -6,6 +6,31 @@ Shared checking, browser/cloaking, mail parsing/formatting and Cloudflare code b
 
 Adapters: DomainQuickReportAdapter, DomainInvestigationAdapter, DomainWorkerPrecheckAdapter, EngineBrowserCaptureAdapter, ImapSentCopyAdapter. Preserve persisted engine/policy identifiers (even historic legacy-* strings): they bind caches/previews/fingerprints. Never rewrite old jobs, grants, snapshots or delivery history to rename code.
 
+Registrar contact correction (2026-10-23): the shared WHOIS boundary exposes
+only explicitly labelled Registrar Abuse Contact Email values as emails and
+abuse_email; generic registrant/admin/technical emails are not report contacts.
+radio.am/radio.fm registrations use an exact third-level-name lookup against
+the fixed CentralNic WHOIS server, with domain-match validation and bounded
+reads. Never infer a registrar from the private suffix or query its parent for
+the child's contact. Quick Report uses explicit WHOIS abuse, then RDAP, then
+static fallback, preserving a recovered RDAP registrar for form routing.
+New Quick Report checks bind legacy-run-cdn-check-v2-registrar-abuse because the
+contact policy changed; old engine bindings/results/previews stay immutable.
+
+Link Status registration identities use the bundled offline PSL with PRIVATE
+rules, preserving station.radio.am, station.africa.com and similar registrable
+names. A bare private suffix still uses its own public-domain registration.
+Private registrations bypass parent-TLD IANA RDAP and query only explicitly
+supported fixed WHOIS routes; validate Domain Name before accepting EPP status.
+Unsupported/unavailable/mismatched private records stay UNKNOWN, never parent
+hold/not-found. DNS/HTTP use the original website host/URL and retain public
+egress/redirect validation. Link Status remains stateless with no result cache.
+Both Link Status subprocess layers must launch the explicit module
+domaincheck.core.link_status, not __name__: a probe launched with -m runs as
+__main__ and otherwise breaks its nested WHOIS child. Regression tests must
+exercise real nested subprocesses with offline fixtures, not only imported
+functions or mocked subprocess results.
+
 Engine imports do not read config.ini, create/migrate runtime folders or write JSON/CSV caches. run_check takes explicit config and rejects persistent/file-draft/combined-capture options. Evidence lives in explicit staging/private artifacts. Provider engine contains parsing/reply formatting; IMAP and sending belong to application services with existing owner/account/permission guards.
 
 Removed: desktop config loader/CLI/CT/brandscan, old form-browser opener, JSON batch/review/cache sender, CSV logging and duplicate mail helpers. Browser/cloaking characterizations now live in backend/tests. Frozen dummy draft/HTML fixtures preserve pre-cutover content without shipping old file writers just for comparison.

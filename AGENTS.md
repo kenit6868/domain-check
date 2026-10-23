@@ -52,6 +52,24 @@ Chạy test trực tiếp và toàn bộ backend unittest cho thay đổi engine
 
 ## Trạng thái thay đổi gần đây
 
+- 2026-10-23 — Link Status sửa module subprocess cố định, không dùng `__name__`
+  khi tiến trình đang chạy dưới `__main__`. WHOIS fallback trong lượt check tổng
+  nhận lại trạng thái đăng ký/hold. Test dùng hai tầng subprocess thật và fixture
+  offline; giữ độc lập DNS/HTTP. Không cần migration/build FE, chưa restart API.
+
+- 2026-10-23 — Link Status dùng PSL PRIVATE offline để giữ tên đăng ký như
+  `ten.radio.am`/`ten.africa.com`. WHOIS private tra đúng tên tại route cố định,
+  xác thực Domain Name; không dùng RDAP public hoặc trạng thái domain cha để
+  kết luận cho tên con. Không có nguồn phù hợp thì UNKNOWN; DNS/HTTP vẫn dùng
+  URL/host gốc. Không cần migration/build FE, nạp lại API khi triển khai.
+
+- 2026-10-23 — Sửa contact registrar: WHOIS chỉ giữ email được ghi rõ là abuse,
+  không lấy email admin/registrant. `.radio.am`/`.radio.fm` tra đúng tên đăng ký
+  tại CentralNic, không tra domain cha hoặc gán một registrar cho cả suffix.
+  Quick Report giữ registrar từ RDAP và hỏi RDAP trước bảng email tĩnh khi thiếu
+  contact. Check mới dùng cache policy v2; không đổi lịch sử hoặc delivery.
+  Không cần migration/build FE; nạp code BE/worker sau khi job hiện tại hoàn tất.
+
 - 2026-10-22 — Domain Worker có nút xóa cache không có email trong ngày của owner.
   Chỉ invalidate provenance, giữ kết quả/lịch sử và khóa delivery sent/unknown.
   Dùng quyền clear_cache có sẵn, CSRF và batch lock; không reset khi còn batch

@@ -13,6 +13,8 @@ GUIDANCE_SMOKE = '''
 from domaincheck.core.link_status import registered_domain, classify
 from domaincheck.api.link_status import router as link_status_router
 assert registered_domain('https://a.example.co.uk/path') == 'example.co.uk'
+assert registered_domain('https://a.fixture.radio.am/path') == 'fixture.radio.am'
+assert registered_domain('https://a.fixture.africa.com/path') == 'fixture.africa.com'
 assert classify(404, {}, '')[0] == 'URL_NOT_FOUND'
 assert classify(403, {'cf-mitigated':'challenge'}, '')[0] == 'CF_CHALLENGE'
 from domaincheck.core.report_guidance import build_report_guidance

@@ -21,8 +21,19 @@ import tldextract
 from domaincheck.core.investigation import validate_target
 from domaincheck.core.networking import EgressDenied, PublicEgressPolicy
 
-_extract = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None)
+_extract = tldextract.TLDExtract(suffix_list_urls=(), cache_dir=None,
+                               include_psl_private_domains=True)
 HOLD = {'clienthold', 'serverhold'}
+_PROBE_MODULE = 'domaincheck.core.link_status'
+
+# Explicit registry routes, never arbitrary WHOIS referrals or a registrar
+# inferred from the private suffix. Other PRIVATE suffixes remain UNKNOWN.
+_CENTRALNIC_SUFFIXES = frozenset({
+    'radio.am', 'radio.fm', 'africa.com', 'ae.org', 'br.com', 'cn.com',
+    'com.de', 'com.se', 'de.com', 'eu.com', 'gb.net', 'gr.com', 'hu.net',
+    'in.net', 'jp.net', 'jpn.com', 'mex.com', 'ru.com', 'sa.com', 'se.net',
+    'uk.com', 'uk.net', 'us.com', 'us.org', 'za.com',
+})
 
 
 def system_addresses(host):
@@ -58,7 +69,11 @@ def link_policy():
 def registered_domain(value):
     host = urlsplit(value if '://' in value else 'https://' + value).hostname or ''
     host = host.encode('idna').decode('ascii').lower().rstrip('.')
-    return _extract(host).top_domain_under_public_suffix
+    extracted = _extract(host)
+    # The namespace itself (radio.am) is a public .am registration, unlike a
+    # separately registered name underneath it (station.radio.am).
+    return (extracted.top_domain_under_public_suffix or
+            _extract(host, include_psl_private_domains=False).top_domain_under_public_suffix)
 
 
 def unknown(url, reason='probe_failed'):
@@ -93,7 +108,11 @@ def read_json(response):
 
 def registration(domain, endpoints):
     result = {'state': 'UNKNOWN', 'source': '', 'statuses': [], 'hold_flags': []}
-    endpoint = endpoints.get(domain.rsplit('.', 1)[-1], '')
+    extracted = _extract(domain)
+    private = bool(extracted.is_private and extracted.domain)
+    # IANA .com/.am RDAP describes the parent public namespace. A 404 there
+    # cannot establish non-registration of a privately registered child.
+    endpoint = '' if private else endpoints.get(domain.rsplit('.', 1)[-1], '')
     if endpoint:
         try:
             # Trusted bootstrap, but validate every response redirect before following it.
@@ -123,9 +142,11 @@ def registration(domain, endpoints):
     # RDAP "inactive" alone does not establish a specific EPP hold.
     if result['state'] in {'UNKNOWN', 'REGISTERED'} and not result['hold_flags']:
         try:
-            completed = subprocess.run([sys.executable, '-m', __name__, 'whois'], input=domain,
+            completed = subprocess.run([sys.executable, '-m', _PROBE_MODULE, 'whois'], input=domain,
                 capture_output=True, text=True, encoding='utf-8', timeout=9)
             data = json.loads(completed.stdout)
+            if private and data.get('domain') != domain:
+                raise ValueError('whois_domain_mismatch')
             statuses = data['statuses']
             flags = sorted({v.split()[0].lower() for v in statuses if v.split()} & HOLD)
             if flags or result['state'] == 'UNKNOWN':
@@ -134,6 +155,27 @@ def registration(domain, endpoints):
         except Exception:
             pass
     return result
+
+
+def whois_observation(domain):
+    """Child-process WHOIS: validate private registration identity before status."""
+    extracted = _extract(domain)
+    if extracted.is_private and extracted.domain:
+        result = {'domain': domain, 'statuses': []}
+        if extracted.suffix not in _CENTRALNIC_SUFFIXES:
+            return result
+        from domaincheck.engine.phishing_toolkit import query_whois_server, _whois_fields
+        fields = _whois_fields(query_whois_server('whois.centralnic.com', domain))
+        names = fields.get('domain name', [])
+        if not names or any(name.casefold().rstrip('.') != domain for name in names):
+            return result
+        values = fields.get('domain status', [])
+    else:
+        import whois
+        data = whois.whois(domain, timeout=5, quiet=True)
+        values = data.get('status') or []
+    return {'domain': domain,
+            'statuses': [str(v)[:150] for v in ([values] if isinstance(values, str) else values)][:30]}
 
 
 def dns_status(host, resolver=None):
@@ -254,7 +296,7 @@ def inspect_link(value, endpoints=None):
 
 def check_bounded(url):
     try:
-        completed = subprocess.run([sys.executable, '-m', __name__],
+        completed = subprocess.run([sys.executable, '-m', _PROBE_MODULE],
             input=json.dumps({'url': url, 'endpoints': bootstrap()}), capture_output=True,
             text=True, encoding='utf-8', timeout=45)
         if completed.returncode != 0: return unknown(url)
@@ -268,10 +310,7 @@ def main():
         raw = sys.stdin.read(65536)
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             if sys.argv[-1] == 'whois':
-                import whois
-                data = whois.whois(raw, timeout=5)
-                values = data.get('status') or []
-                result = {'statuses': [str(v)[:150] for v in ([values] if isinstance(values, str) else values)][:30]}
+                result = whois_observation(raw)
             else:
                 data = json.loads(raw)
                 result = inspect_link(data['url'], data['endpoints'])

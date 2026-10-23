@@ -11,6 +11,7 @@ import random
 import re
 import socket
 import ssl
+import time
 from datetime import datetime, timezone
 from email.utils import getaddresses
 from urllib.parse import urlparse
@@ -775,16 +776,11 @@ def resolve_quick_report_recipients(
     registry_contact = registry_contact if isinstance(registry_contact, dict) else {}
     rdap = rdap if isinstance(rdap, dict) else {}
     registrar = str(who.get("registrar") or rdap.get("registrar") or "").strip()
-    whois_emails = who.get("emails") or []
+    # Generic WHOIS emails can be registrant/admin contacts, not abuse handlers.
+    whois_emails = who.get("abuse_email") or []
     if isinstance(whois_emails, str):
         whois_emails = [whois_emails]
-    usable_whois = [
-        str(value).strip()
-        for value in whois_emails
-        if str(value).strip()
-        and not any(private in str(value).lower() for private in WHOIS_PRIVACY_DOMAINS)
-        and not is_blocked_report_recipient(str(value))
-    ]
+    usable_whois = _registrar_abuse_emails(whois_emails)
 
     recipients = []
     registrar_uses_webform = bool(
@@ -793,7 +789,7 @@ def resolve_quick_report_recipients(
     if not registrar_uses_webform:
         registrar_email = ", ".join(usable_whois)
         if not registrar_email:
-            registrar_email = str(rdap.get("abuse_email") or "").strip()
+            registrar_email = ", ".join(_registrar_abuse_emails(rdap.get("abuse_email")))
         if not registrar_email and registrar:
             registrar_email = lookup_registrar_abuse_email(registrar) or ""
         if registrar_email and not is_blocked_report_recipient(registrar_email):
@@ -863,6 +859,10 @@ def get_rdap_abuse_email(domain: str) -> dict:
 
     KHÔNG raise exception — lỗi trả về trong key "error".
     """
+    if _private_registry_target(domain):
+        # The public .am/.fm bootstrap describes the parent ccTLD registry, not
+        # registrations in the independently operated radio namespace.
+        return {"error": "Private radio registrations use their registry WHOIS"}
     if requests is None:
         return {"error": "requests library not available"}
 
@@ -967,11 +967,67 @@ def get_cert_info(domain: str, port: int = 443, timeout: float = 8.0):
 FAKE_TLD_SUFFIXES = {
     "ru.com", "uk.com", "us.com", "eu.com", "gb.com", "gb.net", "de.com",
     "jpn.com", "sa.com", "se.com", "kr.com", "no.com", "qc.com", "br.com",
-    "cn.com", "hu.com", "za.com", "uy.com", "radio.am"
+    "cn.com", "hu.com", "za.com", "uy.com"
 }
 
 
+_PRIVATE_REGISTRY_WHOIS = {
+    "radio.am": "whois.centralnic.com",
+    "radio.fm": "whois.centralnic.com",
+}
+
+
+def _private_registry_target(domain: str) -> tuple[str, str] | None:
+    host = domain.lower().rstrip(".")
+    for suffix, server in _PRIVATE_REGISTRY_WHOIS.items():
+        if host.endswith(f".{suffix}"):
+            return ".".join(host.split(".")[-3:]), server
+    return None
+
+
+def _registrar_abuse_emails(value) -> list[str]:
+    values = value if isinstance(value, (list, tuple)) else [value or ""]
+    emails = []
+    for _, email in getaddresses([str(item) for item in values]):
+        if (re.fullmatch(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", email)
+                and not any(private in email.casefold() for private in WHOIS_PRIVACY_DOMAINS)
+                and not is_blocked_report_recipient(email)
+                and email.casefold() not in {item.casefold() for item in emails}):
+            emails.append(email)
+    return emails
+
+
+def _whois_fields(raw: str) -> dict[str, list[str]]:
+    fields = {}
+    for line in raw.splitlines():
+        match = re.match(r"^([A-Za-z][A-Za-z ]+):\s*(.*?)\s*$", line)
+        if match:
+            fields.setdefault(match[1].casefold(), []).append(match[2])
+    return fields
+
+
+def _private_registry_whois(domain: str, server: str) -> dict:
+    fields = _whois_fields(query_whois_server(server, domain))
+    # Do not accept parent-domain records or infer contacts after a failed lookup.
+    names = fields.get("domain name", [])
+    if not names or any(name.casefold().rstrip(".") != domain for name in names):
+        return {"error": "Private registry WHOIS record is unavailable or mismatched"}
+    emails = _registrar_abuse_emails(fields.get("registrar abuse contact email", []))
+    return {
+        "registrar": next(iter(fields.get("registrar", [])), None),
+        "creation_date": next(iter(fields.get("creation date", [])), None),
+        "expiration_date": next(iter(fields.get("registry expiry date", [])), None),
+        "name_servers": fields.get("name server", []),
+        "status": fields.get("domain status", []),
+        "emails": emails,
+        "abuse_email": ", ".join(emails) or None,
+    }
+
+
 def whois_query_domain(domain: str) -> str:
+    private = _private_registry_target(domain)
+    if private:
+        return private[0]
     parts = domain.lower().split(".")
     if len(parts) > 2 and ".".join(parts[-2:]) in FAKE_TLD_SUFFIXES:
         return ".".join(parts[-2:])
@@ -979,16 +1035,24 @@ def whois_query_domain(domain: str) -> str:
 
 
 def get_whois_info(domain: str):
+    private = _private_registry_target(domain)
+    if private:
+        return _private_registry_whois(*private)
     if whois is None:
         return {"error": "python-whois chưa được cài (pip install python-whois)"}
     try:
-        w = whois.whois(whois_query_domain(domain))
+        w = whois.whois(whois_query_domain(domain), inc_raw=True, timeout=10, quiet=True)
+        # Retain only explicitly labelled abuse contacts; raw WHOIS and its
+        # unqualified collection of personal emails never leave this boundary.
+        fields = _whois_fields(str(w.get("raw") or ""))
+        emails = _registrar_abuse_emails(fields.get("registrar abuse contact email", []))
         return {
             "registrar": w.get("registrar"),
             "creation_date": str(w.get("creation_date")),
             "expiration_date": str(w.get("expiration_date")),
             "name_servers": w.get("name_servers"),
-            "emails": w.get("emails"),
+            "emails": emails,
+            "abuse_email": ", ".join(emails) or None,
             "status": w.get("status"),
         }
     except Exception as e:
@@ -1060,14 +1124,25 @@ def query_whois_server(server: str, query: str, timeout: float = 8.0) -> str:
     server chỉ định, python-whois không hỗ trợ việc này). decode utf-8 với errors="ignore" vì
     WHOIS server của registry nước ngoài có thể trả về ký tự khó decode.
     """
+    if timeout <= 0 or any(char in query for char in "\r\n\x00"):
+        return ""
+    deadline = time.monotonic() + timeout
     try:
         with socket.create_connection((server, 43), timeout=timeout) as sock:
             sock.sendall(f"{query}\r\n".encode())
             chunks = []
+            size = 0
             while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return ""
+                sock.settimeout(remaining)
                 data = sock.recv(4096)
                 if not data:
                     break
+                size += len(data)
+                if size > 1024 * 1024:
+                    return ""
                 chunks.append(data)
         return b"".join(chunks).decode("utf-8", errors="ignore")
     except Exception:
@@ -2270,19 +2345,16 @@ def run_cdn_check(target: str, cfg: dict | None = None) -> dict:
         cdn_detected = []
     # Tra TLD registry từ bảng tĩnh (không cần mạng, không fallback IANA)
     registry_contact = _static_registry_lookup(domain)
-    report_recipients = resolve_quick_report_recipients(
-        domain, who=who, registry_contact=registry_contact, rdap={},
-    )
     registrar_uses_webform = bool(
         registrar and any(key in registrar.lower() for key in WEB_FORM_REGISTRARS)
     )
-    if not registrar_uses_webform and not any(
-        item.get("channel") == "registrar" for item in report_recipients
-    ):
-        report_recipients = resolve_quick_report_recipients(
-            domain, who=who, registry_contact=registry_contact,
-            rdap=get_rdap_abuse_email(domain),
-        )
+    rdap = {}
+    if not registrar_uses_webform and (not registrar or not _registrar_abuse_emails(who.get("abuse_email"))):
+        rdap = get_rdap_abuse_email(domain)
+        registrar = registrar or rdap.get("registrar")
+    report_recipients = resolve_quick_report_recipients(
+        domain, who=who, registry_contact=registry_contact, rdap=rdap,
+    )
     cloaking = run_cloaking_check(target, mode="full", cfg=cfg)
     return {
         "domain": domain,

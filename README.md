@@ -64,6 +64,15 @@ Dashboard theo quyền; Check Domain; Quick Report; Domain Worker; Cloaking Revi
 
 Cloudflare Worker chống trùng URL đã gửi trong ngày theo múi giờ tài khoản. Sang ngày mới, URL được kiểm tra mới. Nút **Xóa cache kiểm tra hôm nay** bắt đầu lại cache chống trùng của ngày hiện tại, cho phép kiểm tra và xác nhận gửi lại; lịch sử report vẫn được giữ nguyên. Các URL đang gửi hoặc chưa rõ kết quả vẫn bị khóa để đối soát. Cloudflare có thể tiếp tục từ chối report trùng theo chính sách riêng của nhà cung cấp.
 
+Quick Report chỉ dùng email WHOIS được ghi rõ là contact abuse của registrar;
+các tên `.radio.am`/`.radio.fm` được tra riêng, không dùng contact của domain cha.
+Sau khi nạp bản sửa registrar 2026-10-23, nhập lại URL và bấm **Kiểm tra** để lấy
+kết quả theo policy mới; lịch sử cũ không tự đổi. Xem [hướng dẫn kỹ thuật](docs/technical-guide.md).
+
+Check Link Status giữ đúng tên đăng ký dưới các đuôi riêng như `.radio.am` và
+`.africa.com`. Sau khi nạp bản sửa backend, bấm kiểm tra lại để lấy dữ liệu mới;
+trạng thái WHOIS không suy luận từ domain cha khi thiếu bản ghi của tên cần tra.
+
 Preview/draft tiếng Anh; evidence và SMTP ledger giữ scope user/account/ngày. Chỉ thao tác explicit mới gửi/submit hoặc đồng bộ mailbox, không thực hiện khi render/reload.
 
 ## Extension Quick Report

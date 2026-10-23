@@ -74,3 +74,61 @@ API: `POST /api/v1/domain-worker/cache/clear`, quyền `domain_worker.clear_cach
 Kết quả cũ vẫn nằm trong lịch sử; sent/unknown/sending và evidence không bị xóa.
 Không cần migration; nạp code BE/worker sau khi job đang có hoàn tất và build FE
 khi triển khai. Không thay grant tự động.
+
+## Registrar và email abuse — cập nhật 2026-10-23
+
+WHOIS chỉ dùng trường `Registrar Abuse Contact Email` cho email báo cáo; không
+suy luận email admin, kỹ thuật hoặc registrant là email abuse. Quick Report ưu
+tiên contact WHOIS được xác định rõ, rồi RDAP, cuối cùng bảng email tĩnh. Nếu
+RDAP bổ sung registrar, kết quả và form báo cáo đều dùng tên tìm được đó.
+
+Các tên trong `.radio.am`/`.radio.fm` đăng ký qua nhiều registrar khác nhau.
+Backend tra đúng tên cấp ba tại `whois.centralnic.com:43`, kiểm tra domain trong
+response; không dùng WHOIS của `radio.am` để chọn contact cho một tên bên dưới.
+Nếu không tìm thấy đúng bản ghi thì không suy luận contact từ domain cha.
+Truy vấn có deadline 8 giây và response tối đa 1 MiB, không theo referral tùy ý.
+
+Check Quick Report mới dùng engine/cache policy
+`legacy-run-cdn-check-v2-registrar-abuse`, vì vậy không dùng lại Redis result từ
+policy v1. Lịch sử, check cũ, preview và trạng thái đã gửi/chưa rõ kết quả gửi
+không bị sửa hoặc tự chạy lại. Muốn cập nhật một kết quả cũ, nhập lại URL và bấm
+Kiểm tra sau khi API/worker đã nạp code mới. Job đã tạo trước cập nhật vẫn giữ
+engine binding cũ; không restart khi đang có job. Không cần migration hoặc build
+FE cho bản sửa này. Domain Worker vẫn giữ quy tắc cache/review/delivery riêng;
+bản sửa không tự reset batch hay gửi lại email.
+
+## Link Status và đuôi đăng ký riêng — cập nhật 2026-10-23
+
+Link Status dùng Public Suffix List offline kèm phần PRIVATE. Ví dụ:
+
+| URL/host | Tên tra đăng ký |
+| --- | --- |
+| `www.ten.radio.am/path` | `ten.radio.am` |
+| `login.ten.africa.com/path` | `ten.africa.com` |
+| `ten.uk.com` | `ten.uk.com` |
+| `www.example.co.uk` | `example.co.uk` |
+| `radio.am` | `radio.am` — bản thân domain gốc |
+
+Namespace private có WHOIS route được hỗ trợ sẽ được hỏi trực tiếp ở tên đăng
+ký, tránh python-whois tự rút thành domain cha. Response phải có Domain Name
+trùng khớp trước khi dùng `clientHold`/`serverHold`. Không hỏi RDAP `.am`/`.com`
+của IANA để kết luận cho registration private. Namespace chưa có route, lookup
+lỗi hoặc response sai tên trả registration `UNKNOWN`, không suy luận hold hoặc
+chưa đăng ký từ domain cha. Các route là danh sách cố định trong
+`core/link_status.py`, không tự theo WHOIS referral bất kỳ.
+
+DNS và HTTP vẫn kiểm tra hostname/URL gốc cùng các guard private IP, mixed DNS,
+redirect và timeout. Website hoạt động được vẫn có thể hiện HTTP OK khi trạng
+thái đăng ký chưa xác định; các quan sát này độc lập.
+
+Không cần migration, build FE hoặc reset cache. Nạp lại API khi triển khai rồi
+bấm kiểm tra lại; Link Status không lưu kết quả giữa các lượt. Không restart
+worker đang có job chỉ để thử thay đổi này.
+
+Link Status có hai tầng subprocess: tiến trình kiểm tra tổng và WHOIS fallback.
+Cả hai gọi module cố định `domaincheck.core.link_status`. Bản dùng `__name__`
+trước đó có thể gọi nhầm `python -m __main__ whois`, khiến WHOIS luôn UNKNOWN
+trong lượt kiểm tra tổng dù tra riêng có dữ liệu. Nạp lại API với bản sửa rồi
+bấm kiểm tra lại; không cần đổi timeout HTTP hoặc restart worker để xử lý lỗi
+gọi module này. Nếu WHOIS hợp lệ nhưng HTTP timeout, hai trạng thái vẫn được
+hiển thị độc lập.

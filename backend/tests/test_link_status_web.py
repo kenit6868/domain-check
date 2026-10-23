@@ -1,7 +1,12 @@
 import asyncio
 import json
+import io
+import os
+from pathlib import Path
 import subprocess
 import socket
+import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -17,6 +22,52 @@ from domaincheck.core.networking import EgressDenied
 
 
 class LinkStatusCoreTests(unittest.TestCase):
+    def test_module_entrypoint_runs_nested_whois_with_offline_network_fixtures(self):
+        # A real -m process (and its real WHOIS child) is necessary here:
+        # imported-function mocks cannot expose __name__ becoming __main__.
+        fixture = '''
+import os, socket, requests, whois
+from domaincheck.engine import phishing_toolkit
+domain = os.environ['DOMAINCHECK_LINK_FIXTURE_DOMAIN']
+status = os.environ['DOMAINCHECK_LINK_FIXTURE_STATUS']
+def no_network(*args, **kwargs):
+    raise AssertionError('Unexpected live network')
+def timeout(*args, **kwargs):
+    raise requests.ReadTimeout('Fixture HTTP timeout')
+socket.create_connection = no_network
+socket.getaddrinfo = lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('93.184.216.34', 443))]
+requests.get = timeout
+whois.whois = lambda *a, **k: {'status': [status]}
+phishing_toolkit.query_whois_server = lambda *a, **k: f'Domain Name: {domain.upper()}\\nDomain Status: {status}\\n'
+'''
+        cases = [('fixture.com', 'clientHold', 'HOLD'),
+                 ('fixture.radio.am', 'serverHold', 'HOLD'),
+                 ('fixture.africa.com', 'clientTransferProhibited', 'REGISTERED'),
+                 ('fixture.com', 'ok', 'REGISTERED')]
+        with tempfile.TemporaryDirectory(prefix='link-status-entrypoint-') as cwd:
+            Path(cwd, 'sitecustomize.py').write_text(fixture, encoding='utf-8')
+            for domain, status, expected in cases:
+                env = {**os.environ, 'PYTHONPATH': cwd,
+                       'DOMAINCHECK_LINK_FIXTURE_DOMAIN': domain,
+                       'DOMAINCHECK_LINK_FIXTURE_STATUS': status}
+                url = f'https://{domain}/path?q=1'
+                with self.subTest(domain=domain, status=status):
+                    completed = subprocess.run([sys.executable, '-m', 'domaincheck.core.link_status'],
+                        input=json.dumps({'url': url, 'endpoints': {}}), env=env, cwd=cwd,
+                        capture_output=True, text=True, encoding='utf-8', timeout=15)
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    result = json.loads(completed.stdout)
+                    self.assertEqual(result['domain'], domain)
+                    self.assertEqual(result['registration']['state'], expected)
+                    self.assertEqual(result['registration']['source'], 'WHOIS')
+                    self.assertEqual(result['registration']['statuses'], [status])
+                    self.assertEqual(result['registration']['hold_flags'],
+                                     [status.lower()] if expected == 'HOLD' else [])
+                    self.assertEqual(result['dns']['state'], 'RESOLVES')
+                    self.assertEqual(result['website_status'], 'TIMEOUT')
+                    self.assertEqual(result['final_url'], url)
+                    self.assertEqual(result['status'], 'DOMAIN_HOLD' if expected == 'HOLD' else 'TIMEOUT')
+
     def test_system_dns_works_when_direct_dns_is_unavailable(self):
         addresses = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('93.184.216.34', 443))]
         with patch.object(core.socket, 'getaddrinfo', return_value=addresses), patch.object(core.dns.resolver, 'Resolver', side_effect=AssertionError('direct DNS must not gate HTTP')):
@@ -56,6 +107,98 @@ class LinkStatusCoreTests(unittest.TestCase):
         self.assertEqual(core.registered_domain('https://a.shop.example.com.vn/login'), 'example.com.vn')
         self.assertEqual(core.registered_domain('https://a.example.co.uk/path?q=1'), 'example.co.uk')
         self.assertEqual(core.registered_domain('https://bücher.de'), 'xn--bcher-kva.de')
+
+    def test_private_registry_names_keep_the_registered_label(self):
+        for host, expected in [
+            ('fixture.radio.am', 'fixture.radio.am'),
+            ('www.fixture.radio.am', 'fixture.radio.am'),
+            ('fixture.radio.fm', 'fixture.radio.fm'),
+            ('login.fixture.africa.com', 'fixture.africa.com'),
+            ('fixture.uk.com', 'fixture.uk.com'),
+            ('www.fixture.ru.com', 'fixture.ru.com'),
+            ('fixture.github.io', 'fixture.github.io'),
+            ('radio.am', 'radio.am'), ('africa.com', 'africa.com'),
+            ('www.example.co.uk', 'example.co.uk'),
+            ('sub.bücher.africa.com', 'xn--bcher-kva.africa.com'),
+        ]:
+            with self.subTest(host=host):
+                self.assertEqual(core.registered_domain(f'https://{host}/login?q=1'), expected)
+
+    def test_private_whois_queries_exact_name_and_returns_only_statuses(self):
+        import whois
+        from domaincheck.engine import phishing_toolkit as toolkit
+        for suffix in ('radio.am', 'radio.fm', 'africa.com', 'uk.com', 'ru.com'):
+            domain = f'fixture.{suffix}'
+            raw = f'Domain Name: {domain.upper()}\nDomain Status: serverHold https://icann.org/epp#serverHold\nRegistrant Email: private@fixture.example\n'
+            with self.subTest(suffix=suffix), patch.object(toolkit, 'query_whois_server', return_value=raw) as query, \
+                    patch.object(whois, 'whois', side_effect=AssertionError('Must not strip private name')):
+                result = core.whois_observation(domain)
+                query.assert_called_once_with('whois.centralnic.com', domain)
+                self.assertEqual(result['domain'], domain)
+                self.assertEqual(result['statuses'], ['serverHold https://icann.org/epp#serverHold'])
+                self.assertNotIn('private@', json.dumps(result))
+
+    def test_private_parent_wrong_empty_or_ambiguous_whois_does_not_prove_hold(self):
+        from domaincheck.engine import phishing_toolkit as toolkit
+        for names in ('Domain Name: AFRICA.COM\n', 'Domain Name: OTHER.AFRICA.COM\n', '',
+                      'Domain Name: FIXTURE.AFRICA.COM\nDomain Name: AFRICA.COM\n'):
+            raw = names + 'Domain Status: serverHold\n'
+            with self.subTest(names=names), patch.object(toolkit, 'query_whois_server', return_value=raw):
+                self.assertEqual(core.whois_observation('fixture.africa.com')['statuses'], [])
+
+    def test_private_registration_skips_public_parent_rdap_and_checks_child_identity(self):
+        for suffix, tld in [('radio.am', 'am'), ('africa.com', 'com')]:
+            domain = f'fixture.{suffix}'
+            child = SimpleNamespace(stdout=json.dumps({'domain': domain, 'statuses': ['clientHold']}))
+            with self.subTest(suffix=suffix), patch.object(core.requests, 'get', side_effect=AssertionError('No parent RDAP')), \
+                    patch.object(core.subprocess, 'run', return_value=child) as run:
+                result = core.registration(domain, {tld: 'https://public-registry.example/'})
+                self.assertEqual(run.call_args.kwargs['input'], domain)
+                self.assertEqual(run.call_args.kwargs['timeout'], 9)
+                self.assertEqual(result['state'], 'HOLD')
+                self.assertEqual(result['hold_flags'], ['clienthold'])
+            wrong = SimpleNamespace(stdout=json.dumps({'domain': suffix, 'statuses': ['serverHold']}))
+            with patch.object(core.subprocess, 'run', return_value=wrong):
+                self.assertEqual(core.registration(domain, {})['state'], 'UNKNOWN')
+
+    def test_unknown_private_namespace_does_not_invent_registration_from_parent(self):
+        import whois
+        from domaincheck.engine import phishing_toolkit as toolkit
+        with patch.object(toolkit, 'query_whois_server', side_effect=AssertionError('No registry mapping')), \
+                patch.object(whois, 'whois', side_effect=AssertionError('No parent query')):
+            result = core.whois_observation('fixture.github.io')
+            self.assertEqual(result, {'domain': 'fixture.github.io', 'statuses': []})
+
+    def test_private_website_and_dns_keep_original_host_and_full_url(self):
+        url = 'https://login.fixture.africa.com/path?q=1'
+        with patch.object(core, 'registration', return_value={'state': 'UNKNOWN'}) as registration, \
+                patch.object(core, 'dns_status', return_value={'state': 'RESOLVES'}) as dns, \
+                patch.object(core, 'http_status', return_value={'website_status': 'HTTP_OK'}) as http:
+            result = core.inspect_link(url, {})
+        self.assertEqual(result['domain'], 'fixture.africa.com')
+        registration.assert_called_once_with('fixture.africa.com', {})
+        dns.assert_called_once_with('login.fixture.africa.com')
+        http.assert_called_once_with(url)
+        self.assertEqual(core.unknown(url)['domain'], 'fixture.africa.com')
+        self.assertEqual(result['status'], 'HTTP_OK')
+
+    def test_private_dns_ns_query_uses_registration_name_not_suffix(self):
+        resolver = Mock()
+        resolver.resolve.return_value = []
+        core.dns_status('www.fixture.radio.am', resolver)
+        self.assertIn(unittest.mock.call('fixture.radio.am', 'NS', lifetime=2), resolver.resolve.call_args_list)
+        self.assertNotIn(unittest.mock.call('radio.am', 'NS', lifetime=2), resolver.resolve.call_args_list)
+
+    def test_private_whois_child_dispatch_uses_validated_record(self):
+        from domaincheck.engine import phishing_toolkit as toolkit
+        raw = 'Domain Name: FIXTURE.RADIO.AM\nDomain Status: clientTransferProhibited\n'
+        output = io.StringIO()
+        with patch.object(core.sys, 'stdin', io.StringIO('fixture.radio.am')), \
+                patch.object(core.sys, 'stdout', output), patch.object(core.sys, 'argv', ['link_status', 'whois']), \
+                patch.object(toolkit, 'query_whois_server', return_value=raw):
+            core.main()
+        self.assertEqual(json.loads(output.getvalue()), {'domain': 'fixture.radio.am',
+                         'statuses': ['clientTransferProhibited']})
 
     def test_http_classification_does_not_conflate_block_challenge_and_dead_domain(self):
         cf = {'Server': 'cloudflare', 'CF-Ray': 'fixture'}
