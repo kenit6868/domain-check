@@ -410,6 +410,7 @@ CCTLD_REGISTRY_CONTACTS = {
     "in.net":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
     "com.co":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
     "radio.am":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
+    "radio.fm":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
     # Alias 2 cấp — trỏ về registry của TLD cha
     "co.in":    {"registry": "NIXI", "note": "Hay không hồi âm — nên đi đường nhà đăng ký."},
     "co.jp":    {"registry": "JPRS", "abuse_email": "abuse@jprs.jp", "note": "Đòi hỏi xác thực nhãn hiệu đăng ký tại Nhật Bản."},
