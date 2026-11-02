@@ -22,6 +22,8 @@ def report_forms(domain: str, result: dict) -> list[dict]:
             provider = 'registry_co_phishing'
         elif url == 'https://gen.xyz/account/submitticket.php?step=2&deptid=6':
             provider = 'xyz_registry_abuse'
+        elif url == 'https://www.udr.hk.com/report-abuse':
+            provider = 'udr_registry_abuse'
         forms.append({'channel': 'registry', 'label': registry.get('registry') or 'Registry',
             'form_url': url, 'autofill_provider': provider, 'note': registry.get('note') or ''})
     return forms

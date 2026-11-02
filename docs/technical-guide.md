@@ -132,3 +132,5 @@ trong lượt kiểm tra tổng dù tra riêng có dữ liệu. Nạp lại API 
 bấm kiểm tra lại; không cần đổi timeout HTTP hoặc restart worker để xử lý lỗi
 gọi module này. Nếu WHOIS hợp lệ nhưng HTTP timeout, hai trạng thái vẫn được
 hiển thị độc lập.
+
+UDR autofill (extension 3.1.1): Quick Report offers UDR Limited for catalog namespaces .hk.com/.hk.org/.ltd.hk/.inc.hk. The adapter fills reporter name/email, configured company name, target hostname, Phishing or Pharming, and the registry draft. Phone is not in the reporting profile and must be entered manually; missing company/phone keeps NEEDS_MANUAL. Honeypot and Send are untouched. Build the FE ZIP, update the unpacked extension in the same folder, explicitly Reload it, and reload the web page. No new migration or automatic submission.

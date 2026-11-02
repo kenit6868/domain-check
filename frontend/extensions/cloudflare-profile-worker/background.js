@@ -9,6 +9,7 @@ const providerOrigins = {
   godaddy_phishing: "https://legalportal.godaddy.com",
   registry_co_phishing: "https://registry.co",
   xyz_registry_abuse: "https://gen.xyz",
+  udr_registry_abuse: "https://www.udr.hk.com",
 };
 const cleanText = (value, limit = 300) => String(value || "")
   .replace(/([#?&](?:ptask|port|token|key|captcha)\s*=)[^&\s#]+/gi, "$1[REDACTED]")
@@ -76,6 +77,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
       threat_category: task.threat_category || "", expiresAt: task.expires_at,
       contact_email: task.contact_email || "", contact_name: task.contact_name || "",
       brand_name: task.brand_name || "", report_type: task.report_type || "",
+      company_name: task.company_name || "",
     }});
     return {ok: true, taskId: task.id, tabId: tab.id, provider: task.provider};
   })().then(sendResponse).catch((error) => sendResponse({ok: false, error: cleanText(error?.message || error)}));
@@ -105,7 +107,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         provider: task.provider, target_url: task.target_url, draft: task.draft,
         mode: "fill_only", threat_type: task.threat_type, threat_category: task.threat_category,
         contact_email: task.contact_email, contact_name: task.contact_name,
-        brand_name: task.brand_name, report_type: task.report_type,
+        brand_name: task.brand_name, report_type: task.report_type, company_name: task.company_name,
       }};
     })().then(sendResponse).catch((error) => sendResponse({ok: false, error: cleanText(error)}));
     return true;

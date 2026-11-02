@@ -168,6 +168,7 @@ class FormTaskService:
                 "threat_category": payload.threat_category,
                 "contact_email": payload.contact_email, "contact_name": payload.contact_name,
                 "brand_name": payload.brand_name, "report_type": payload.report_type,
+                "company_name": payload.company_name,
             },
             "device_id_hash": _digest(device_id),
             "capability_hash": _digest(capability), "status_token_hash": "pending_exchange",
@@ -243,6 +244,7 @@ class FormTaskService:
             threat_category=str(payload_data.get("threat_category", "")),
             contact_email=str(payload_data.get("contact_email", "")),
             contact_name=str(payload_data.get("contact_name", "")),
+            company_name=str(payload_data.get("company_name", "")),
             brand_name=str(payload_data.get("brand_name", "")),
             report_type=str(payload_data.get("report_type", "phishing")),
         )

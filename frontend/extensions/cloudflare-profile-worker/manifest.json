@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PhishingTool Web Form Assistant",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "Fills supported official abuse forms from owner-bound web tasks. Manual submission only.",
   "icons": {
     "16": "icons/icon16.png",
@@ -32,7 +32,8 @@
     "https://safe.coccoc.com/*",
     "https://legalportal.godaddy.com/*",
     "https://registry.co/*",
-    "https://gen.xyz/*"
+    "https://gen.xyz/*",
+    "https://www.udr.hk.com/report-abuse*"
   ],
   "optional_host_permissions": [
     "https://*/*",
@@ -60,7 +61,8 @@
         "https://safe.coccoc.com/*",
         "https://legalportal.godaddy.com/*",
         "https://registry.co/*",
-        "https://gen.xyz/*"
+        "https://gen.xyz/*",
+        "https://www.udr.hk.com/report-abuse*"
       ],
       "js": [
         "adapters/cloudflare.js",
@@ -71,6 +73,7 @@
         "adapters/godaddy_phishing.js",
         "adapters/registry_co.js",
         "adapters/xyz_registry.js",
+        "adapters/udr_registry.js",
         "content.js"
       ],
       "run_at": "document_idle"

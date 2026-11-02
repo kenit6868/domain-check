@@ -443,6 +443,7 @@ CCTLD_REGISTRY_CONTACTS = {
     "ltd.hk":   {"registry": "UDR Limited", "abuse_email": None, "report_webform": "https://www.udr.hk.com/report-abuse", "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của UDR"},
     "inc.hk":   {"registry": "UDR Limited", "abuse_email": None, "report_webform": "https://www.udr.hk.com/report-abuse", "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của UDR"},
     "africa.com":   {"registry": "DNS Africa / Gateway SRS", "abuse_email": "abuse@dns.business", "report_webform": None, "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của DNS Africa / Gateway SRS"},
+    "com.my":   {"registry": "MYNIC Berhad", "abuse_email": "abuse@mynic.my", "report_webform": None, "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của MYNIC Berhad đơn vị quản lý tên miền quốc gia .my của Malaysia"},
 }
 
 # Bảng tĩnh abuse email của các registrar phổ biến — dùng làm fallback khi WHOIS không trả về email.

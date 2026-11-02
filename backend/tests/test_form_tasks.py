@@ -77,6 +77,21 @@ class FormTaskDomainTests(unittest.TestCase):
         self.assertIn("registry_co_phishing", available_providers("fixture.co", {}))
         self.assertIn("xyz_registry_abuse", available_providers("fixture.xyz", {}))
 
+    def test_udr_routes_only_for_catalog_namespaces_and_builds_registry_draft(self):
+        from domaincheck.core.form_tasks import available_providers
+        for suffix in ("hk.com", "hk.org", "ltd.hk", "inc.hk"):
+            self.assertIn("udr_registry_abuse", available_providers(f"fixture.{suffix}", {}))
+        self.assertNotIn("udr_registry_abuse", available_providers("fixture.com", {}))
+        toolkit = SimpleNamespace(get_registry_webform_draft_text=lambda domain, registry, cfg, **kw: registry["registry"])
+        with patch("domaincheck.core.form_tasks.importlib.import_module", return_value=toolkit):
+            task = QuickReportFormTaskAdapter().build("udr_registry_abuse",
+                target_url="https://fixture.hk.com/login", domain="fixture.hk.com",
+                config={"company_name": "Fixture Company", "contact_name": "Reporter"})
+        self.assertEqual(task.draft, "UDR Limited")
+        self.assertEqual(task.company_name, "Fixture Company")
+        self.assertEqual(task.form_url, "https://www.udr.hk.com/report-abuse")
+        self.assertEqual(task.mode, "fill_only")
+
     def test_api_contract_has_registration_exchange_status_and_owned_read(self):
         paths = create_app(Settings(_env_file=None)).openapi()["paths"]
         self.assertEqual(set(paths["/api/v1/extension/devices"]), {"post"})

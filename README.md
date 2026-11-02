@@ -123,3 +123,5 @@ kết quả không có email vẫn được dùng lại trong ngày. Nút yêu c
 `domain_worker.clear_cache` và chỉ dùng khi không còn batch đang xử lý/chờ gửi;
 nếu đang chờ gửi, hoàn thành hoặc kết thúc lượt trước. Lịch sử và các khóa gửi
 thành công/chưa rõ kết quả được giữ nguyên. Không cần migration cho nút này.
+
+Extension **3.1.1** bổ sung tự điền form UDR Report Abuse từ Quick Report: tên, email, công ty, domain, loại Phishing or Pharming và nội dung. Điện thoại cần điền thủ công; kiểm tra lại thông tin rồi tự bấm Send. Build frontend để lấy ZIP mới, thay file trong cùng thư mục extension và Reload.
