@@ -23,6 +23,7 @@ class ProviderFormTask:
 
 
 PROVIDER_FORMS = {
+    "centralnic_registry_abuse": ("CentralNic", "https://centralnicregistry.com/contact/"),
     "udr_registry_abuse": ("UDR Limited", "https://www.udr.hk.com/report-abuse"),
     "google_gsb": ("Google", "https://safebrowsing.google.com/safebrowsing/report_phish/"),
     "microsoft_smartscreen": ("Microsoft", "https://www.microsoft.com/wdsi/support/report-unsafe-site-guest"),
@@ -74,7 +75,7 @@ class QuickReportFormTaskAdapter:
         toolkit = importlib.import_module("domaincheck.engine.phishing_toolkit")
         if provider == "cloudflare":
             draft = toolkit.generate_cloudflare_report_text(domain, config, target_url)
-        elif provider in {"registry_co_phishing", "xyz_registry_abuse", "udr_registry_abuse"}:
+        elif provider in {"registry_co_phishing", "xyz_registry_abuse", "udr_registry_abuse", "centralnic_registry_abuse"}:
             registry = config.get("registry_contact") or {"registry": PROVIDER_FORMS[provider][0]}
             draft = toolkit.get_registry_webform_draft_text(domain, registry, config, target_url=target_url)
         elif provider == "godaddy_phishing":

@@ -125,3 +125,5 @@ nếu đang chờ gửi, hoàn thành hoặc kết thúc lượt trước. Lịc
 thành công/chưa rõ kết quả được giữ nguyên. Không cần migration cho nút này.
 
 Extension **3.1.1** bổ sung tự điền form UDR Report Abuse từ Quick Report: tên, email, công ty, domain, loại Phishing or Pharming và nội dung. Điện thoại cần điền thủ công; kiểm tra lại thông tin rồi tự bấm Send. Build frontend để lấy ZIP mới, thay file trong cùng thư mục extension và Reload.
+
+Extension **3.1.2** bổ sung CentralNic Contact: tự điền họ tên, email, chọn Report Abuse và nội dung registry. Kiểm tra cách tách họ tên, bổ sung điện thoại và xử lý CAPTCHA rồi tự bấm Submit. Giữ email registry hiện có; không thay chính sách chọn kênh.

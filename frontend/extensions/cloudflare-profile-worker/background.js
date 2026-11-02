@@ -10,6 +10,7 @@ const providerOrigins = {
   registry_co_phishing: "https://registry.co",
   xyz_registry_abuse: "https://gen.xyz",
   udr_registry_abuse: "https://www.udr.hk.com",
+  centralnic_registry_abuse: "https://centralnicregistry.com",
 };
 const cleanText = (value, limit = 300) => String(value || "")
   .replace(/([#?&](?:ptask|port|token|key|captcha)\s*=)[^&\s#]+/gi, "$1[REDACTED]")

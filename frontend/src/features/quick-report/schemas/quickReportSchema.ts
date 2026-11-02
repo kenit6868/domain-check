@@ -10,7 +10,7 @@ export const quickReportCheckSchema = z.object({
   status: z.string(),
   result: z.record(z.string(), z.unknown()),
   report_forms: z.array(reportFormSchema).optional(),
-  providers: z.array(z.object({ id: z.enum(['google_gsb', 'microsoft_smartscreen', 'cloudflare', 'chongluadao', 'coccoc_safe', 'godaddy_phishing', 'registry_co_phishing', 'xyz_registry_abuse', 'udr_registry_abuse']), label: z.string(), form_url: z.url() })).optional(),
+  providers: z.array(z.object({ id: z.enum(['google_gsb', 'microsoft_smartscreen', 'cloudflare', 'chongluadao', 'coccoc_safe', 'godaddy_phishing', 'registry_co_phishing', 'xyz_registry_abuse', 'udr_registry_abuse', 'centralnic_registry_abuse']), label: z.string(), form_url: z.url() })).optional(),
   cache_provenance: z.record(z.string(), z.unknown()),
 })
 

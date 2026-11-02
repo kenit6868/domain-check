@@ -92,6 +92,27 @@ class FormTaskDomainTests(unittest.TestCase):
         self.assertEqual(task.form_url, "https://www.udr.hk.com/report-abuse")
         self.assertEqual(task.mode, "fill_only")
 
+    def test_centralnic_routes_catalog_forms_to_canonical_origin_and_keeps_email(self):
+        from domaincheck.core.form_tasks import available_providers
+        from domaincheck.core.quick_report_routes import report_forms
+        from domaincheck.engine.phishing_toolkit import _static_registry_lookup
+        for suffix in ("uk.com", "jpn.com", "jp.net", "in.net", "com.co", "radio.am", "radio.fm"):
+            domain = f"fixture.{suffix}"
+            self.assertIn("centralnic_registry_abuse", available_providers(domain, {}))
+            form = next(f for f in report_forms(domain, {}) if f['channel'] == 'registry')
+            self.assertEqual(form['form_url'], "https://www.centralnicregistry.com/contact")
+            self.assertEqual(_static_registry_lookup(domain)['abuse_email'], "abuse@centralnic.com")
+        self.assertNotIn("centralnic_registry_abuse", available_providers("fixture.com", {}))
+        toolkit = SimpleNamespace(get_registry_webform_draft_text=lambda domain, registry, cfg, **kw: registry["registry"])
+        with patch("domaincheck.core.form_tasks.importlib.import_module", return_value=toolkit):
+            task = QuickReportFormTaskAdapter().build("centralnic_registry_abuse",
+                target_url="https://fixture.uk.com/login", domain="fixture.uk.com",
+                config={"contact_name": "Fixture Reporter", "contact_email": "report@example.test"})
+        self.assertEqual(task.draft, "CentralNic")
+        self.assertEqual(task.mode, "fill_only")
+        self.assertEqual(task.contact_name, "Fixture Reporter")
+        self.assertEqual(task.form_url, "https://centralnicregistry.com/contact/")
+
     def test_api_contract_has_registration_exchange_status_and_owned_read(self):
         paths = create_app(Settings(_env_file=None)).openapi()["paths"]
         self.assertEqual(set(paths["/api/v1/extension/devices"]), {"post"})
