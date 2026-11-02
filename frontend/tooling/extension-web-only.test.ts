@@ -72,7 +72,7 @@ it.each(['fill_only', 'submit'])('content script handles %s without submitting o
 
 it('keeps explicit optional localhost app support without mandatory legacy bridge access', () => {
   const manifest = JSON.parse(source('manifest.json')) as { version: string; host_permissions: string[]; optional_host_permissions: string[] }
-  expect(manifest.version).toBe('3.1.2')
+  expect(manifest.version).toBe('3.1.3')
   expect(manifest.host_permissions).not.toContain('http://127.0.0.1/*')
   expect(manifest.optional_host_permissions).toContain('http://127.0.0.1/*')
 })

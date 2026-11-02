@@ -127,3 +127,5 @@ thành công/chưa rõ kết quả được giữ nguyên. Không cần migratio
 Extension **3.1.1** bổ sung tự điền form UDR Report Abuse từ Quick Report: tên, email, công ty, domain, loại Phishing or Pharming và nội dung. Điện thoại cần điền thủ công; kiểm tra lại thông tin rồi tự bấm Send. Build frontend để lấy ZIP mới, thay file trong cùng thư mục extension và Reload.
 
 Extension **3.1.2** bổ sung CentralNic Contact: tự điền họ tên, email, chọn Report Abuse và nội dung registry. Kiểm tra cách tách họ tên, bổ sung điện thoại và xử lý CAPTCHA rồi tự bấm Submit. Giữ email registry hiện có; không thay chính sách chọn kênh.
+
+Extension **3.1.3** sửa GoDaddy mở lần đầu: kiểm tra lại form trong thời gian giới hạn và điền lại các ô rỗng nếu trang reset lúc khởi tạo, kể cả khi thay phần tử input. Giữ giá trị khác do người dùng nhập; kiểm tra đủ email, brand, URL và nội dung. Cập nhật file trong cùng thư mục extension rồi Reload; xác nhận good faith và gửi vẫn thủ công.
