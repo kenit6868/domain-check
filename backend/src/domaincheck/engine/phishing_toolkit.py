@@ -411,6 +411,7 @@ CCTLD_REGISTRY_CONTACTS = {
     "com.co":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
     "radio.am":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
     "radio.fm":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
+    "gr.com":   {"registry": "CentralNic", "abuse_email": "abuse@centralnic.com", "report_webform": "https://www.centralnicregistry.com/contact", "note": None},
     # Alias 2 cấp — trỏ về registry của TLD cha
     "co.in":    {"registry": "NIXI", "note": "Hay không hồi âm — nên đi đường nhà đăng ký."},
     "co.jp":    {"registry": "JPRS", "abuse_email": "abuse@jprs.jp", "note": "Đòi hỏi xác thực nhãn hiệu đăng ký tại Nhật Bản."},
@@ -444,6 +445,7 @@ CCTLD_REGISTRY_CONTACTS = {
     "inc.hk":   {"registry": "UDR Limited", "abuse_email": None, "report_webform": "https://www.udr.hk.com/report-abuse", "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của UDR"},
     "africa.com":   {"registry": "DNS Africa / Gateway SRS", "abuse_email": "abuse@dns.business", "report_webform": None, "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của DNS Africa / Gateway SRS"},
     "com.my":   {"registry": "MYNIC Berhad", "abuse_email": "abuse@mynic.my", "report_webform": None, "note": "Bạn gửi báo cáo qua form Report Abuse chính thức của MYNIC Berhad đơn vị quản lý tên miền quốc gia .my của Malaysia"},
+    "hot":   {"registry": "Amazon Registry", "abuse_email": "registry-abuse@amazon.com", "report_webform": None, "note": "Bạn gửi báo cáo qua mail Report Abuse chính thức của Amazon Registry đơn vị quản lý tên miền"},
 }
 
 # Bảng tĩnh abuse email của các registrar phổ biến — dùng làm fallback khi WHOIS không trả về email.
@@ -524,7 +526,7 @@ WEB_FORM_REGISTRARS = {
     "tucows":               "https://www.tucowsdomains.com/report-abuse",
     "opensrs":              "https://www.tucowsdomains.com/report-abuse",
     "namesilo":             "https://www.namesilo.com/report_abuse.php",
-    "porkbun":              "https://www.porkbun.com/abuse",
+    "porkbun":              "https://abuse.cleandns.space/porkbun",
 #     "namecheap":            "https://support.namecheap.com/index.php?/Tickets/Submit",  # tạm dùng web form, không gửi email
     "sav.com":              "https://abuse.sav.com",
     "key-systems":          "https://abuse.cleandns.space",

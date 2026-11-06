@@ -11,7 +11,7 @@ def report_forms(domain: str, result: dict) -> list[dict]:
     for key, url in toolkit.WEB_FORM_REGISTRARS.items():
         if key in registrar.casefold():
             forms.append({'channel': 'registrar', 'label': registrar, 'form_url': url,
-                'autofill_provider': 'godaddy_phishing' if key == 'godaddy' else None,
+                'autofill_provider': {'godaddy': 'godaddy_phishing', 'dynadot': 'dynadot_phishing'}.get(key),
                 'note': ''})
             break
     registry = toolkit._static_registry_lookup(domain) or {}

@@ -77,6 +77,22 @@ class FormTaskDomainTests(unittest.TestCase):
         self.assertIn("registry_co_phishing", available_providers("fixture.co", {}))
         self.assertIn("xyz_registry_abuse", available_providers("fixture.xyz", {}))
 
+    def test_dynadot_routes_registrar_and_uses_registrar_draft(self):
+        from domaincheck.core.form_tasks import available_providers
+        from domaincheck.api.form_tasks import FormTaskCreate
+        self.assertIn("dynadot_phishing", available_providers("fixture.test", {"registrar": "Dynadot LLC"}))
+        self.assertNotIn("dynadot_phishing", available_providers("fixture.test", {"registrar": "Other"}))
+        FormTaskCreate(provider="dynadot_phishing", device_id="fixture-device-1234")
+        with patch("domaincheck.engine.phishing_toolkit.get_webform_draft_text", return_value="Fixture English report") as draft:
+            task = QuickReportFormTaskAdapter().build("dynadot_phishing",
+                target_url="https://fixture.test/wap/#/register", domain="fixture.test",
+                config={"contact_name": "Fixture Reporter", "contact_email": "report@example.test"})
+        self.assertEqual(draft.call_args.kwargs["registrar"], "Dynadot")
+        self.assertEqual(task.form_url, "https://www.dynadot.com/report-abuse")
+        self.assertEqual(task.mode, "fill_only")
+        self.assertEqual(task.draft, "Fixture English report")
+        self.assertEqual(task.contact_name, "Fixture Reporter")
+
     def test_udr_routes_only_for_catalog_namespaces_and_builds_registry_draft(self):
         from domaincheck.core.form_tasks import available_providers
         for suffix in ("hk.com", "hk.org", "ltd.hk", "inc.hk"):

@@ -12,4 +12,4 @@ export const formTaskStatusSchema = z.object({
 })
 
 export type FormTaskStatus = z.infer<typeof formTaskStatusSchema>
-export type FormProvider = 'google_gsb' | 'microsoft_smartscreen' | 'cloudflare' | 'chongluadao' | 'coccoc_safe' | 'godaddy_phishing' | 'registry_co_phishing' | 'xyz_registry_abuse' | 'udr_registry_abuse' | 'centralnic_registry_abuse'
+export type FormProvider = 'google_gsb' | 'microsoft_smartscreen' | 'cloudflare' | 'chongluadao' | 'coccoc_safe' | 'godaddy_phishing' | 'registry_co_phishing' | 'xyz_registry_abuse' | 'udr_registry_abuse' | 'centralnic_registry_abuse' | 'dynadot_phishing'

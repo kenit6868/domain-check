@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PhishingTool Web Form Assistant",
-  "version": "3.1.3",
+  "version": "3.1.4",
   "description": "Fills supported official abuse forms from owner-bound web tasks. Manual submission only.",
   "icons": {
     "16": "icons/icon16.png",
@@ -34,7 +34,8 @@
     "https://registry.co/*",
     "https://gen.xyz/*",
     "https://www.udr.hk.com/report-abuse*",
-    "https://centralnicregistry.com/contact*"
+    "https://centralnicregistry.com/contact*",
+    "https://www.dynadot.com/report-abuse*"
   ],
   "optional_host_permissions": [
     "https://*/*",
@@ -64,7 +65,8 @@
         "https://registry.co/*",
         "https://gen.xyz/*",
         "https://www.udr.hk.com/report-abuse*",
-        "https://centralnicregistry.com/contact*"
+        "https://centralnicregistry.com/contact*",
+        "https://www.dynadot.com/report-abuse*"
       ],
       "js": [
         "adapters/cloudflare.js",
@@ -77,6 +79,7 @@
         "adapters/xyz_registry.js",
         "adapters/udr_registry.js",
         "adapters/centralnic_registry.js",
+        "adapters/dynadot_phishing.js",
         "content.js"
       ],
       "run_at": "document_idle"

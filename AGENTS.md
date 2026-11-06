@@ -120,3 +120,5 @@ Final validation: clean PostgreSQL/Redis + fresh wheel backend 402/402 (zero ski
   lệnh kiểm tra/log/dừng/mở lại/restart worker và cập nhật production vào
   docs/team-deployment.md; README liên kết runbook. Chỉ đổi tài liệu, không chạy
   dịch vụ, migration hoặc sửa secret/runtime.
+
+- 2026-11-06 ? Extension 3.1.4 th?m Dynadot Phishing fill-only, n?i registrar routing v? task API/FE. Official Website v? VPN/Proxy/user-agent ?i?n N/A; domain l? hostname, Full Domain Path gi? URL ??y ??. Ch? t? ch?n native Phishing option duy nh?t; dropdown t?y bi?n ch? ch?n th? c?ng v? ch?a c? markup x?c minh. Kh?ng ch?m CAPTCHA/upload/Submit ho?c profile Chrome; kh?ng migration/restart worker.

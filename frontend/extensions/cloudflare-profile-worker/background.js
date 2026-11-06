@@ -1,6 +1,7 @@
 "use strict";
 const tabStatuses = new Map();
 const providerOrigins = {
+  dynadot_phishing: "https://www.dynadot.com",
   google_gsb: "https://safebrowsing.google.com",
   microsoft_smartscreen: "https://www.microsoft.com",
   cloudflare: "https://abuse.cloudflare.com",

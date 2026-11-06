@@ -23,6 +23,7 @@ class ProviderFormTask:
 
 
 PROVIDER_FORMS = {
+    "dynadot_phishing": ("Dynadot", "https://www.dynadot.com/report-abuse"),
     "centralnic_registry_abuse": ("CentralNic", "https://centralnicregistry.com/contact/"),
     "udr_registry_abuse": ("UDR Limited", "https://www.udr.hk.com/report-abuse"),
     "google_gsb": ("Google", "https://safebrowsing.google.com/safebrowsing/report_phish/"),
@@ -78,8 +79,8 @@ class QuickReportFormTaskAdapter:
         elif provider in {"registry_co_phishing", "xyz_registry_abuse", "udr_registry_abuse", "centralnic_registry_abuse"}:
             registry = config.get("registry_contact") or {"registry": PROVIDER_FORMS[provider][0]}
             draft = toolkit.get_registry_webform_draft_text(domain, registry, config, target_url=target_url)
-        elif provider == "godaddy_phishing":
-            draft = toolkit.get_webform_draft_text(domain=domain, registrar="GoDaddy",
+        elif provider in {"godaddy_phishing", "dynadot_phishing"}:
+            draft = toolkit.get_webform_draft_text(domain=domain, registrar=PROVIDER_FORMS[provider][0],
                 webform_url=PROVIDER_FORMS[provider][1], cfg=config, target_url=target_url)
         else:
             draft = toolkit.generate_community_report_text(domain, config, target_url)

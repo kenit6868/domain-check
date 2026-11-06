@@ -65,3 +65,7 @@ owner batch lock, invalidate only today's succeeded excluded_no_email checks
 via cache provenance; retain original results/history and delivery protections.
 Busy/paused/awaiting-send batches reject reset. Ordinary precheck retains cached
 negative contacts until explicit reset or the next account-local business day.
+
+## Dynadot adapter ? 2026-11-06
+
+`dynadot_phishing` is registrar-routed, exact-origin HTTPS www.dynadot.com/report-abuse and fill_only. Fields use the supplied Phishing form names with `_2` suffix, never Vue-generated data attributes. Domain is the target hostname; full URL retains path/query/fragment. Official Website and VPN/Proxy/user-agent use N/A by operator instruction. Preserve nonempty operator values, repair empty fields after Vue mount, leave phone/file/verification/submit untouched. Native Phishing selection requires one exact unambiguous option; custom dropdowns remain manual pending observed markup. No CAPTCHA token from the supplied HTML is stored.

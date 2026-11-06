@@ -29,7 +29,7 @@ class ExtensionDeviceResponse(BaseModel):
 
 
 class FormTaskCreate(BaseModel):
-    provider: Literal["google_gsb", "microsoft_smartscreen", "cloudflare", "chongluadao", "coccoc_safe", "godaddy_phishing", "registry_co_phishing", "xyz_registry_abuse", "udr_registry_abuse", "centralnic_registry_abuse"]
+    provider: Literal["google_gsb", "microsoft_smartscreen", "cloudflare", "chongluadao", "coccoc_safe", "godaddy_phishing", "registry_co_phishing", "xyz_registry_abuse", "udr_registry_abuse", "centralnic_registry_abuse", "dynadot_phishing"]
     device_id: str = Field(min_length=16, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
