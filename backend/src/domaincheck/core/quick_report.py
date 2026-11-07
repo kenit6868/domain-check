@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
 
-QUICK_REPORT_ENGINE_VERSION = "legacy-run-cdn-check-v2-registrar-abuse"
+QUICK_REPORT_ENGINE_VERSION = "legacy-run-cdn-check-v3-private-whois"
 _BLOCKED_KEYS = frozenset({
     "body", "content", "cookie", "credential", "html", "password", "proxy",
     "raw_html", "secret", "session", "storage_key", "token",

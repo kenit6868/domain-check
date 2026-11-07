@@ -122,3 +122,4 @@ Final validation: clean PostgreSQL/Redis + fresh wheel backend 402/402 (zero ski
   dịch vụ, migration hoặc sửa secret/runtime.
 
 - 2026-11-06 ? Extension 3.1.4 th?m Dynadot Phishing fill-only, n?i registrar routing v? task API/FE. Official Website v? VPN/Proxy/user-agent ?i?n N/A; domain l? hostname, Full Domain Path gi? URL ??y ??. Ch? t? ch?n native Phishing option duy nh?t; dropdown t?y bi?n ch? ch?n th? c?ng v? ch?a c? markup x?c minh. Kh?ng ch?m CAPTCHA/upload/Submit ho?c profile Chrome; kh?ng migration/restart worker.
+- 2026-11-07 — Registrar contact `.africa.com` dùng HTTPS Gateway SRS; `.hk.com` tra tự động qua `whois.udr.hk.com` cổng 43, web CAPTCHA chỉ fallback thủ công. Xác thực đúng Domain Name, không lấy contact domain cha. Marcaria có email fallback chính thức theo registrar thực tế khi WHOIS abuse trống. Hai domain ví dụ đã tra đúng contact. Quick Report mới dùng policy v3; giữ lịch sử/delivery. Không migration hoặc restart dịch vụ.

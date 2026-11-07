@@ -129,6 +129,90 @@ class RegistrarContactTests(unittest.TestCase):
         with patch.object(toolkit, "_load_rdap_bootstrap", side_effect=AssertionError("Wrong registry")):
             self.assertIn("error", toolkit.get_rdap_abuse_email("fixture.radio.am"))
 
+    def test_gateway_https_exact_record_and_explicit_abuse_only(self):
+        response = MagicMock()
+        response.status_code = 200
+        response.iter_content.return_value = [(
+            '<a>Registrar Abuse Contact Email: wrong@outside.example</a><pre>' +
+            private_record('fixture.africa.com', 'Fixture Registrar') + '</pre>'
+        ).encode()]
+        response.__enter__.return_value = response
+        with patch.object(toolkit.requests, 'get', return_value=response) as get:
+            result = toolkit.get_whois_info('login.fixture.africa.com')
+        get.assert_called_once_with('https://whois.gatewaysrs.com/whois/whois.sh',
+            params={'Domain': 'fixture.africa.com'}, timeout=8, allow_redirects=False, stream=True)
+        self.assertEqual(result['registrar'], 'Fixture Registrar')
+        self.assertEqual(result['emails'], ['abuse@nicenic.net'])
+
+    def test_gateway_rejects_parent_missing_ambiguous_and_unlabelled_contacts(self):
+        for raw in ('', private_record('africa.com'), private_record('other.africa.com'),
+                    private_record('fixture.africa.com') + 'Domain Name: africa.com\n'):
+            with self.subTest(raw=raw), patch.object(toolkit, '_gateway_whois_text', return_value=raw):
+                self.assertIn('error', toolkit.get_whois_info('fixture.africa.com'))
+
+    def test_gateway_http_failure_redirect_oversize_and_timeout_fail_closed(self):
+        for status, chunks in ((429, []), (302, []), (200, [b'x' * (256 * 1024 + 1)])):
+            response = MagicMock(status_code=status)
+            response.__enter__.return_value = response
+            response.iter_content.return_value = chunks
+            with patch.object(toolkit.requests, 'get', return_value=response):
+                self.assertIn('error', toolkit.get_whois_info('fixture.africa.com'))
+        with patch.object(toolkit.requests, 'get', side_effect=TimeoutError):
+            self.assertIn('error', toolkit.get_whois_info('fixture.africa.com'))
+
+    def test_hk_manual_fallback_and_private_names_never_use_parent(self):
+        with patch.object(toolkit, 'query_whois_server', return_value='') as query:
+            result = toolkit.get_whois_info('login.fixture.hk.com')
+        query.assert_called_once_with('whois.udr.hk.com', 'fixture.hk.com')
+        self.assertEqual(result['lookup_url'], 'https://whois.hk.com/')
+        self.assertEqual(result['lookup_domain'], 'fixture.hk.com')
+        self.assertTrue(result['manual_lookup_required'])
+        for name in ('fixture.hk.com', 'fixture.africa.com'):
+            with patch.object(toolkit, '_load_rdap_bootstrap', side_effect=AssertionError('Parent lookup')):
+                self.assertIn('error', toolkit.get_rdap_abuse_email(name))
+
+    def test_hk_tcp_whois_restores_registrar_and_verified_static_abuse(self):
+        # Minimal synthetic record mirrors the observed UDR field layout;
+        # no registrant data, web CAPTCHA tokens or raw live records are stored.
+        raw = ('Domain Name: HAMMAR.HK.COM\n'
+               'Registrar: Marcaria.com International\n'
+               'Registrar Abuse Contact Email: \n'
+               'Registrant Email: owner@fixture.example\n')
+        with patch.object(toolkit, 'query_whois_server', return_value=raw) as query:
+            who = toolkit.get_whois_info('login.hammar.hk.com')
+        query.assert_called_once_with('whois.udr.hk.com', 'hammar.hk.com')
+        self.assertEqual(who['registrar'], 'Marcaria.com International')
+        self.assertIsNone(who['abuse_email'])
+        self.assertEqual(who['emails'], [])
+        self.assertNotIn('owner@fixture.example', str(who))
+        result, _ = self.pipeline(who, {'error': 'Private namespace'})
+        self.assertIn({'channel': 'registrar', 'label': 'Registrar', 'email': 'abuse@marcaria.com'},
+                      result['report_recipients'])
+        self.assertIn({'channel': 'registrar', 'email': 'abuse@marcaria.com'},
+                      toolkit.resolve_worker_report_recipients(who, {}, {}))
+
+    def test_hk_parent_mismatch_cannot_trigger_marcaria_fallback(self):
+        for name in ('hk.com', 'other.hk.com'):
+            raw = private_record(name, 'Marcaria.com International')
+            with self.subTest(name=name), patch.object(toolkit, 'query_whois_server', return_value=raw):
+                who = toolkit.get_whois_info('hammar.hk.com')
+            self.assertTrue(who['manual_lookup_required'])
+            self.assertNotIn('registrar', who)
+            self.assertEqual(toolkit.resolve_quick_report_recipients('hammar.hk.com', who=who), [])
+
+    def test_africa_example_explicit_contact_reaches_quick_report_and_worker(self):
+        raw = ('Domain Name: kasumay.africa.com\n'
+               'Registrar: Registrar.eu\n'
+               'Registrar Abuse Contact Email: abuse@registrar.eu\n')
+        with patch.object(toolkit, '_gateway_whois_text', return_value=raw):
+            who = toolkit.get_whois_info('kasumay.africa.com')
+        result, calls = self.pipeline(who, {})
+        self.assertEqual(calls, 0)
+        self.assertEqual(result['registrar'], 'Registrar.eu')
+        expected = {'channel': 'registrar', 'email': 'abuse@registrar.eu'}
+        self.assertIn(dict(expected, label='Registrar'), result['report_recipients'])
+        self.assertIn(expected, toolkit.resolve_worker_report_recipients(who, {}, {}))
+
     def test_new_cache_namespace_does_not_reuse_old_contact_policy(self):
         self.assertNotEqual(QUICK_REPORT_ENGINE_VERSION, "legacy-run-cdn-check-v1")
 

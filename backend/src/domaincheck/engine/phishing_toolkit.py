@@ -14,6 +14,7 @@ import ssl
 import time
 from datetime import datetime, timezone
 from email.utils import getaddresses
+from html.parser import HTMLParser
 from urllib.parse import urlparse
 
 from domaincheck.engine import cloaking_detector
@@ -451,6 +452,10 @@ CCTLD_REGISTRY_CONTACTS = {
 # Bảng tĩnh abuse email của các registrar phổ biến — dùng làm fallback khi WHOIS không trả về email.
 # Match theo "contains" case-insensitive với tên registrar từ WHOIS (xem lookup_registrar_abuse_email).
 REGISTRAR_ABUSE_EMAILS = {
+    # Official abuse policy: marcaria.com/ws/en/terms-and-conditions/policies/
+    # domain-abuse-complaint-escalation-policy (verified 2026-11-07).
+    "marcaria.com international": "abuse@marcaria.com",
+    "marcaria international": "abuse@marcaria.com",
     "namecheap":           "abuse@namecheap.com",
     "godaddy":             "abuse@godaddy.com",
     "tucows":              "domainabuse@tucows.com",
@@ -866,7 +871,7 @@ def get_rdap_abuse_email(domain: str) -> dict:
     if _private_registry_target(domain):
         # The public .am/.fm bootstrap describes the parent ccTLD registry, not
         # registrations in the independently operated radio namespace.
-        return {"error": "Private radio registrations use their registry WHOIS"}
+        return {"error": "Private registrations use their registry WHOIS"}
     if requests is None:
         return {"error": "requests library not available"}
 
@@ -978,6 +983,8 @@ FAKE_TLD_SUFFIXES = {
 _PRIVATE_REGISTRY_WHOIS = {
     "radio.am": "whois.centralnic.com",
     "radio.fm": "whois.centralnic.com",
+    "africa.com": "https://whois.gatewaysrs.com/",
+    "hk.com": "whois.udr.hk.com",
 }
 
 
@@ -1010,11 +1017,62 @@ def _whois_fields(raw: str) -> dict[str, list[str]]:
     return fields
 
 
+class _WhoisPreText(HTMLParser):
+    """Read WHOIS text only, excluding page links, scripts and other contacts."""
+
+    def __init__(self):
+        super().__init__()
+        self.depth = 0
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "pre":
+            self.depth += 1
+        elif tag == "br" and self.depth:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag == "pre":
+            self.depth = max(0, self.depth - 1)
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if self.depth:
+            self.parts.append(data)
+
+
+def _gateway_whois_text(domain: str) -> str:
+    deadline = time.monotonic() + 12
+    try:
+        with requests.get(
+            "https://whois.gatewaysrs.com/whois/whois.sh",
+            params={"Domain": domain}, timeout=8, allow_redirects=False, stream=True,
+        ) as response:
+            if response.status_code != 200:
+                return ""
+            data = bytearray()
+            for chunk in response.iter_content(chunk_size=8192):
+                data.extend(chunk)
+                if len(data) > 256 * 1024 or time.monotonic() > deadline:
+                    return ""
+        parser = _WhoisPreText()
+        parser.feed(data.decode("utf-8", errors="replace"))
+        return "".join(parser.parts)
+    except Exception:
+        return ""
+
+
 def _private_registry_whois(domain: str, server: str) -> dict:
-    fields = _whois_fields(query_whois_server(server, domain))
+    raw = (_gateway_whois_text(domain) if server == "https://whois.gatewaysrs.com/"
+           else query_whois_server(server, domain))
+    fields = _whois_fields(raw)
     # Do not accept parent-domain records or infer contacts after a failed lookup.
     names = fields.get("domain name", [])
     if not names or any(name.casefold().rstrip(".") != domain for name in names):
+        if server == "whois.udr.hk.com":
+            return {"error": "Private registry WHOIS record is unavailable or mismatched",
+                    "lookup_url": "https://whois.hk.com/", "lookup_domain": domain,
+                    "manual_lookup_required": True}
         return {"error": "Private registry WHOIS record is unavailable or mismatched"}
     emails = _registrar_abuse_emails(fields.get("registrar abuse contact email", []))
     return {
