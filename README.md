@@ -131,3 +131,9 @@ Extension **3.1.2** bổ sung CentralNic Contact: tự điền họ tên, email,
 Extension **3.1.3** sửa GoDaddy mở lần đầu: kiểm tra lại form trong thời gian giới hạn và điền lại các ô rỗng nếu trang reset lúc khởi tạo, kể cả khi thay phần tử input. Giữ giá trị khác do người dùng nhập; kiểm tra đủ email, brand, URL và nội dung. Cập nhật file trong cùng thư mục extension rồi Reload; xác nhận good faith và gửi vẫn thủ công.
 
 Extension **3.1.4** b? sung Dynadot Phishing cho registrar Dynadot trong Quick Report: ?i?n t?n, email/x?c nh?n, domain, URL ??y ?? v? Comments; Official Website v? VPN/Proxy/user-agent ?i?n `N/A`. Ch? t? ch?n Phishing khi c? ??ng m?t option native kh?p; dropdown t?y bi?n c?n ch?n Phishing th? c?ng r?i d?ng ?i?n l?i n?u ?? h?t th?i gian ch?. CAPTCHA, upload v? Submit gi? th? c?ng. Build l?i FE ?? c? ZIP m?i; c?p nh?t c?ng th? m?c extension r?i Reload ?? gi? ID. Backend/API c?n n?p code m?i khi tri?n khai, kh?ng c?n migration.
+
+
+Extension **3.1.5** bổ sung Verisign DNS Abuse trong Quick Report cho các registry hiện định tuyến tới Verisign (.com/.net/.name/.cc). Tự chọn DNS Abuse → Phishing, TLD theo domain, bấm Today cho hai ngày; điền registrar từ check nếu có, email và bản nháp từ hồ sơ. Giữ giá trị đã nhập để người dùng duyệt. Next/CAPTCHA/upload/Submit vẫn thủ công. ZIP: `frontend/dist/downloads/web-form-assistant.zip`; giải nén vào cùng thư mục extension và Reload thủ công để giữ ID. API cần nạp code mới khi triển khai; không cần migration hoặc restart worker.
+
+
+Extension **3.1.6** sửa Verisign: điền Brand name or website being impersonated từ brand_name sau khi chọn Phishing, chuyển registrar tới content script và chọn Today cho hai ngày trong môi trường cô lập của extension. Tải ZIP mới, giải nén đè trong cùng thư mục extension, Reload rồi mở một task Verisign mới. Giữ giá trị người dùng; Next/CAPTCHA/upload/Submit vẫn thủ công. Không cần migration hay restart worker cho bản sửa extension này.

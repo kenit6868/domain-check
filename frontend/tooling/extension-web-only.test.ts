@@ -18,6 +18,7 @@ function background(mode = 'fill_only') {
   const fetcher = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({
     id: 'fixture', provider: 'cloudflare', mode, form_url: 'https://abuse.cloudflare.com/phishing',
     target_url: 'https://suspect.example/', status_token: 'fixture-status',
+    registrar: 'Fixture Registrar', target_domain: 'suspect.example',
   }) }))
   runInNewContext(source('background.js'), { chrome, fetch: fetcher, URL })
   const external = chrome.runtime.onMessageExternal.addListener.mock.calls[0]?.[0] as Listener
@@ -39,9 +40,16 @@ it('exchanges a capability and stores an owner-bound fill-only web task', async 
   const worker = background()
   expect(await worker.send({ type: 'domaincheck-open-form', capabilityToken: 'x'.repeat(50) })).toMatchObject({ ok: true, tabId: 7 })
   expect(worker.fetcher).toHaveBeenCalledWith('https://app.example/api/v1/form-tasks/exchange', expect.objectContaining({ credentials: 'omit' }))
-  const stored = worker.chrome.storage.session.set.mock.calls[0]?.[0] as Record<string, { mode: string; apiOrigin: string }>
+  const stored = worker.chrome.storage.session.set.mock.calls[0]?.[0] as Record<string, { mode: string; apiOrigin: string; registrar: string; target_domain: string }>
   expect(stored['formTask:7'].mode).toBe('fill_only')
   expect(stored['formTask:7'].apiOrigin).toBe('https://app.example')
+  expect(stored['formTask:7'].registrar).toBe('Fixture Registrar')
+  expect(stored['formTask:7'].target_domain).toBe('suspect.example')
+  worker.chrome.storage.session.get.mockResolvedValue(stored)
+  const reply = await new Promise<Record<string, unknown>>((resolveReply) => {
+    worker.internal({ type: 'form-task-for-tab' }, { tab: { id: 7, url: 'https://abuse.cloudflare.com/phishing' } }, resolveReply)
+  })
+  expect(reply).toMatchObject({ ok: true, task: { registrar: 'Fixture Registrar', target_domain: 'suspect.example' } })
 })
 
 it('rejects submit tasks and has no retired localhost bridge fetch handler', async () => {
@@ -72,7 +80,9 @@ it.each(['fill_only', 'submit'])('content script handles %s without submitting o
 
 it('keeps explicit optional localhost app support without mandatory legacy bridge access', () => {
   const manifest = JSON.parse(source('manifest.json')) as { version: string; host_permissions: string[]; optional_host_permissions: string[] }
-  expect(manifest.version).toBe('3.1.4')
+  expect(manifest.version).toBe('3.1.6')
+  expect(manifest.host_permissions).toContain('https://verisign.my.site.com/ReportAbuse*')
+  expect(manifest.host_permissions).toContain('https://verisign.my.site.com/DNSAbuse*')
   expect(manifest.host_permissions).not.toContain('http://127.0.0.1/*')
   expect(manifest.optional_host_permissions).toContain('http://127.0.0.1/*')
 })

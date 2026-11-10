@@ -4,7 +4,7 @@ import os
 import unittest
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -35,6 +35,27 @@ class FakeFormAdapter:
 
 
 class FormTaskDomainTests(unittest.TestCase):
+    def test_verisign_registry_routing_and_registrar_payload(self):
+        from domaincheck.core.form_tasks import available_providers
+        from domaincheck.api.form_tasks import FormTaskCreate, FormTaskExchangeResponse
+        for suffix in ("com", "net", "name", "cc"):
+            self.assertIn("verisign_dns_abuse", available_providers(f"fixture.{suffix}", {}))
+        for domain in ("fixture.org", "fixture.hk.com", "fixture.africa.com", "fixture.uk.com"):
+            self.assertNotIn("verisign_dns_abuse", available_providers(domain, {}))
+        FormTaskCreate(provider="verisign_dns_abuse", device_id="fixture-device-1234")
+        with patch("domaincheck.engine.phishing_toolkit.get_registry_webform_draft_text", return_value="English fixture") as draft:
+            task = QuickReportFormTaskAdapter().build("verisign_dns_abuse",
+                target_url="https://sub.fixture.com/wap/#/register", domain="fixture.com",
+                config={"registrar": "Fixture Registrar", "contact_email": "report@example.test"})
+        self.assertEqual(draft.call_args.args[1]["registry"], "Verisign")
+        self.assertEqual(task.registrar, "Fixture Registrar")
+        self.assertEqual(task.target_domain, "fixture.com")
+        self.assertEqual(task.contact_email, "report@example.test")
+        self.assertEqual(task.form_url, "https://verisign.my.site.com/DNSAbuse")
+        self.assertEqual(task.mode, "fill_only")
+        self.assertIn("registrar", FormTaskExchangeResponse.model_fields)
+        self.assertIn("target_domain", FormTaskExchangeResponse.model_fields)
+
     def test_google_task_uses_characterized_formatter_and_microsoft_is_url_only(self):
         toolkit = SimpleNamespace(generate_safebrowsing_report_text=lambda domain, cfg, url: f"{cfg['brand_name']}:{domain}:{url}")
         with patch("domaincheck.core.form_tasks.importlib.import_module", return_value=toolkit):
@@ -151,6 +172,37 @@ class FormTaskDomainTests(unittest.TestCase):
             "headers": [(b"origin", b"chrome-extension://abcdefghijklmnopabcdefghijklmnop")],
         })
         _extension_origin(extension_origin)
+
+
+class FormTaskPayloadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_registrar_and_domain_snapshot_exchange_and_older_payload_defaults(self):
+        owner = uuid4()
+        now = datetime(2026, 11, 10, 8, tzinfo=UTC)
+        check = SimpleNamespace(id=uuid4(), workflow="quick_report", status="succeeded",
+            domain="fixture.com", requested_url="https://sub.fixture.com/wap/#/register",
+            business_day=now.date(), result={"registrar": "Fixture Registrar"})
+        for older_payload in (False, True):
+            session = SimpleNamespace(scalar=AsyncMock(return_value=uuid4()),
+                get=AsyncMock(return_value=None), flush=AsyncMock(), add=Mock())
+            service = FormTaskService(session, owner_user_id=owner, actor_user_id=owner,
+                request_id="fixture", now=now)
+            with patch("domaincheck.application.form_tasks.OwnedRepository.get", new=AsyncMock(return_value=check)), \
+                 patch("domaincheck.engine.phishing_toolkit.get_registry_webform_draft_text", return_value="English fixture"):
+                created = await service.create(check.id, provider="verisign_dns_abuse", device_id="fixture-device-1234")
+            row = session.add.call_args_list[0].args[0]
+            self.assertEqual(row.owner_user_id, owner)
+            self.assertEqual(row.sanitized_state["payload"]["registrar"], "Fixture Registrar")
+            self.assertEqual(row.sanitized_state["payload"]["target_domain"], "fixture.com")
+            row.version = 1
+            if older_payload:
+                row.sanitized_state["payload"].pop("registrar")
+                row.sanitized_state["payload"].pop("target_domain")
+            session.scalar.return_value = row
+            exchanged = await FormTaskService.exchange(session, capability_token=created.capability_token,
+                device_id="fixture-device-1234", now=now)
+            self.assertEqual(exchanged.payload.registrar, "" if older_payload else "Fixture Registrar")
+            self.assertEqual(exchanged.payload.target_domain, "" if older_payload else "fixture.com")
+            self.assertEqual(exchanged.payload.target_url, check.requested_url)
 
 
 @unittest.skipUnless(TEST_DATABASE_URL, "requires isolated PostgreSQL test database")

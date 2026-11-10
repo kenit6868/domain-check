@@ -151,3 +151,21 @@ Build/deploy l?i FE, t?i ZIP 3.1.4 t? Quick Report, gi?i n?n ?? v?o c?ng th? m?c
 - Nếu bản ghi xác thực registrar là Marcaria.com International nhưng ô abuse trống, dùng `abuse@marcaria.com` theo [chính sách abuse chính thức](https://www.marcaria.com/ws/en/terms-and-conditions/policies/domain-abuse-complaint-escalation-policy). Đây là fallback theo registrar thực tế, không gán Marcaria cho mọi domain `.hk.com`.
 - Tra trực tiếp ngày 07/11/2026: `kasumay.africa.com` → Registrar.eu, WHOIS có `abuse@registrar.eu`; `hammar.hk.com` → Marcaria.com International, WHOIS abuse trống, fallback chính thức `abuse@marcaria.com`. Chỉ truy vấn dịch vụ WHOIS; chưa truy cập website nghi vấn hoặc gửi report. Các fixture kiểm thử chỉ giữ trường cần thiết, không lưu thông tin registrant.
 - Quick Report mới dùng policy `legacy-run-cdn-check-v3-private-whois`; giữ lịch sử và delivery. Workflow khác có thể còn dùng cache hiện tại. Không cần migration/build frontend. Chỉ nạp lại code khi worker hoàn tất job; lượt cập nhật này chưa restart dịch vụ.
+
+
+## Verisign DNS Abuse — extension 3.1.5 (2026-11-10)
+
+Quick Report cung cấp `verisign_dns_abuse` cho registry có form `https://verisign.my.site.com/DNSAbuse` theo catalog hiện tại (.com/.net/.name/.cc). Trang chuyển tới `/ReportAbuse/`; extension hỗ trợ cả hai đường dẫn trên đúng HTTPS host. Namespace private có registry riêng vẫn giữ routing riêng.
+
+Adapter duyệt open shadow DOM của Salesforce Lightning, chọn Type of Abuse = DNS Abuse rồi DNS Abuse Category = Phishing. Domain dùng tên đã xác định trong check; URL giữ nguyên path/query/fragment. Corresponding Top-Level Domain chọn chính xác option theo đuôi cuối, không đoán khi thiếu option. Hai ô Date of First Observation và Registrar Notification Date mở lịch và bấm Today theo ngày địa phương của trình duyệt. Registrar That Was Notified lấy registrar của check nếu có; Your Email Address và Description lấy email/bản nháp tiếng Anh từ hồ sơ và formatter hiện tại. Form này không có ô tên/công ty ở bước đầu.
+
+Giữ giá trị đã điền; giá trị khác task, field thiếu, ngày không khớp, TLD không hỗ trợ hoặc description vượt 3000 ký tự báo cần duyệt thủ công. Không tự cắt nội dung. Người dùng duyệt lại ngày quan sát và việc đã thông báo registrar trước khi bấm Next. Next, CAPTCHA, tệp và Submit luôn thủ công. Không đọc config.ini hay tự cập nhật profile Chrome.
+
+Build FE tạo `frontend/dist/downloads/web-form-assistant.zip` bản 3.1.5. Giải nén vào cùng thư mục extension đang dùng, Reload thủ công và chấp nhận quyền cho host Verisign nếu Chrome yêu cầu. API cần nạp code mới khi triển khai; payload mới giữ mặc định rỗng cho task cũ. Không cần migration/restart worker. Kiểm thử: xem `docs/testing/verisign-adapter-2026-11-10.md`.
+
+
+### Sửa Verisign trong extension 3.1.6
+
+Sau chọn Phishing, field `phishingDetails` (Brand name or website being impersonated) xuất hiện và nhận `brand_name` từ hồ sơ. Bản 3.1.5 đã bỏ sót field động này. Background phải trả registrar/target_domain từ session storage cho `form-task-for-tab`; bản 3.1.6 đã sửa đường truyền này. Calendar cần tìm qua cả physical parent và shadow host vì Lightning synthetic shadow hiển thị thành light DOM trong môi trường cô lập của Chrome extension. Đã xác minh bốn field bằng dữ liệu mẫu trên form thật trong CDP isolated world. Không bấm Next hoặc gửi báo cáo.
+
+Tải ZIP 3.1.6, giải nén vào cùng thư mục extension, Reload thủ công rồi mở task Verisign mới từ Quick Report; task cũ có thể chưa có registrar trong snapshot. Registrar chỉ được điền khi check có dữ liệu này. Bản sửa không đổi backend; backend vẫn cần đã nạp phần task payload của 3.1.5. Không cần restart worker.

@@ -150,6 +150,7 @@ class FormTaskService:
             "business_registration_no": settings.business_registration_no if settings else "",
             "signature_role": settings.signature_role if settings else "",
             "registry_contact": check.result.get("registry_contact"),
+            "registrar": check.result.get("registrar") or "",
         }
         payload = self._adapter.build(
             provider, target_url=check.requested_url, domain=check.domain, config=config,
@@ -169,6 +170,7 @@ class FormTaskService:
                 "contact_email": payload.contact_email, "contact_name": payload.contact_name,
                 "brand_name": payload.brand_name, "report_type": payload.report_type,
                 "company_name": payload.company_name,
+                "registrar": payload.registrar, "target_domain": payload.target_domain,
             },
             "device_id_hash": _digest(device_id),
             "capability_hash": _digest(capability), "status_token_hash": "pending_exchange",
@@ -245,6 +247,8 @@ class FormTaskService:
             contact_email=str(payload_data.get("contact_email", "")),
             contact_name=str(payload_data.get("contact_name", "")),
             company_name=str(payload_data.get("company_name", "")),
+            registrar=str(payload_data.get("registrar", "")),
+            target_domain=str(payload_data.get("target_domain", "")),
             brand_name=str(payload_data.get("brand_name", "")),
             report_type=str(payload_data.get("report_type", "phishing")),
         )

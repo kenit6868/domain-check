@@ -1,6 +1,7 @@
 "use strict";
 const tabStatuses = new Map();
 const providerOrigins = {
+  verisign_dns_abuse: "https://verisign.my.site.com",
   dynadot_phishing: "https://www.dynadot.com",
   google_gsb: "https://safebrowsing.google.com",
   microsoft_smartscreen: "https://www.microsoft.com",
@@ -80,6 +81,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
       contact_email: task.contact_email || "", contact_name: task.contact_name || "",
       brand_name: task.brand_name || "", report_type: task.report_type || "",
       company_name: task.company_name || "",
+      registrar: task.registrar || "", target_domain: task.target_domain || "",
     }});
     return {ok: true, taskId: task.id, tabId: tab.id, provider: task.provider};
   })().then(sendResponse).catch((error) => sendResponse({ok: false, error: cleanText(error?.message || error)}));
@@ -110,6 +112,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         mode: "fill_only", threat_type: task.threat_type, threat_category: task.threat_category,
         contact_email: task.contact_email, contact_name: task.contact_name,
         brand_name: task.brand_name, report_type: task.report_type, company_name: task.company_name,
+        registrar: task.registrar || "", target_domain: task.target_domain || "",
       }};
     })().then(sendResponse).catch((error) => sendResponse({ok: false, error: cleanText(error)}));
     return true;

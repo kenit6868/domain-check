@@ -29,7 +29,7 @@ class ExtensionDeviceResponse(BaseModel):
 
 
 class FormTaskCreate(BaseModel):
-    provider: Literal["google_gsb", "microsoft_smartscreen", "cloudflare", "chongluadao", "coccoc_safe", "godaddy_phishing", "registry_co_phishing", "xyz_registry_abuse", "udr_registry_abuse", "centralnic_registry_abuse", "dynadot_phishing"]
+    provider: Literal["google_gsb", "microsoft_smartscreen", "cloudflare", "chongluadao", "coccoc_safe", "godaddy_phishing", "registry_co_phishing", "xyz_registry_abuse", "udr_registry_abuse", "centralnic_registry_abuse", "dynadot_phishing", "verisign_dns_abuse"]
     device_id: str = Field(min_length=16, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
 
 
@@ -63,6 +63,8 @@ class FormTaskExchangeResponse(BaseModel):
     contact_email: str
     contact_name: str
     company_name: str = ""
+    registrar: str = ""
+    target_domain: str = ""
     brand_name: str
     report_type: str
 
@@ -180,6 +182,7 @@ async def exchange_form_task(
         threat_type=payload.threat_type, threat_category=payload.threat_category,
         expires_at=exchanged.expires_at,
         contact_email=payload.contact_email, contact_name=payload.contact_name,
+        registrar=payload.registrar, target_domain=payload.target_domain,
         brand_name=payload.brand_name, report_type=payload.report_type, company_name=payload.company_name,
     )
 

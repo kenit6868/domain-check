@@ -18,7 +18,9 @@ def report_forms(domain: str, result: dict) -> list[dict]:
     url = registry.get('report_webform')
     if url:
         provider = None
-        if url == 'https://registry.co/report-abuse/form?type=phishing':
+        if url == 'https://verisign.my.site.com/DNSAbuse':
+            provider = 'verisign_dns_abuse'
+        elif url == 'https://registry.co/report-abuse/form?type=phishing':
             provider = 'registry_co_phishing'
         elif url == 'https://gen.xyz/account/submitticket.php?step=2&deptid=6':
             provider = 'xyz_registry_abuse'
