@@ -113,6 +113,8 @@ Chạy source vẫn dùng một lệnh BE như trên. Các loại job có worker
 
 Deploy dùng `backend/deploy.bat` trên Windows hoặc `python3 backend/scripts/deploy_team.py` trên Linux sau khi cấu hình `.env` theo hướng dẫn. Helper build trước, dừng/drain các service ứng dụng, chạy migration rồi mở lại toàn bộ. Trong production, service lỗi được restart riêng. Web có thông báo khi worker mất heartbeat.
 
+Cấu hình thống nhất local/VPS: `backend/.env` chứa backend/hạ tầng; `frontend/.env` chứa `VITE_FORM_ASSISTANT_EXTENSION_ID` công khai. Tạo từng file từ `.env.example` tương ứng. Helper deploy đọc cả hai file và truyền ID vào build frontend; không khai báo ID lần nữa trong backend. Không đưa `.env` vào Git hoặc image. Đổi ID cần build lại FE.
+
 Đề xuất ban đầu cho Linux: Ubuntu 24.04 LTS, 8 vCPU, RAM 32 GB, SSD/NVMe 500 GB và backup ngoài máy chủ. Đây là ước lượng khởi đầu, cần đo workload thật trước khi tăng slot. Xem [hướng dẫn deploy và cập nhật cho team](docs/team-deployment.md), gồm cấu hình slot, chuyển artifact hiện có, ID extension dùng chung, backup và giới hạn của kiểm thử mô phỏng 20/30 người × 50 URL. Không tự deploy hoặc chuyển dữ liệu runtime trong lần sửa source này.
 
 ## Domain Worker: kiểm tra lại sau khi bổ sung email

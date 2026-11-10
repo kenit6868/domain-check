@@ -183,3 +183,6 @@ Verisign correction 3.1.6 / adapter 1.0.1: PHISHING reveals phishingDetails (bra
 
 
 Quick Report extension compatibility: use manifest JSON module import for HMR-safe download version. Keep provider minimum versions in extensionCompatibility.ts; incompatible autofill must not create tasks and offers manual opening, while compatible forms remain usable on older installed versions. Verisign minimum is 3.1.6; older fill-only baseline is 3.1.0. Recheck handshake after manual extension reload. Version UX never replaces backend auth/owner/device/CSRF checks.
+
+
+Environment layout is shared between local and VPS: frontend/.env owns VITE_FORM_ASSISTANT_EXTENSION_ID; backend/.env owns backend and infrastructure. Deploy helper/production Compose commands load --env-file .env --env-file ../frontend/.env from backend, then pass only the public ID as FE build arg. Do not duplicate the ID in backend env, read/copy actual secrets, or bundle env files. Both files must exist before real deployment. Dry-run remains read-only and never invokes Docker.

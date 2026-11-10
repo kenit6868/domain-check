@@ -1,4 +1,4 @@
-# Use with compose.yaml and --env-file backend/.env (see docs/team-deployment.md).
+# From backend: use compose.yaml and --env-file .env --env-file ../frontend/.env.
 x-backend: &backend
   image: domaincheck-backend:${DOMAINCHECK_RELEASE:-local}
   env_file: ./.env
@@ -78,7 +78,7 @@ services:
     build:
       context: ../frontend
       args:
-        VITE_FORM_ASSISTANT_EXTENSION_ID: ${VITE_FORM_ASSISTANT_EXTENSION_ID:?Set the installed public extension ID}
+        VITE_FORM_ASSISTANT_EXTENSION_ID: ${VITE_FORM_ASSISTANT_EXTENSION_ID:?Set the installed public extension ID in frontend/.env}
     environment:
       DOMAINCHECK_PUBLIC_HOST: ${DOMAINCHECK_PUBLIC_HOST:?Set the public HTTPS hostname}
     ports:

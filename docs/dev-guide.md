@@ -107,6 +107,8 @@ nghiệp vụ gồm gửi mail/report, nên rà soát quyền trước khi duy�
 | Submit Netcraft | `DOMAINCHECK_NETCRAFT_SUBMIT_ENABLED=true` khi chủ động muốn gửi thật |
 | Extension Quick Report | Cài ZIP từ UI, Options dùng origin dev; đặt ID vào `frontend/.env` qua `VITE_FORM_ASSISTANT_EXTENSION_ID`, rồi restart FE |
 
+Local và production dùng cùng vị trí `frontend/.env` cho cấu hình FE. Docker deploy helper đọc `backend/.env` và `frontend/.env`, truyền ID công khai vào build argument; không cần chuyển hoặc khai báo trùng ID trong `backend/.env`. Docker vẫn loại file env khỏi build context. Đổi ID trên VPS cần build/deploy FE lại.
+
 Không bật gửi/submit chỉ để kiểm tra khởi động. Preview và quyền gửi là hai bước
 riêng; gửi thật/đọc mailbox được thực hiện bằng thao tác chủ động trong UI.
 

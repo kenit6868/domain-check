@@ -8,7 +8,8 @@ SERVICES = ['api', 'quick-report', 'check-domain', 'precheck', 'evidence', 'send
 
 
 def deployment_commands():
-    compose = ['docker', 'compose', '--env-file', '.env', '-f', 'compose.yaml', '-f', 'compose.production.yaml']
+    compose = ['docker', 'compose', '--env-file', '.env', '--env-file', '../frontend/.env',
+               '-f', 'compose.yaml', '-f', 'compose.production.yaml']
     return [
         compose + ['build'],
         compose + ['up', '-d', '--wait', 'db', 'redis'],
@@ -24,6 +25,8 @@ def main():
     args = parser.parse_args()
     if not args.dry_run and not (BACKEND / '.env').is_file():
         parser.error('Configure backend/.env using the documented production examples first')
+    if not args.dry_run and not (BACKEND.parent / 'frontend' / '.env').is_file():
+        parser.error('Configure frontend/.env from frontend/.env.example with the public extension ID first')
     for command in deployment_commands():
         print(subprocess.list2cmdline(command), flush=True)
         if not args.dry_run:

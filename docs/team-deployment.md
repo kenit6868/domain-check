@@ -131,7 +131,9 @@ Cần cấu hình:
   evidence bằng cấu hình ghi đè đã được kiểm tra, tránh để service lặp restart.
 - Danh sách SMTP/IMAP egress được phép và các cờ gửi report theo chủ đích.
 - `VITE_FORM_ASSISTANT_EXTENSION_ID` công khai dùng chung. Đây là tham số build
-  FE; thay ID phải build lại FE. Options của extension trên từng máy phải dùng
+  FE, đặt trong `frontend/.env` ở cả local và VPS, không đặt trong `backend/.env`.
+  Helper đọc hai file env và truyền ID vào build argument, không đưa file env vào image.
+  Thay ID phải build lại FE. Options của extension trên từng máy phải dùng
   đúng origin HTTPS của web. Extension cài unpacked không có manifest key có
   thể nhận ID khác nhau giữa các máy; cần thống nhất ID bằng cách phân phối qua
   cơ chế quản lý hoặc store trước khi dùng cho cả team. Thay đổi này không sửa
@@ -160,6 +162,7 @@ Tại thư mục gốc source đã đưa lên máy chủ:
 docker compose version
 python3 --version
 if [ ! -f backend/.env ]; then cp backend/.env.example backend/.env; fi
+if [ ! -f frontend/.env ]; then cp frontend/.env.example frontend/.env; fi
 chmod 600 backend/.env
 ```
 
@@ -254,14 +257,14 @@ Vào thư mục `backend` từ thư mục gốc. Định nghĩa hàm sau trong t
 
 ```sh
 cd backend
-dc() { docker compose --env-file .env -f compose.yaml -f compose.production.yaml "$@"; }
+dc() { docker compose --env-file .env --env-file ../frontend/.env -f compose.yaml -f compose.production.yaml "$@"; }
 dc ps -a
 ```
 
 Mỗi terminal mới cần định nghĩa lại `dc`. Ví dụ `dc ps -a` tương đương:
 
 ```sh
-docker compose --env-file .env -f compose.yaml -f compose.production.yaml ps -a
+docker compose --env-file .env --env-file ../frontend/.env -f compose.yaml -f compose.production.yaml ps -a
 ```
 
 API, web và các worker cần ở trạng thái chạy; `migrate` kết thúc với mã 0 là
@@ -332,7 +335,7 @@ dc exec api python -m domaincheck.cli sync-rbac
 
 Lệnh này không thay thế migration và không bắt buộc trong vận hành thường ngày.
 
-Trên Windows, dùng cùng lệnh `docker compose --env-file .env -f compose.yaml
+Trên Windows, dùng cùng lệnh `docker compose --env-file .env --env-file ../frontend/.env -f compose.yaml
 -f compose.production.yaml ...` tại `backend` thay cho hàm Bash `dc`;
 deploy từ thư mục gốc bằng `backend/deploy.bat`.
 
@@ -364,7 +367,7 @@ Không có tài khoản admin/mật khẩu mẫu được tạo sẵn. Biến
 2. Tại terminal, vào thư mục `backend` rồi chạy:
 
    ```sh
-   docker compose --env-file .env -f compose.yaml -f compose.production.yaml exec api python -m domaincheck.cli bootstrap-admin
+   docker compose --env-file .env --env-file ../frontend/.env -f compose.yaml -f compose.production.yaml exec api python -m domaincheck.cli bootstrap-admin
    ```
 
    Lệnh dùng subject đã cấu hình trong env, phải trùng subject OIDC của tài

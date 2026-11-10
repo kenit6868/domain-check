@@ -81,3 +81,6 @@ Correction in extension 3.1.6 / adapter 1.0.1: select PHISHING while waiting and
 
 
 Quick Report compatibility (2026-11-10): import extension manifest as a Vite module for HMR-safe download labels; do not freeze version in startup define. Gate autofill per provider minimum: baseline fill-only 3.1.0, UDR 3.1.1, CentralNic 3.1.2, GoDaddy 3.1.3, Dynadot 3.1.4, Verisign 3.1.6. Older connected versions retain compatible forms; incompatible forms expose a manual link, never create a task. Invalid versions fail compatibility. A refreshed handshake unlocks updated providers. This is FE compatibility, not backend authorization.
+
+
+Unified environment ownership (2026-11-10): VITE_FORM_ASSISTANT_EXTENSION_ID belongs in frontend/.env in both local and Docker production. backend/.env owns backend/infrastructure only. deploy_team.py passes both --env-file .env and --env-file ../frontend/.env from backend for every Compose command and checks both files before any mutation. Frontend env remains excluded from Docker context; only the public extension ID is forwarded as a build argument. Never copy/edit real env during source updates. Direct Compose runbooks must use both env files; ID changes require a FE rebuild.

@@ -25,9 +25,14 @@ class DeploymentHelperTests(unittest.TestCase):
         import io
         helper = self.load_helper()
         with tempfile.TemporaryDirectory() as directory:
-            (Path(directory) / '.env').write_text('fixture-only')
+            backend = Path(directory) / 'backend'
+            backend.mkdir()
+            (backend / '.env').write_text('fixture-only')
+            frontend = Path(directory) / 'frontend'
+            frontend.mkdir()
+            (frontend / '.env').write_text('VITE_FORM_ASSISTANT_EXTENSION_ID=' + 'a' * 32)
             for failures in ([1], [0, 0, 0, 7]):
-                with patch.object(helper, 'BACKEND', Path(directory)), \
+                with patch.object(helper, 'BACKEND', backend), \
                      patch.object(sys, 'argv', ['deploy_team']), \
                      patch.object(helper.subprocess, 'run', side_effect=[SimpleNamespace(returncode=code) for code in failures]) as run, \
                      contextlib.redirect_stdout(io.StringIO()):
@@ -36,6 +41,8 @@ class DeploymentHelperTests(unittest.TestCase):
 
     def test_deploy_plan_builds_then_drains_before_migration(self):
         commands = self.load_helper().deployment_commands()
+        for command in commands:
+            self.assertEqual(command[:6], ['docker', 'compose', '--env-file', '.env', '--env-file', '../frontend/.env'])
         self.assertEqual(commands[0][-1], 'build')
         self.assertIn('stop', commands[2])
         self.assertIn('migrate', commands[3])
@@ -43,20 +50,42 @@ class DeploymentHelperTests(unittest.TestCase):
         self.assertIn('--wait', commands[4])
         self.assertNotIn('down', [arg for command in commands for arg in command])
 
+    def test_missing_frontend_config_fails_before_any_docker_action(self):
+        import contextlib
+        import io
+        import sys
+        helper = self.load_helper()
+        with tempfile.TemporaryDirectory() as directory:
+            backend = Path(directory) / 'backend'
+            backend.mkdir()
+            (backend / '.env').write_text('fixture-only')
+            errors = io.StringIO()
+            with patch.object(helper, 'BACKEND', backend), \
+                 patch.object(sys, 'argv', ['deploy_team']), \
+                 patch.object(helper.subprocess, 'run') as run, \
+                 contextlib.redirect_stderr(errors), self.assertRaises(SystemExit):
+                helper.main()
+            run.assert_not_called()
+            self.assertIn('frontend/.env', errors.getvalue())
+
 
 @unittest.skipUnless(shutil.which('docker'), 'requires Docker Compose CLI')
 class TeamDeploymentTests(unittest.TestCase):
     def test_complete_stack_isolated_services_private_storage_and_safe_shutdown(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory) / 'backend'
+            root.mkdir()
+            frontend = Path(directory) / 'frontend'
+            frontend.mkdir()
             for name in ('compose.yaml', 'compose.production.yaml'):
                 shutil.copyfile(ROOT / 'backend' / name, root / name)
             (root / '.env').write_text(
                 'POSTGRES_PASSWORD=fixture-only\n'
                 'DOMAINCHECK_CONTAINER_DATABASE_URL=postgresql+asyncpg://fixture:fixture@db/fixture\n'
-                'DOMAINCHECK_PUBLIC_HOST=fixture.example.test\n'
-                'VITE_FORM_ASSISTANT_EXTENSION_ID=' + 'a' * 32 + '\n')
+                'DOMAINCHECK_PUBLIC_HOST=fixture.example.test\n')
+            (frontend / '.env').write_text('VITE_FORM_ASSISTANT_EXTENSION_ID=' + 'a' * 32 + '\n')
             output = subprocess.run(['docker', 'compose', '--env-file', str(root / '.env'),
+                '--env-file', str(frontend / '.env'),
                 '-f', str(root / 'compose.yaml'), '-f', str(root / 'compose.production.yaml'),
                 'config', '--format', 'json'], cwd=directory, capture_output=True, text=True, timeout=20)
             self.assertEqual(output.returncode, 0, output.stderr)
@@ -65,9 +94,11 @@ class TeamDeploymentTests(unittest.TestCase):
         self.assertEqual(set(services), {'db', 'redis', 'migrate', 'api', 'web', 'quick-report',
             'check-domain', 'precheck', 'evidence', 'send-mail', 'cloudflare-runner'})
         self.assertEqual(config['name'], 'domaincheck')
+        self.assertEqual(services['web']['build']['args']['VITE_FORM_ASSISTANT_EXTENSION_ID'], 'a' * 32)
         for name in ('api', 'quick-report', 'check-domain', 'precheck', 'evidence', 'send-mail', 'cloudflare-runner'):
             with self.subTest(name=name):
                 self.assertEqual(services[name]['restart'], 'unless-stopped')
+                self.assertNotIn('VITE_FORM_ASSISTANT_EXTENSION_ID', services[name]['environment'])
                 self.assertNotIn('ports', services[name])
                 self.assertEqual(services[name]['environment']['DOMAINCHECK_ARTIFACT_ROOT'], '/var/lib/domaincheck/artifacts')
                 self.assertEqual(services[name]['depends_on']['migrate']['condition'], 'service_completed_successfully')

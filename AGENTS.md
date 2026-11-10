@@ -129,3 +129,5 @@ Final validation: clean PostgreSQL/Redis + fresh wheel backend 402/402 (zero ski
 - 2026-11-10 — Extension 3.1.6 sửa Verisign: chờ field phishingDetails sau Phishing để điền brand_name; trả registrar/target_domain từ background cho content script. Datepicker tìm qua parentElement và shadow host để hỗ trợ Lightning synthetic light DOM trong isolated world. Đã tái hiện lỗi và xác minh bốn field trên form thật bằng dữ liệu mẫu, không Next/Submit. Không đổi backend/restart dịch vụ.
 
 - 2026-11-10 — Quick Report đồng bộ nhãn tải extension bằng import manifest (Vite HMR). Cảnh báo bản cũ, kiểm tra version tối thiểu theo provider và giữ link mở thủ công cho form chưa tương thích; Verisign cần 3.1.6. Bấm Kiểm tra lại sau cập nhật để bật form. Không đổi API/worker/quyền hoặc tự reload extension.
+
+- 2026-11-10 — Thống nhất cấu hình FE local/VPS trong frontend/.env, gồm VITE_FORM_ASSISTANT_EXTENSION_ID. Deploy helper đọc cả backend/.env và frontend/.env; kiểm tra file trước gọi Docker. ID truyền qua build arg, không đóng gói env. Cập nhật runbook; không sửa env thật hoặc deploy/restart dịch vụ.
