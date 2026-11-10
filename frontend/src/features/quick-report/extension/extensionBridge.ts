@@ -1,4 +1,5 @@
 import { bundledExtensionId } from './bundledExtensionId'
+import { UserMessageError } from '../../../lib/userMessageError'
 
 export interface ExtensionConnection {
   deviceId: string
@@ -34,20 +35,27 @@ export function getExtensionId(): string {
 }
 
 function connectionError(code?: unknown): string {
-  code = (typeof code === 'string' ? code : '').replace(/^Error:\s*/, '').trim()
-  if (code === 'origin_not_allowed') return `Extension chưa cho phép trang ${window.location.origin}. Mở Options của Web Form Assistant, lưu đúng Application origin rồi kiểm tra lại.`
-  if (code === 'device_not_initialized') return 'Extension chưa khởi tạo thiết bị. Mở Options của Web Form Assistant và lưu Application origin.'
+  const normalized = (typeof code === 'string' ? code : '').replace(/^Error:\s*/, '').trim()
+  if (normalized === 'origin_not_allowed') return `Extension chưa cho phép trang ${window.location.origin}. Mở Options của Web Form Assistant, lưu đúng Application origin rồi kiểm tra lại.`
+  if (normalized === 'device_not_initialized') return 'Extension chưa khởi tạo thiết bị. Mở Options của Web Form Assistant và lưu Application origin.'
+  if (/Failed to fetch|NetworkError|network request failed/i.test(normalized)) return 'Extension không kết nối được máy chủ. Kiểm tra mạng và trạng thái Form trước khi mở lại.'
+  if (/TimeoutError|timed out|aborted due to timeout/i.test(normalized)) return 'Extension chờ máy chủ quá lâu. Kiểm tra tab và trạng thái Form trước khi mở lại.'
   return 'Không kết nối được extension. Kiểm tra ID, bật extension và Reload bản v3 trong đúng Chrome profile, sau đó tải lại trang web.'
 }
 
 function sendMessage(message: Record<string, unknown>): Promise<ExtensionReply> {
   return new Promise((resolve, reject) => {
     const extensionId = getExtensionId()
-    if (!extensionId) { reject(new Error('Frontend chưa có VITE_FORM_ASSISTANT_EXTENSION_ID. Điền frontend/.env rồi khởi động lại frontend.')); return; }
-    if (!/^[a-p]{32}$/.test(extensionId)) { reject(new Error('ID extension không hợp lệ. Cần đúng 32 chữ cái a–p từ chrome://extensions.')); return; }
+    if (!extensionId) { reject(new UserMessageError('Frontend chưa có VITE_FORM_ASSISTANT_EXTENSION_ID. Điền frontend/.env rồi khởi động lại frontend.')); return; }
+    if (!/^[a-p]{32}$/.test(extensionId)) { reject(new UserMessageError('ID extension không hợp lệ. Cần đúng 32 chữ cái a–p từ chrome://extensions.')); return; }
     const runtime = window.chrome?.runtime
-    if (typeof runtime?.sendMessage !== 'function') { reject(new Error('Trang chưa có API kết nối extension. Dùng Chrome đã nạp Web Form Assistant v3, Reload extension rồi tải lại trang. Kiểm tra manifest cho phép origin hiện tại.')); return; }
-    const timeout = window.setTimeout(() => { reject(new Error('Extension không phản hồi.')) }, 2_500)
+    if (typeof runtime?.sendMessage !== 'function') { reject(new UserMessageError('Trang chưa có API kết nối extension. Dùng Chrome đã nạp Web Form Assistant v3, Reload extension rồi tải lại trang. Kiểm tra manifest cho phép origin hiện tại.')); return; }
+    const opening = message.type === 'domaincheck-open-form'
+    // Opening includes a capability exchange (extension HTTP timeout is 15s).
+    // Ping stays fast; a slow open is not proof that no form tab was created.
+    const timeout = window.setTimeout(() => { reject(new UserMessageError(opening
+      ? 'Chưa nhận được xác nhận mở form. Kiểm tra tab và trạng thái Form trước khi mở lại.'
+      : 'Extension không phản hồi.')) }, opening ? 20_000 : 2_500)
     try { runtime.sendMessage(extensionId, message, (response) => {
       window.clearTimeout(timeout)
       const runtimeError = window.chrome?.runtime?.lastError?.message
@@ -57,25 +65,25 @@ function sendMessage(message: Record<string, unknown>): Promise<ExtensionReply> 
           : /message port closed|message channel closed/i.test(runtimeError)
             ? 'Extension đã đóng kết nối trước khi phản hồi. Reload extension và kiểm tra lỗi Service worker trong chrome://extensions.'
             : connectionError()
-        reject(new Error(message))
+        reject(new UserMessageError(message))
       }
-      else if (!response?.ok) reject(new Error(connectionError(response?.error)))
+      else if (!response?.ok) reject(new UserMessageError(connectionError(response?.error)))
       else resolve(response)
     }) } catch {
       window.clearTimeout(timeout)
-      reject(new Error(connectionError()))
+      reject(new UserMessageError(connectionError()))
     }
   })
 }
 
 export async function pingExtension(): Promise<ExtensionConnection> {
   const response = await sendMessage({ type: 'domaincheck-ping' })
-  if (!response.deviceId || !response.extensionVersion) throw new Error('Extension trả về handshake không hợp lệ.')
+  if (!response.deviceId || !response.extensionVersion) throw new UserMessageError('Extension trả về handshake không hợp lệ.')
   return { deviceId: response.deviceId, extensionVersion: response.extensionVersion }
 }
 
 export async function openExtensionForm(capabilityToken: string): Promise<{ taskId: string; tabId: number }> {
   const response = await sendMessage({ type: 'domaincheck-open-form', capabilityToken })
-  if (!response.taskId || response.tabId === undefined) throw new Error('Extension không xác nhận tab form.')
+  if (!response.taskId || response.tabId === undefined) throw new UserMessageError('Extension không xác nhận tab form.')
   return { taskId: response.taskId, tabId: response.tabId }
 }

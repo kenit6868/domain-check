@@ -156,6 +156,12 @@ create/migrate runtime folders or write global CSV/JSON state.
 
 ## Validation and documentation
 
+Form-open acknowledgements allow 20 seconds while ping keeps 2.5 seconds;
+extension exchange HTTP is bounded at 15 seconds. Never replay on an uncertain
+acknowledgement; ask operators to check tabs/task status before another action.
+Netcraft/comparison reads do not gate opening extension forms. Keep toast text
+UI-authored and safe; never expose raw extension/API errors or capabilities.
+
 Netcraft GET status routes reuse the authenticated request session for get/find.
 Quick Report keeps all cards and the original action/draft layout in a scrolling
 list. Defer data queries until near viewport, not markup or user controls.

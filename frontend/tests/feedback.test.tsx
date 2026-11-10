@@ -9,10 +9,18 @@ import { useConfirmation } from '../src/components/shared/useConfirmation'
 import { createQueryClient } from '../src/lib/query/client'
 import { notifyError, toast } from '../src/lib/notifications'
 import { ApiError } from '../src/lib/http/errors'
+import { UserMessageError } from '../src/lib/userMessageError'
 
 afterEach(() => { cleanup(); toast.dismiss(); vi.restoreAllMocks() })
 
 describe('application feedback', () => {
+  it('shows authored action guidance but keeps arbitrary exception text private', () => {
+    const error = vi.spyOn(toast, 'error')
+    notifyError(new UserMessageError('Kiểm tra tab và trạng thái Form trước khi mở lại.'))
+    expect(error).toHaveBeenLastCalledWith('Kiểm tra tab và trạng thái Form trước khi mở lại.', expect.any(Object))
+    notifyError(new Error('private-capability-and-body'))
+    expect(JSON.stringify(error.mock.calls)).not.toContain('private-capability-and-body')
+  })
   it('shows accessible dismissible notifications', async () => {
     const view = render(<ThemeContext.Provider value={{ appearance: 'light', setAppearance: () => undefined }}><AppToaster /></ThemeContext.Provider>)
     act(() => { toast.success('Đã lưu cấu hình thử nghiệm.', { duration: Infinity }) })

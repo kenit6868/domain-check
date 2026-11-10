@@ -64,3 +64,41 @@ it('lets manual retry recover and ignores an older failed initial ping', async (
   expect(result.current.state).toBe('connected')
   expect(result.current.message).toBe('')
 })
+
+it('accepts a slow form-open acknowledgement beyond the fast ping deadline without replay', async () => {
+  vi.useFakeTimers()
+  let respond: (response: unknown) => void = () => {}
+  const sendMessage = vi.fn((_id: string, _message: unknown, callback: (response: unknown) => void) => { respond = callback })
+  vi.stubGlobal('chrome', { runtime: { sendMessage } })
+  let settled = false
+  const outcome = bridge.openExtensionForm('fixture-capability').then(
+    value => { settled = true; return { value } }, (error: unknown) => { settled = true; return { error } })
+  await vi.advanceTimersByTimeAsync(3_000)
+  expect(settled).toBe(false)
+  respond({ ok: true, taskId: 'fixture-task', tabId: 7 })
+  expect(await outcome).toEqual({ value: { taskId: 'fixture-task', tabId: 7 } })
+  expect(sendMessage).toHaveBeenCalledTimes(1)
+})
+
+it('bounds opening at 20 seconds and explains uncertainty without retrying automatically', async () => {
+  vi.useFakeTimers()
+  const sendMessage = vi.fn(() => undefined)
+  vi.stubGlobal('chrome', { runtime: { sendMessage } })
+  let settled = false
+  const outcome = bridge.openExtensionForm('private-capability').catch((error: unknown) => { settled = true; return error })
+  await vi.advanceTimersByTimeAsync(19_999)
+  expect(settled).toBe(false)
+  await vi.advanceTimersByTimeAsync(1)
+  expect(String(await outcome)).toContain('Kiểm tra tab và trạng thái Form')
+  expect(String(await outcome)).not.toContain('private-capability')
+  expect(sendMessage).toHaveBeenCalledTimes(1)
+})
+
+it('maps extension network errors to safe guidance without copying raw replies', async () => {
+  vi.stubGlobal('chrome', { runtime: { sendMessage: (_id: string, _message: unknown, callback: (response: unknown) => void) => {
+    callback({ ok: false, error: 'Failed to fetch private-capability-and-body' })
+  } } })
+  const error = await bridge.openExtensionForm('fixture').catch((value: unknown) => value)
+  expect(String(error)).toContain('Extension không kết nối được máy chủ')
+  expect(String(error)).not.toContain('private-capability-and-body')
+})

@@ -166,6 +166,14 @@ Build FE tạo `frontend/dist/downloads/web-form-assistant.zip` bản 3.1.5. Gi�
 
 ### Quick Report — Netcraft pending và QueuePool timeout
 
+Mở form extension không phụ thuộc việc đọc trạng thái Netcraft/draft. Luồng mở
+là đăng ký thiết bị → tạo task → extension exchange → mở tab. FE chờ xác nhận
+mở form tối đa 20 giây (HTTP exchange trong extension timeout 15 giây); ping
+vẫn 2.5 giây. Quá hạn không chứng minh tab chưa mở: kiểm tra tab và trạng thái
+Form trước khi bấm lại. Không tự retry capability hoặc tự tạo task khác.
+Toast chỉ hiển thị thông báo do UI chủ động soạn qua UserMessageError; lỗi/API
+raw vẫn dùng nội dung chung để tránh lộ token, draft hoặc thông tin liên hệ.
+
 FE giữ toàn bộ card trên một trang sau bộ lọc cache/cũ, giữ số thứ tự ban đầu
 và tổng tiến độ. Bố cục/padding/nội dung đối chiếu giữ như trước, không có nút mở
 draft hoặc wrapper skeleton. IntersectionObserver chỉ bật query khi card gần

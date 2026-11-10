@@ -51,6 +51,39 @@ function renderQuickReport() {
 describe('Quick Report workflow', () => {
   afterEach(() => { cleanup(); sessionStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+  it('opens Google independently while Netcraft status and comparison drafts remain pending', async () => {
+    const taskId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+    vi.spyOn(extensionBridge, 'pingExtension').mockResolvedValue({ deviceId: 'fixture-device', extensionVersion: '3.1.8' })
+    const open = vi.spyOn(extensionBridge, 'openExtensionForm').mockResolvedValue({ taskId, tabId: 7 })
+    sessionStorage.setItem(`domaincheck:v1:u:${me.id}:quick-report:active-operation`, operation().id)
+    const pendingReads: string[] = []
+    const restore = installApiMock((config) => {
+      if (config.url === '/me') return { ...me, permissions: [...me.permissions, 'quick_report.open_form', 'quick_report.submit_netcraft'] }
+      if (config.url === '/quick-reports/readiness') return { ready: true, missing: [] }
+      if (config.url?.startsWith('/quick-reports/netcraft-statuses?') || config.url?.includes('/form-drafts?')) {
+        pendingReads.push(config.url)
+        return new Promise(() => {})
+      }
+      if (config.url === '/extension/devices') return { registered: true, extension_version: '3.1.8' }
+      if (config.url?.endsWith('/form-tasks')) return {
+        id: taskId, capability_token: 'fixture-capability', provider: 'google_gsb',
+        form_url: 'https://safebrowsing.google.com/safebrowsing/report_phish/', target_url: 'https://example.test/login',
+        mode: 'fill_only', state: 'CREATED', expires_at: '2026-11-11T00:00:00Z',
+      }
+      if (config.url?.startsWith('/form-tasks/')) return new Promise(() => {})
+      if (config.url?.startsWith('/quick-reports/checks/')) return operation()
+      throw new Error('Unexpected request')
+    })
+    renderQuickReport()
+    const google = await screen.findByRole('button', { name: 'Google — Mở và tự điền' })
+    await waitFor(() => { expect(google).toBeEnabled(); expect(pendingReads).toHaveLength(2) })
+    expect(screen.getByRole('button', { name: 'Gửi API Netcraft' })).toBeDisabled()
+    await userEvent.click(google)
+    await waitFor(() => { expect(open).toHaveBeenCalledWith('fixture-capability') })
+    expect(open).toHaveBeenCalledTimes(1)
+    restore()
+  })
+
   it('keeps the full list visible but loads report actions only as cards enter the viewport', async () => {
     const intersections: Array<() => void> = []
     vi.stubGlobal('IntersectionObserver', class {
