@@ -68,28 +68,41 @@ class DeploymentHelperTests(unittest.TestCase):
             run.assert_not_called()
             self.assertIn('frontend/.env', errors.getvalue())
 
+    def test_aapanel_override_is_used_for_every_deployment_step(self):
+        for command in self.load_helper().deployment_commands(aapanel=True):
+            index = command.index('compose.aapanel.yaml')
+            self.assertEqual(command[index - 1], '-f')
+            self.assertGreater(index, command.index('compose.production.yaml'))
+
 
 @unittest.skipUnless(shutil.which('docker'), 'requires Docker Compose CLI')
 class TeamDeploymentTests(unittest.TestCase):
-    def test_complete_stack_isolated_services_private_storage_and_safe_shutdown(self):
+    def render_stack(self, *, aapanel=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / 'backend'
             root.mkdir()
             frontend = Path(directory) / 'frontend'
             frontend.mkdir()
-            for name in ('compose.yaml', 'compose.production.yaml'):
+            for name in ('compose.yaml', 'compose.production.yaml', 'compose.aapanel.yaml'):
                 shutil.copyfile(ROOT / 'backend' / name, root / name)
             (root / '.env').write_text(
                 'POSTGRES_PASSWORD=fixture-only\n'
                 'DOMAINCHECK_CONTAINER_DATABASE_URL=postgresql+asyncpg://fixture:fixture@db/fixture\n'
                 'DOMAINCHECK_PUBLIC_HOST=fixture.example.test\n')
             (frontend / '.env').write_text('VITE_FORM_ASSISTANT_EXTENSION_ID=' + 'a' * 32 + '\n')
-            output = subprocess.run(['docker', 'compose', '--env-file', str(root / '.env'),
+            command = ['docker', 'compose', '--env-file', str(root / '.env'),
                 '--env-file', str(frontend / '.env'),
-                '-f', str(root / 'compose.yaml'), '-f', str(root / 'compose.production.yaml'),
-                'config', '--format', 'json'], cwd=directory, capture_output=True, text=True, timeout=20)
+                '-f', str(root / 'compose.yaml'), '-f', str(root / 'compose.production.yaml')]
+            if aapanel:
+                command += ['-f', str(root / 'compose.aapanel.yaml')]
+            output = subprocess.run(command + ['config', '--format', 'json'], cwd=directory,
+                capture_output=True, text=True, timeout=20)
             self.assertEqual(output.returncode, 0, output.stderr)
             config = json.loads(output.stdout)
+        return config
+
+    def test_complete_stack_isolated_services_private_storage_and_safe_shutdown(self):
+        config = self.render_stack()
         services = config['services']
         self.assertEqual(set(services), {'db', 'redis', 'migrate', 'api', 'web', 'quick-report',
             'check-domain', 'precheck', 'evidence', 'send-mail', 'cloudflare-runner'})
@@ -108,6 +121,19 @@ class TeamDeploymentTests(unittest.TestCase):
         self.assertEqual(services['evidence']['command'][-1], 'browser_evidence')
         self.assertIn('postgres-data', config['volumes'])
         self.assertIn('artifacts-data', config['volumes'])
+
+    def test_aapanel_keeps_databases_internal_and_publishes_only_loopback_http(self):
+        config = self.render_stack(aapanel=True)
+        services = config['services']
+        self.assertFalse(services['db'].get('ports'))
+        self.assertFalse(services['redis'].get('ports'))
+        ports = services['web']['ports']
+        self.assertEqual(len(ports), 1)
+        self.assertEqual((ports[0]['host_ip'], ports[0]['published'], ports[0]['target']), ('127.0.0.1', '8088', 80))
+        self.assertEqual(services['web']['environment']['DOMAINCHECK_PUBLIC_HOST'], 'http://fixture.example.test')
+        self.assertNotIn('ports', services['api'])
+        self.assertEqual(services['api']['environment']['DOMAINCHECK_REDIS_URL'], 'redis://redis:6379/0')
+        self.assertEqual(config['name'], 'domaincheck')
 
     def test_build_contexts_exclude_configuration_and_runtime(self):
         backend_ignore = (ROOT / 'backend/.dockerignore').read_text()

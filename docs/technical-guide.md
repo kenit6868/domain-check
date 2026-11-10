@@ -181,3 +181,8 @@ Kiểm tra tương thích theo provider tại `extensionCompatibility.ts`: luồ
 ## Cấu hình env thống nhất local và VPS (2026-11-10)
 
 Giữ cấu hình backend/hạ tầng trong `backend/.env`; cấu hình FE công khai trong `frontend/.env`, gồm `VITE_FORM_ASSISTANT_EXTENSION_ID`. Cả local Vite và deploy Docker dùng cùng vị trí, không chuyển ID sang backend khi lên server. Helper production chạy Compose với `--env-file .env --env-file ../frontend/.env` từ thư mục backend và kiểm tra cả hai file trước gọi Docker. File env vẫn bị loại khỏi build context; chỉ ID công khai được truyền vào build argument. Lệnh Compose thủ công cũng phải dùng cả hai env file. Đổi ID cần build lại frontend. Nếu từng khai báo ID trong backend env, chuyển giá trị đó sang frontend env rồi bỏ dòng trùng bằng thao tác của người vận hành; cập nhật source không tự sửa cấu hình thật. Shell environment vẫn có ưu tiên theo chuẩn Docker/Vite, nên tránh export ID cũ khi build.
+
+
+## aaPanel reverse proxy
+
+Xem [runbook aaPanel](aapanel-deployment.md). Helper thêm `--aapanel` để nạp `compose.aapanel.yaml` cuối cùng trong mọi bước. Web chỉ publish `127.0.0.1:8088:80`, nhận địa chỉ Caddy HTTP nội bộ; Nginx aaPanel quản lý chứng chỉ và chuyển tiếp Host đúng hostname công khai. DB/Redis không publish cổng host. Không đổi project name/volume/internal endpoint. Cần Compose 2.24.4+; bản không flag vẫn là standalone Caddy 80/443. Luôn dùng đúng ba file Compose cho ps/logs/exec/update. 8 test deploy đạt với fixture config render, gồm chỉ một port loopback và không có port DB/Redis; dry-run không gọi Docker. Chưa kiểm thử end-to-end trên aaPanel thật hoặc chạy container/migration trong lượt thay đổi này.

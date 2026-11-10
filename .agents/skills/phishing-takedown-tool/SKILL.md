@@ -186,3 +186,6 @@ Quick Report extension compatibility: use manifest JSON module import for HMR-sa
 
 
 Environment layout is shared between local and VPS: frontend/.env owns VITE_FORM_ASSISTANT_EXTENSION_ID; backend/.env owns backend and infrastructure. Deploy helper/production Compose commands load --env-file .env --env-file ../frontend/.env from backend, then pass only the public ID as FE build arg. Do not duplicate the ID in backend env, read/copy actual secrets, or bundle env files. Both files must exist before real deployment. Dry-run remains read-only and never invokes Docker.
+
+
+aaPanel VPS uses deploy_team.py --aapanel with compose.aapanel.yaml last on every command. Nginx owns public HTTPS; Caddy web serves HTTP only at host loopback 8088; DB/Redis have no host ports. Retain project names/volumes and internal service endpoints. Standalone Caddy 80/443 defaults must not be used on aaPanel accidentally. Read docs/aapanel-deployment.md; config rendering and dry-run are safe fixture checks, not a real VPS smoke or authorization to restart active workers.

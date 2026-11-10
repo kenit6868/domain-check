@@ -131,3 +131,5 @@ Final validation: clean PostgreSQL/Redis + fresh wheel backend 402/402 (zero ski
 - 2026-11-10 — Quick Report đồng bộ nhãn tải extension bằng import manifest (Vite HMR). Cảnh báo bản cũ, kiểm tra version tối thiểu theo provider và giữ link mở thủ công cho form chưa tương thích; Verisign cần 3.1.6. Bấm Kiểm tra lại sau cập nhật để bật form. Không đổi API/worker/quyền hoặc tự reload extension.
 
 - 2026-11-10 — Thống nhất cấu hình FE local/VPS trong frontend/.env, gồm VITE_FORM_ASSISTANT_EXTENSION_ID. Deploy helper đọc cả backend/.env và frontend/.env; kiểm tra file trước gọi Docker. ID truyền qua build arg, không đóng gói env. Cập nhật runbook; không sửa env thật hoặc deploy/restart dịch vụ.
+
+- 2026-11-10 — Deploy thêm --aapanel và compose.aapanel.yaml: Nginx giữ HTTPS, web bind 127.0.0.1:8088 HTTP, bỏ host port DB/Redis để tránh dịch vụ aaPanel có sẵn. Dùng override cho mọi lệnh deploy/vận hành; runbook docs/aapanel-deployment.md. 8/8 test deploy và dry-run đạt; không chạy stack thật hoặc sửa env/runtime.

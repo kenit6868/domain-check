@@ -1,5 +1,7 @@
 # Hướng dẫn triển khai cho team 15–30 người
 
+**VPS dùng aaPanel/Nginx có sẵn:** làm theo [hướng dẫn aaPanel](aapanel-deployment.md), dùng `deploy_team.py --aapanel` và đủ ba file Compose. Các lệnh standalone phía dưới dùng Caddy chiếm 80/443, không áp dụng nguyên trạng cho aaPanel.
+
 Mức tải khởi đầu được xem xét là tối đa 20 người cùng gửi khoảng 50 URL/người,
 tương đương 1.000 URL trong hàng đợi. Một kịch bản kiểm thử khác bao gồm 30 người
 và 1.500 URL. Hệ thống xử lý theo lượt, không mở đồng thời 1.000 trình duyệt hoặc

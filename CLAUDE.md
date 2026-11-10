@@ -84,3 +84,6 @@ Quick Report compatibility (2026-11-10): import extension manifest as a Vite mod
 
 
 Unified environment ownership (2026-11-10): VITE_FORM_ASSISTANT_EXTENSION_ID belongs in frontend/.env in both local and Docker production. backend/.env owns backend/infrastructure only. deploy_team.py passes both --env-file .env and --env-file ../frontend/.env from backend for every Compose command and checks both files before any mutation. Frontend env remains excluded from Docker context; only the public extension ID is forwarded as a build argument. Never copy/edit real env during source updates. Direct Compose runbooks must use both env files; ID changes require a FE rebuild.
+
+
+aaPanel deployment uses deploy_team.py --aapanel and compose.aapanel.yaml after the base/production files on every operation. aaPanel Nginx owns public HTTPS; web publishes only 127.0.0.1:8088:80 and gets an http:// site address to disable Caddy TLS behind the proxy. DB/Redis host ports are reset; internal endpoints and durable volumes remain unchanged. Require Compose 2.24.4+. Keep standalone behavior without this flag. Never run the standalone helper/commands against aaPanel by accident.

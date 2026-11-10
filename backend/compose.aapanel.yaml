@@ -1,0 +1,12 @@
+# Compose 2.24.4+. Use after compose.yaml and compose.production.yaml.
+# aaPanel owns public HTTPS; Caddy serves HTTP behind the host's reverse proxy.
+services:
+  db:
+    ports: !reset []
+  redis:
+    ports: !reset []
+  web:
+    environment:
+      DOMAINCHECK_PUBLIC_HOST: "http://${DOMAINCHECK_PUBLIC_HOST:?Set the public hostname without a scheme}"
+    ports: !override
+      - "127.0.0.1:8088:80"
