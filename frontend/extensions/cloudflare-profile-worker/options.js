@@ -30,7 +30,7 @@ document.getElementById("save").addEventListener("click", async () => {
     if (!granted) throw new Error("Quyền truy cập origin chưa được cấp.");
     await chrome.storage.local.set({domaincheckOrigin: origin});
     status.className = "ok";
-    status.textContent = `Đã khóa kết nối vào ${origin}`;
+    status.textContent = `Đã thêm kết nối ${origin}; các địa chỉ mặc định vẫn hoạt động.`;
   } catch (error) {
     status.className = "error";
     status.textContent = String(error).replace(/^Error:\s*/, "").slice(0, 220);

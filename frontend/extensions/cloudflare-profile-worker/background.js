@@ -36,9 +36,31 @@ const updateBadge = (tabId, state, message) => {
     chrome.action.setTitle({tabId, title: badge.title}),
   ]);
 };
-const getConnection = async () => {
-  const stored = await chrome.storage.local.get(["domaincheckOrigin", "deviceId"]);
-  return {origin: String(stored.domaincheckOrigin || ""), deviceId: String(stored.deviceId || "")};
+// Trust exact application origins; never use an origin supplied in message payloads.
+const defaultApplicationOrigins = new Set([
+  "https://tool-check.camellrp.com",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+]);
+let deviceInitialization;
+const getDeviceId = () => {
+  if (!deviceInitialization) {
+    deviceInitialization = (async () => {
+      const stored = await chrome.storage.local.get(["deviceId"]);
+      if (stored.deviceId) return String(stored.deviceId);
+      const deviceId = crypto.randomUUID();
+      await chrome.storage.local.set({deviceId});
+      return deviceId;
+    })().catch((error) => { deviceInitialization = undefined; throw error; });
+  }
+  return deviceInitialization;
+};
+const getConnection = async (origin) => {
+  const stored = await chrome.storage.local.get(["domaincheckOrigin"]);
+  if (!defaultApplicationOrigins.has(origin) && (!origin || origin !== stored.domaincheckOrigin)) {
+    throw new Error("origin_not_allowed");
+  }
+  return {origin, deviceId: await getDeviceId()};
 };
 const senderOrigin = (sender) => {
   try { return new URL(sender.url || "").origin; } catch (_) { return ""; }
@@ -47,6 +69,7 @@ const apiPost = async (origin, path, body) => {
   const response = await fetch(`${origin}${path}`, {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify(body), cache: "no-store", credentials: "omit",
+    signal: AbortSignal.timeout(15000),
   });
   let payload = {};
   try { payload = await response.json(); } catch (_) {}
@@ -56,8 +79,7 @@ const apiPost = async (origin, path, body) => {
 const taskStorageKey = (tabId) => `formTask:${tabId}`;
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   (async () => {
-    const connection = await getConnection();
-    if (!connection.origin || senderOrigin(sender) !== connection.origin) throw new Error("origin_not_allowed");
+    const connection = await getConnection(senderOrigin(sender));
     if (!connection.deviceId) throw new Error("device_not_initialized");
     if (message?.type === "domaincheck-ping") {
       return {ok: true, deviceId: connection.deviceId, extensionVersion: chrome.runtime.getManifest().version};

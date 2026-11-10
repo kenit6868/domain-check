@@ -1,5 +1,11 @@
 # Domain Check Tool — hướng dẫn dự án
 
+- 2026-11-10 — Extension 3.1.7 tự kết nối exact production tool-check.camellrp.com
+  và localhost/127.0.0.1 cổng 5173; tự tạo device ID, giữ ID/custom origin cũ.
+  Options chỉ thêm origin ngoài mặc định. Task giữ apiOrigin riêng, không nhận
+  origin từ payload. FE 200/200, build/typecheck/lint đạt; một lượt trung gian
+  timeout Audit Log, chạy lại đạt. Không sửa env/profile, restart hoặc deploy.
+
 ## Phạm vi
 
 Bản được hỗ trợ chỉ gồm backend FastAPI/worker và frontend React. Người dùng đã xác nhận các tính năng cần thiết đều có trong web; ứng dụng Streamlit/desktop/CLI cũ và chức năng chỉ có ở đó đã được gỡ. Không giữ hoặc khôi phục một bản ứng dụng cũ song song.

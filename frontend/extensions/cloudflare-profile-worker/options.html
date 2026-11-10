@@ -10,8 +10,8 @@
 </head>
 <body><main>
   <h1>Kết nối Domain Check Tool</h1>
-  <p>Nhập đúng origin của ứng dụng. Extension chỉ nhận message và gọi API tại origin này. Production bắt buộc HTTPS; localhost chỉ dùng phát triển.</p>
-  <label>Application origin<input id="origin" placeholder="https://domaincheck.example" autocomplete="off"></label>
+  <p>Web tool-check.camellrp.com và local http://localhost:5173 / http://127.0.0.1:5173 kết nối tự động, không cần cấu hình. Chỉ nhập bên dưới khi cần thêm một origin khác. Production bắt buộc HTTPS.</p>
+  <label>Application origin bổ sung<input id="origin" placeholder="https://domaincheck.example" autocomplete="off"></label>
   <button id="save" type="button">Cấp quyền và lưu</button>
   <p id="status" aria-live="polite"></p>
   <p>Device ID: <code id="device">—</code></p>

@@ -189,3 +189,6 @@ Environment layout is shared between local and VPS: frontend/.env owns VITE_FORM
 
 
 aaPanel VPS uses deploy_team.py --aapanel with compose.aapanel.yaml last on every command. Nginx owns public HTTPS; Caddy web serves HTTP only at host loopback 8088; DB/Redis have no host ports. Retain project names/volumes and internal service endpoints. Standalone Caddy 80/443 defaults must not be used on aaPanel accidentally. Read docs/aapanel-deployment.md; config rendering and dry-run are safe fixture checks, not a real VPS smoke or authorization to restart active workers.
+
+
+Extension 3.1.7: default exact application origins are https://tool-check.camellrp.com, http://localhost:5173 and http://127.0.0.1:5173. Initialize device ID lazily once on authorized handshake, preserve existing ID. Legacy Options origin is additive to defaults. Exchange uses sender URL origin; status uses immutable per-task apiOrigin. Never trust a payload origin or enable arbitrary localhost ports. Default host permissions need no Options grant; custom origins still require explicit permission. No automatic extension reload/profile edits or submission.

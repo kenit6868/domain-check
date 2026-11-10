@@ -164,6 +164,31 @@ Giữ giá trị đã điền; giá trị khác task, field thiếu, ngày khôn
 Build FE tạo `frontend/dist/downloads/web-form-assistant.zip` bản 3.1.5. Giải nén vào cùng thư mục extension đang dùng, Reload thủ công và chấp nhận quyền cho host Verisign nếu Chrome yêu cầu. API cần nạp code mới khi triển khai; payload mới giữ mặc định rỗng cho task cũ. Không cần migration/restart worker. Kiểm thử: xem `docs/testing/verisign-adapter-2026-11-10.md`.
 
 
+### Extension 3.1.7 — kết nối mặc định
+
+Cài mới hoặc cập nhật extension rồi Reload, tải lại trang và bấm Kiểm tra lại.
+Không cần Options cho `https://tool-check.camellrp.com`, `http://localhost:5173`
+và `http://127.0.0.1:5173`. Device ID tự tạo ở lần kết nối hợp lệ đầu tiên;
+nâng cấp giữ ID cũ. Origin cũ trong Options là địa chỉ bổ sung, không thay mặc định.
+Origin khác vẫn cần cấp quyền và lưu trong Options. Mỗi task giữ riêng apiOrigin;
+exchange dùng sender URL, không dùng origin trong payload. Host permissions cho
+loopback bao phủ các cổng, nhưng worker chỉ cho phép exact origin cổng 5173 mặc định.
+
+Kiểm thử thủ công:
+
+1. Giải nén ZIP vào đúng thư mục extension đang cài, Reload để giữ ID. Chấp nhận
+   quyền truy cập mới nếu Chrome hỏi. Không sửa Chrome profile.
+2. Mở production, tải lại trang, Kiểm tra lại phải nhận 3.1.7 mà không mở Options.
+3. Mở local cổng 5173 trong tab khác, Kiểm tra lại; cả hai môi trường cùng kết nối.
+4. Mở task mới từ từng môi trường bằng dữ liệu thử; kiểm tra điền form và trạng thái
+   về đúng nơi tạo task. Next/CAPTCHA/upload/Submit vẫn thủ công; không gửi report để thử.
+5. Cài mới trên Chrome profile thử riêng để kiểm tra không cần Options. ID mới phải
+   khớp frontend/.env của FE thử; thay ID cần build lại FE. Việc này không tự giải
+   quyết phân phối ID unpacked giữa các máy trong team.
+
+Production cần cập nhật source và build/deploy FE để cung cấp ZIP/nhãn mới.
+Người dùng cập nhật extension riêng. Không cần migration hay đổi backend.
+
 ### Sửa Verisign trong extension 3.1.6
 
 Sau chọn Phishing, field `phishingDetails` (Brand name or website being impersonated) xuất hiện và nhận `brand_name` từ hồ sơ. Bản 3.1.5 đã bỏ sót field động này. Background phải trả registrar/target_domain từ session storage cho `form-task-for-tab`; bản 3.1.6 đã sửa đường truyền này. Calendar cần tìm qua cả physical parent và shadow host vì Lightning synthetic shadow hiển thị thành light DOM trong môi trường cô lập của Chrome extension. Đã xác minh bốn field bằng dữ liệu mẫu trên form thật trong CDP isolated world. Không bấm Next hoặc gửi báo cáo.

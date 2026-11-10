@@ -87,3 +87,6 @@ Unified environment ownership (2026-11-10): VITE_FORM_ASSISTANT_EXTENSION_ID bel
 
 
 aaPanel deployment uses deploy_team.py --aapanel and compose.aapanel.yaml after the base/production files on every operation. aaPanel Nginx owns public HTTPS; web publishes only 127.0.0.1:8088:80 and gets an http:// site address to disable Caddy TLS behind the proxy. DB/Redis host ports are reset; internal endpoints and durable volumes remain unchanged. Require Compose 2.24.4+. Keep standalone behavior without this flag. Never run the standalone helper/commands against aaPanel by accident.
+
+
+Extension 3.1.7: default exact application origins are https://tool-check.camellrp.com, http://localhost:5173 and http://127.0.0.1:5173. Initialize device ID lazily once on authorized handshake, preserve existing ID. Legacy Options origin is additive to defaults. Exchange uses sender URL origin; status uses immutable per-task apiOrigin. Never trust a payload origin or enable arbitrary localhost ports. Default host permissions need no Options grant; custom origins still require explicit permission. No automatic extension reload/profile edits or submission.

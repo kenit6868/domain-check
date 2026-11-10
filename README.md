@@ -77,6 +77,12 @@ Preview/draft tiếng Anh; evidence và SMTP ledger giữ scope user/account/ng�
 
 ## Extension Quick Report
 
+Extension **3.1.7** tự kết nối `https://tool-check.camellrp.com`,
+`http://localhost:5173` và `http://127.0.0.1:5173`, không cần mở Options.
+Device ID tự khởi tạo; cấu hình origin cũ vẫn được giữ làm địa chỉ bổ sung.
+Các hướng dẫn mở Options bên dưới chỉ áp dụng cho origin khác hoặc bản cũ.
+Xem hướng dẫn kiểm thử trong [technical guide](docs/technical-guide.md).
+
 Nút **Tải extension** cung cấp ZIP của bản đi kèm web, đổi thành **Tải bản cập nhật** khi phiên bản kết nối thấp hơn. Bản **3.1.0** chỉ dùng task của web ở chế độ fill_only, đã bỏ bridge local và tự submit của desktop cũ. Giải nén vào thư mục cố định, vào chrome://extensions, bật Developer mode rồi **Load unpacked**. Mở Options, cấu hình exact Application origin và đối chiếu ID với VITE_FORM_ASSISTANT_EXTENSION_ID. Khi cập nhật, thay file trong cùng thư mục, Reload extension rồi tải lại web. Tải ZIP không tự cài hay submit.
 
 Chrome profile đang dùng đường dẫn cũ chrome_extension/ có thể tiếp tục nhờ bản sao sinh từ source FE bằng `python backend/scripts/sync_installed_extension.py`. Đây là bản sinh của extension hiện tại, không phải ứng dụng cũ hay source để sửa. Đổi thư mục unpacked có thể đổi ID; không tự sửa profile người dùng.
