@@ -2,13 +2,14 @@ import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as bridge from '../src/features/quick-report/extension/extensionBridge'
 import { useExtensionConnection } from '../src/features/quick-report/hooks/useExtensionConnection'
+import { bundledExtensionId } from '../src/features/quick-report/extension/bundledExtensionId'
 
 const id = 'a'.repeat(32)
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
-it('distinguishes missing ID, invalid ID and unavailable browser API', async () => {
+it('defaults to bundled ID and distinguishes invalid ID and unavailable browser API', async () => {
   vi.stubEnv('VITE_FORM_ASSISTANT_EXTENSION_ID', '')
-  await expect(bridge.pingExtension()).rejects.toThrow('Frontend chưa có VITE_FORM_ASSISTANT_EXTENSION_ID')
+  expect(bridge.getExtensionId()).toBe(bundledExtensionId)
   vi.stubEnv('VITE_FORM_ASSISTANT_EXTENSION_ID', 'wrong-id')
   await expect(bridge.pingExtension()).rejects.toThrow('ID extension không hợp lệ')
   vi.stubEnv('VITE_FORM_ASSISTANT_EXTENSION_ID', id)

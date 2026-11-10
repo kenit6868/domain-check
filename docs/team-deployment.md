@@ -135,11 +135,14 @@ Cần cấu hình:
 - `VITE_FORM_ASSISTANT_EXTENSION_ID` công khai dùng chung. Đây là tham số build
   FE, đặt trong `frontend/.env` ở cả local và VPS, không đặt trong `backend/.env`.
   Helper đọc hai file env và truyền ID vào build argument, không đưa file env vào image.
-  Thay ID phải build lại FE. Options của extension trên từng máy phải dùng
-  đúng origin HTTPS của web. Extension cài unpacked không có manifest key có
-  thể nhận ID khác nhau giữa các máy; cần thống nhất ID bằng cách phân phối qua
-  cơ chế quản lý hoặc store trước khi dùng cho cả team. Thay đổi này không sửa
-  ID, key, phiên bản extension hoặc Chrome profile đang cài.
+  Từ extension 3.1.8, manifest có public key cố định, mọi bản Load unpacked dùng
+  ID `aaodigjnbngpggpgkphmeaakpfhehcpb`. Quản trị sửa ID cũ trong frontend/.env
+  sang ID chung một lần rồi build FE. Người dùng cài gói mới; nếu Chrome vẫn giữ
+  ID cũ, gỡ bản cũ và Load unpacked lại. Không tự sửa Chrome profile.
+  Production tool-check.camellrp.com và localhost/127.0.0.1 cổng 5173 không cần
+  Options; domain khác dùng Options. Không đổi manifest key khi cập nhật.
+  Key này công khai, không phải master key hay quyền xác thực. Nếu chuyển sang
+  Chrome Web Store cần đồng bộ key/ID với store theo kế hoạch chuyển đổi.
 
 Trong danh sách trên, các tên cấu hình backend viết ngắn phải có tiền tố
 `DOMAINCHECK_`, ví dụ `DOMAINCHECK_BROWSER_CAPTURE_ENABLED` và

@@ -77,6 +77,11 @@ Preview/draft tiếng Anh; evidence và SMTP ledger giữ scope user/account/ng�
 
 ## Extension Quick Report
 
+Bản **3.1.8** thêm public key cố định để mọi máy cài unpacked dùng chung ID
+`aaodigjnbngpggpgkphmeaakpfhehcpb`. Quản trị cập nhật ID cũ trong `frontend/.env`
+một lần rồi build FE; người dùng không nhập ID hoặc sửa env. Cài bản mới có thể
+cần gỡ extension ID cũ và Load unpacked lại. Không đổi key khi nâng cấp sau này.
+
 Extension **3.1.7** tự kết nối `https://tool-check.camellrp.com`,
 `http://localhost:5173` và `http://127.0.0.1:5173`, không cần mở Options.
 Device ID tự khởi tạo; cấu hình origin cũ vẫn được giữ làm địa chỉ bổ sung.

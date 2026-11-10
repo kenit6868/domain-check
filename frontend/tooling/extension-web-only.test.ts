@@ -1,9 +1,21 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { runInNewContext } from 'node:vm'
+import { createHash, createPublicKey } from 'node:crypto'
+import { bundledExtensionId } from '../src/features/quick-report/extension/bundledExtensionId'
 import { expect, it, vi } from 'vitest'
 
 const source = (name: string) => readFileSync(resolve('extensions/cloudflare-profile-worker', name), 'utf8')
+
+it('pins the shared unpacked ID to a valid public key across every installation path', () => {
+  const manifest = JSON.parse(source('manifest.json')) as {key: string}
+  const der = Buffer.from(manifest.key, 'base64')
+  expect(createPublicKey({key: der, format: 'der', type: 'spki'}).asymmetricKeyType).toBe('rsa')
+  const derived = createHash('sha256').update(der).digest('hex').slice(0, 32)
+    .replace(/[0-9a-f]/g, digit => String.fromCharCode(97 + parseInt(digit, 16)))
+  expect(derived).toBe(bundledExtensionId)
+  expect(bundledExtensionId).toBe('aaodigjnbngpggpgkphmeaakpfhehcpb')
+})
 type Listener = (message: unknown, sender: unknown, reply: (value: Record<string, unknown>) => void) => boolean
 
 function background(mode = 'fill_only', initial: Record<string, string> = { domaincheckOrigin: 'https://app.example', deviceId: 'device-fixture' }) {
@@ -81,7 +93,7 @@ it.each(['fill_only', 'submit'])('content script handles %s without submitting o
 
 it('declares default application permissions and keeps custom origin support', () => {
   const manifest = JSON.parse(source('manifest.json')) as { version: string; host_permissions: string[]; optional_host_permissions: string[] }
-  expect(manifest.version).toBe('3.1.7')
+  expect(manifest.version).toBe('3.1.8')
   expect(manifest.host_permissions).toContain('https://verisign.my.site.com/ReportAbuse*')
   expect(manifest.host_permissions).toContain('https://verisign.my.site.com/DNSAbuse*')
   expect(manifest.host_permissions).toContain('http://127.0.0.1/*')

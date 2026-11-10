@@ -164,6 +164,21 @@ Giữ giá trị đã điền; giá trị khác task, field thiếu, ngày khôn
 Build FE tạo `frontend/dist/downloads/web-form-assistant.zip` bản 3.1.5. Giải nén vào cùng thư mục extension đang dùng, Reload thủ công và chấp nhận quyền cho host Verisign nếu Chrome yêu cầu. API cần nạp code mới khi triển khai; payload mới giữ mặc định rỗng cho task cũ. Không cần migration/restart worker. Kiểm thử: xem `docs/testing/verisign-adapter-2026-11-10.md`.
 
 
+### Extension 3.1.8 — ID chung cho team
+
+Manifest public key cố định tạo ID `aaodigjnbngpggpgkphmeaakpfhehcpb`.
+FE dùng ID này khi env trống; env khác vẫn ghi đè cho gói tùy biến. Quản trị sửa
+ID cũ trong frontend/.env sang ID chung một lần rồi build/deploy web.
+Không tự sửa env thật. Không lưu private key; public key không cấp quyền owner.
+Không đổi manifest key giữa các phiên bản.
+
+Kiểm thử: Load unpacked cùng ZIP 3.1.8 từ hai thư mục hoặc trên hai Chrome profile,
+ID phải giống giá trị trên. Nếu Chrome giữ ID cũ, gỡ bản cũ rồi Load unpacked lại.
+Device ID có thể thay đổi khi chuyển ID; dùng task mới, không gửi lại report cũ.
+Kiểm tra handshake local/production như phần dưới, version phải là 3.1.8.
+Cài mới vẫn cần Developer mode/Load unpacked; ZIP không tự cài. Cài một nút cần
+phân phối qua store hoặc cơ chế quản lý Chrome phù hợp.
+
 ### Extension 3.1.7 — kết nối mặc định
 
 Cài mới hoặc cập nhật extension rồi Reload, tải lại trang và bấm Kiểm tra lại.
@@ -184,7 +199,8 @@ Kiểm thử thủ công:
    về đúng nơi tạo task. Next/CAPTCHA/upload/Submit vẫn thủ công; không gửi report để thử.
 5. Cài mới trên Chrome profile thử riêng để kiểm tra không cần Options. ID mới phải
    khớp frontend/.env của FE thử; thay ID cần build lại FE. Việc này không tự giải
-   quyết phân phối ID unpacked giữa các máy trong team.
+   quyết phân phối ID unpacked giữa các máy trong team ở bản 3.1.7;
+   bản 3.1.8 đã bổ sung key/ID chung như phần trên.
 
 Production cần cập nhật source và build/deploy FE để cung cấp ZIP/nhãn mới.
 Người dùng cập nhật extension riêng. Không cần migration hay đổi backend.

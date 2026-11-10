@@ -192,3 +192,6 @@ aaPanel VPS uses deploy_team.py --aapanel with compose.aapanel.yaml last on ever
 
 
 Extension 3.1.7: default exact application origins are https://tool-check.camellrp.com, http://localhost:5173 and http://127.0.0.1:5173. Initialize device ID lazily once on authorized handshake, preserve existing ID. Legacy Options origin is additive to defaults. Exchange uses sender URL origin; status uses immutable per-task apiOrigin. Never trust a payload origin or enable arbitrary localhost ports. Default host permissions need no Options grant; custom origins still require explicit permission. No automatic extension reload/profile edits or submission.
+
+
+Extension 3.1.8 pins a committed manifest public key and shared unpacked ID aaodigjnbngpggpgkphmeaakpfhehcpb. Never regenerate/change this key on updates. No private key is stored. FE falls back to bundledExtensionId when env is empty; an existing env override must be changed once by the operator before building for the shared package. Users migrating from path-based IDs may need to remove/reload the old extension and create fresh tasks. Do not modify actual env files or Chrome profiles automatically. The key/ID is public identity, not authorization. Chrome Web Store migration requires a separate key/ID transition plan.

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PhishingTool Web Form Assistant",
-  "version": "3.1.7",
+  "version": "3.1.8",
   "description": "Fills supported official abuse forms from owner-bound web tasks. Manual submission only.",
   "icons": {
     "16": "icons/icon16.png",
@@ -92,5 +92,6 @@
       ],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvb1vYp0usuQBlqjmndM23p43d2g2wB5NDAHyX7oR7fmvxFeUR/8CG9LtQ0v2etY3r/WJBlTZuQcl/ldTyAFdgxPYmjE1Nny9r5Rwtqh9lLuZu1c64Ibzik9lNXmmhh1kH237PCFwouwHGWeiZNEZyZ09xLxrMm6Iyy6yHEoAV+Pg/CwSDXgTIVg3A+SPjclMFUv+zSyy0pfTZGyp/nZCidlkvyQ/u85LGDSfJiSmVaxjb1MQasLXiNCnFEX0K51skFt+mzpESfwmsRs/dvfWZBDK+NQreia09OlAddQD59YV7FqewFBC1ZJmNmXxR8j7QhAK6lrrIrC2UPATzfAv7wIDAQAB"
 }

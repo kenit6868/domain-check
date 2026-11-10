@@ -139,3 +139,6 @@ Final validation: clean PostgreSQL/Redis + fresh wheel backend 402/402 (zero ski
 - 2026-11-10 — Thống nhất cấu hình FE local/VPS trong frontend/.env, gồm VITE_FORM_ASSISTANT_EXTENSION_ID. Deploy helper đọc cả backend/.env và frontend/.env; kiểm tra file trước gọi Docker. ID truyền qua build arg, không đóng gói env. Cập nhật runbook; không sửa env thật hoặc deploy/restart dịch vụ.
 
 - 2026-11-10 — Deploy thêm --aapanel và compose.aapanel.yaml: Nginx giữ HTTPS, web bind 127.0.0.1:8088 HTTP, bỏ host port DB/Redis để tránh dịch vụ aaPanel có sẵn. Dùng override cho mọi lệnh deploy/vận hành; runbook docs/aapanel-deployment.md. 8/8 test deploy và dry-run đạt; không chạy stack thật hoặc sửa env/runtime.
+
+
+Extension 3.1.8 pins a committed manifest public key and shared unpacked ID aaodigjnbngpggpgkphmeaakpfhehcpb. Never regenerate/change this key on updates. No private key is stored. FE falls back to bundledExtensionId when env is empty; an existing env override must be changed once by the operator before building for the shared package. Users migrating from path-based IDs may need to remove/reload the old extension and create fresh tasks. Do not modify actual env files or Chrome profiles automatically. The key/ID is public identity, not authorization. Chrome Web Store migration requires a separate key/ID transition plan.

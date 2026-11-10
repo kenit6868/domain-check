@@ -1,3 +1,5 @@
+import { bundledExtensionId } from './bundledExtensionId'
+
 export interface ExtensionConnection {
   deviceId: string
   extensionVersion: string
@@ -28,7 +30,7 @@ declare global {
 }
 
 export function getExtensionId(): string {
-  return String(import.meta.env.VITE_FORM_ASSISTANT_EXTENSION_ID ?? '').trim()
+  return String(import.meta.env.VITE_FORM_ASSISTANT_EXTENSION_ID ?? '').trim() || bundledExtensionId
 }
 
 function connectionError(code?: unknown): string {
