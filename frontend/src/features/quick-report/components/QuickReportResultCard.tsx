@@ -1,6 +1,5 @@
 ﻿import { AlertTriangle, Cloud, Database, Server } from 'lucide-react'
 import { CopyButton } from '../../../components/shared/CopyButton'
-import { useEffect, useRef, useState } from 'react'
 import type { QuickReportCheck } from '../schemas/quickReportSchema'
 import { QuickReportProviderActions } from './QuickReportProviderActions'
 import type { ReturnTypeOfUseExtension } from './types'
@@ -30,25 +29,9 @@ export function QuickReportResultCard({ check, index, canOpenForm, extension }: 
             return <div className="flex flex-wrap gap-x-2 gap-y-1" key={channel}><dt className="font-medium text-slate-500">{channel === 'registrar' ? 'Registrar' : 'Registry'}:</dt><dd className="break-all">{emails.length ? emails.join(', ') : hasForm ? 'Liên hệ qua form' : 'Chưa tìm thấy email'}</dd></div>
           })}</dl>
         </div>
-        <DeferredReportActions check={check} canOpenForm={canOpenForm} extension={extension} />
+        <QuickReportProviderActions check={check} canOpenForm={canOpenForm} extension={extension} />
       </>}
   </article>
-}
-
-function DeferredReportActions(props: Parameters<typeof QuickReportProviderActions>[0]) {
-  const node = useRef<HTMLDivElement>(null)
-  const [visible, setVisible] = useState(() => typeof IntersectionObserver === 'undefined')
-  useEffect(() => {
-    if (visible || !node.current) return
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some(entry => entry.isIntersecting)) { setVisible(true); observer.disconnect() }
-    }, { rootMargin: '400px' })
-    observer.observe(node.current)
-    return () => { observer.disconnect() }
-  }, [visible])
-  return <div ref={node} aria-busy={!visible}>
-    {visible ? <QuickReportProviderActions {...props} /> : <div className="h-12 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800" aria-label="Đang tải thao tác báo cáo" />}
-  </div>
 }
 
 function Status({ status }: { status: string }) {

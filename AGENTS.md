@@ -1,7 +1,8 @@
 # Domain Check Tool — hướng dẫn dự án
 
-- 2026-11-10 — Quick Report giữ danh sách cuộn, tải thao tác gần viewport và draft
-  khi mở đối chiếu. Netcraft gộp tối đa 50 ID/request chạy lần lượt theo client/
+- 2026-11-10 — Quick Report giữ danh sách cuộn và bố cục cũ; tải dữ liệu gần
+  viewport, nội dung đối chiếu tự hiện, draft tối đa 2 request đồng thời.
+  Netcraft gộp tối đa 50 ID/request chạy lần lượt theo client/
   owner; giữ cache từng check, khóa gửi và owner/day scope server. Cần BE + FE.
 
 - 2026-11-10 — Hai GET trạng thái Netcraft dùng lại session request/auth để tránh

@@ -157,13 +157,15 @@ create/migrate runtime folders or write global CSV/JSON state.
 ## Validation and documentation
 
 Netcraft GET status routes reuse the authenticated request session for get/find.
-Quick Report keeps all cards in one scrolling list, defers action groups until
-near viewport and retains mounted groups. Preserve counts/progress/numbering.
+Quick Report keeps all cards and the original action/draft layout in a scrolling
+list. Defer data queries until near viewport, not markup or user controls.
+Preserve padding/counts/progress/numbering; no draft toggle or skeleton wrapper.
 Batch status reads per QueryClient/owner into sequential requests of at most 50;
 retain per-check cache/mutation locks, reject missing responses, never batch sends.
 Bulk GET scopes every check by owner/workflow and every submission by owner/day/hash;
 reuse request session, lock in stable order, return no preview bodies/artifacts.
-Load comparison drafts only when opened; autofill does not require those reads.
+Automatically load comparison drafts near viewport with at most two requests
+running; skip cancelled queued work. Autofill does not require those reads.
 Do not hold one bounded DB pool slot for auth and acquire a second for each
 per-card status request. Caller-owned sessions are committed by their owner;
 standalone service callers retain their own transaction. Preserve owner/day

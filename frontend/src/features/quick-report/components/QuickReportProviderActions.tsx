@@ -1,7 +1,7 @@
 ﻿import { Button } from '../../../components/shared/Button'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Building2, Cloud, Globe2, Leaf, Puzzle, Search, Shield, ShieldAlert } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { queryKeys } from '../../../lib/query/keys'
 import { createFormTask, getFormTask, registerExtensionDevice } from '../api/formTaskApi'
 import { openExtensionForm } from '../extension/extensionBridge'
@@ -12,6 +12,7 @@ import type { ReturnTypeOfUseExtension } from './types'
 import { request } from '../../../lib/http/client'
 import { z } from 'zod'
 import { QuickReportDraftPanel } from './QuickReportDraftPanel'
+import { limitDraftRequest } from '../api/draftRequestQueue'
 import { minimumExtensionVersion, supportsFormProvider } from '../extension/extensionCompatibility'
 
 const ACTIVE_STATES = new Set(['CREATED', 'EXCHANGED', 'WORKING'])
@@ -23,9 +24,18 @@ const ICONS: Partial<Record<FormProvider, ReactNode>> = {
 
 export function QuickReportProviderActions({ check, canOpenForm, extension }: { check: QuickReportCheck; canOpenForm: boolean; extension: ReturnTypeOfUseExtension }) {
   const [taskId, setTaskId] = useState<string | null>(null)
-  const [draftGroups, setDraftGroups] = useState<string[]>([])
-  const drafts = useQuery({ queryKey: ['quick-report', check.id, 'all-form-drafts'], enabled: canOpenForm && draftGroups.length > 0,
-    queryFn: async ({ signal }) => z.array(z.object({ channel: z.string(), label: z.string(), form_url: z.string(), draft: z.string(), note: z.string(), autofill_provider: z.string().nullable() })).parse(await request<unknown>({ url: `/quick-reports/checks/${check.id}/form-drafts?include_providers=true`, signal })) })
+  const section = useRef<HTMLElement>(null)
+  const [nearViewport, setNearViewport] = useState(() => typeof IntersectionObserver === 'undefined')
+  useEffect(() => {
+    if (nearViewport || !section.current) return
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some(entry => entry.isIntersecting)) { setNearViewport(true); observer.disconnect() }
+    }, { rootMargin: '400px' })
+    observer.observe(section.current)
+    return () => { observer.disconnect() }
+  }, [nearViewport])
+  const drafts = useQuery({ queryKey: ['quick-report', check.id, 'all-form-drafts'], enabled: canOpenForm && nearViewport,
+    queryFn: async ({ signal }) => z.array(z.object({ channel: z.string(), label: z.string(), form_url: z.string(), draft: z.string(), note: z.string(), autofill_provider: z.string().nullable() })).parse(await limitDraftRequest(() => request<unknown>({ url: `/quick-reports/checks/${check.id}/form-drafts?include_providers=true`, signal }), signal)) })
   const task = useQuery({
     queryKey: queryKeys.formTask(taskId ?? 'none'),
     queryFn: ({ signal }) => getFormTask(taskId ?? '', signal), enabled: taskId !== null,
@@ -65,7 +75,7 @@ export function QuickReportProviderActions({ check, canOpenForm, extension }: { 
     {icon}<span className="text-left"><span className="block max-w-52 truncate">{label}</span><span className="block text-[10px] font-normal opacity-70">Mở và tự điền</span></span><Puzzle size={12} className="opacity-50" />
   </Button>{needsUpdate && <><span className="text-xs text-amber-700 dark:text-amber-300">Cần extension v{minimumExtensionVersion[provider.id]} trở lên</span><a className="text-xs underline" href={provider.form_url} target="_blank" rel="noopener noreferrer" aria-label={`${label} — Mở thủ công`}>Mở thủ công</a></>}</div>
   }
-  return <section className="border-t border-slate-100 px-3 py-2 dark:border-slate-800">
+  return <section ref={section} className="border-t border-slate-100 px-3 py-2 dark:border-slate-800">
     <div className="grid items-start gap-2 md:grid-cols-[repeat(var(--report-columns),minmax(0,1fr))]" style={{ '--report-columns': Math.max(1, groups.length - 1) } as React.CSSProperties} aria-label="Kênh báo cáo">
       {canOpenForm && groups.map((group) => <div key={group} className={`min-w-0 rounded-lg border border-slate-200 p-2 dark:border-slate-800 ${group === 'general' ? 'md:col-span-full' : ''}`}>
         <h3 className="mb-2 text-xs font-semibold">{group === 'general' ? 'Báo cáo chung' : group === 'infrastructure' ? 'CDN' : group === 'registrar' ? 'Registrar' : 'Registry'}</h3>
@@ -82,7 +92,7 @@ export function QuickReportProviderActions({ check, canOpenForm, extension }: { 
           return provider ? autoButton(provider, label, icon) : <Button asChild key={`${channel}:${form.form_url}`} className="primary-button report-action inline-flex items-center gap-2 text-xs"><a
             title="Mở form thủ công" href={form.form_url} target="_blank" rel="noopener noreferrer">{icon}<span className="max-w-52 truncate">{label}</span></a></Button>
         }))}
-        {group === 'general' && <NetcraftAction checkId={check.id} compact />}
+        {group === 'general' && <NetcraftAction checkId={check.id} compact enabled={nearViewport} />}
         {group === 'general' && <div className="flex w-full flex-wrap items-start gap-3">
           {(['chongluadao', 'coccoc_safe'] as const).map((id) => {
             const provider = providers.find((item) => item.id === id)
@@ -90,12 +100,9 @@ export function QuickReportProviderActions({ check, canOpenForm, extension }: { 
           })}
         </div>}
         </div>
-        <Button className="secondary-button mt-2" aria-expanded={draftGroups.includes(group)} onClick={() => { setDraftGroups((previous) => previous.includes(group) ? previous.filter((item) => item !== group) : [...previous, group]) }}>
-          {draftGroups.includes(group) ? 'Ẩn nội dung đối chiếu' : 'Xem nội dung đối chiếu'}
-        </Button>
-        {draftGroups.includes(group) && <QuickReportDraftPanel wide={group === 'general'} drafts={(drafts.data ?? []).filter((item) => item.channel === group)} loading={drafts.isPending} {...(drafts.error ? { error: drafts.error.message } : {})} />}
+        <QuickReportDraftPanel wide={group === 'general'} drafts={(drafts.data ?? []).filter((item) => item.channel === group)} loading={drafts.isPending} {...(drafts.error ? { error: drafts.error.message } : {})} />
       </div>)}
-      {!canOpenForm && <NetcraftAction checkId={check.id} compact />}
+      {!canOpenForm && <NetcraftAction checkId={check.id} compact enabled={nearViewport} />}
     </div>
     {canOpenForm && !connected && <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">Kết nối extension để dùng các nút tự điền. Form thủ công vẫn có thể xem nội dung.</p>}
     {open.error && <p className="error-notice mt-3" role="alert">{open.error.message}</p>}

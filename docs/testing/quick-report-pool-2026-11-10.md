@@ -1,5 +1,8 @@
 # Quick Report — nghẽn pool khi đọc trạng thái Netcraft
 
+Ghi chú: phần UI nút mở draft/skeleton trong báo cáo này đã được thay bằng bố
+cục cũ và draft tự tải, xem [báo cáo khôi phục UI](quick-report-ui-restore-2026-11-10.md).
+
 Log VPS xác nhận QueuePool size 5 + overflow 2 hết chỗ, timeout 30 giây tại
 current_user/Netcraft find. Các GET Netcraft trước đây giữ transaction xác thực
 và mở thêm transaction riêng. Nhiều request cùng giữ một slot rồi đợi slot thứ

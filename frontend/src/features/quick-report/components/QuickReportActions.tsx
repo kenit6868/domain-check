@@ -10,12 +10,12 @@ import { getBatchedNetcraft } from '../api/netcraftStatusBatch'
 
 const labels = { PREVIEW: 'Chưa gửi', SENDING: 'Đang gửi', SUBMITTED: 'Netcraft đã nhận báo cáo', FAILED: 'Nhà cung cấp từ chối', UNKNOWN: 'Chưa xác định kết quả — không tự gửi lại' }
 
-export function NetcraftAction({ checkId, compact = false }: { checkId: string; compact?: boolean }) {
+export function NetcraftAction({ checkId, compact = false, enabled = true }: { checkId: string; compact?: boolean; enabled?: boolean }) {
   const { me } = useOutletContext<{ me: Me }>()
   const allowed = me.permissions.includes('quick_report.submit_netcraft')
   const client = useQueryClient()
   const key = ['quick-report', me.id, 'netcraft', checkId]
-  const status = useQuery({ queryKey: key, queryFn: ({ signal }) => getBatchedNetcraft(client, me.id, checkId, signal), enabled: allowed,
+  const status = useQuery({ queryKey: key, queryFn: ({ signal }) => getBatchedNetcraft(client, me.id, checkId, signal), enabled: allowed && enabled,
     refetchInterval: (query) => query.state.data?.state === 'SENDING' ? 1_500 : false })
   const send = useMutation({ mutationFn: async () => {
     const preview = await previewNetcraft(checkId)

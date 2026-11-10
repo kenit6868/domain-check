@@ -167,11 +167,11 @@ Build FE tạo `frontend/dist/downloads/web-form-assistant.zip` bản 3.1.5. Gi�
 ### Quick Report — Netcraft pending và QueuePool timeout
 
 FE giữ toàn bộ card trên một trang sau bộ lọc cache/cũ, giữ số thứ tự ban đầu
-và tổng tiến độ. IntersectionObserver tải nhóm thao tác khi card gần viewport
-(rootMargin 400px); sau khi tải giữ nguyên để không mất trạng thái thao tác.
-Nếu trình duyệt không có IntersectionObserver, vẫn hiển thị đầy đủ thao tác.
-Draft các nhóm general/CDN/registrar/registry chỉ tải sau khi người dùng mở
-Xem nội dung đối chiếu; các nhóm của cùng check dùng chung query và mở form
+và tổng tiến độ. Bố cục/padding/nội dung đối chiếu giữ như trước, không có nút mở
+draft hoặc wrapper skeleton. IntersectionObserver chỉ bật query khi card gần
+viewport (400px), sau đó giữ bật. Không có observer thì query được bật ngay.
+Draft các nhóm general/CDN/registrar/registry tự tải khi cuộn tới, qua hàng đợi
+tối đa hai request đồng thời. Các nhóm cùng check dùng chung query và mở form
 extension không cần tải draft đối chiếu trước. Trạng thái Netcraft gộp qua GET
 `/quick-reports/netcraft-statuses?check_ids=UUID&check_ids=UUID`, tối đa 50 ID.
 Batcher tách theo QueryClient/owner, chạy lần lượt và chặn nút nếu thiếu trạng
@@ -179,8 +179,10 @@ thái hoặc API lỗi. Mỗi check vẫn có cache riêng để mutation/pollin
 API xác thực quyền/owner/workflow, giữ ngày và UNKNOWN recovery; không đọc body
 preview/artifact hoặc gửi report trong GET gộp. Một ID không hợp lệ hoặc không
 thuộc owner làm cả request bị từ chối, không trả kết quả một phần.
-Fixture 100 reader đồng thời tạo 2 request trạng thái, 0 draft; Chrome thường
-chỉ yêu cầu cho card gần viewport. Đây là giới hạn theo client, không phải cam
+Fixture 100 reader đồng thời tạo 2 request trạng thái; draft tự tải tối đa 2
+request cùng lúc, tổng số tùy số card đã xem (fallback không observer tải đủ
+100 draft lần lượt). Chrome thường chỉ yêu cầu cho card gần viewport.
+Đây là giới hạn theo client, không phải cam
 kết năng lực phần cứng hoặc throttle toàn cục. Cần deploy BE trước/cùng FE.
 
 Khi reload danh sách nhiều kết quả, FE đọc trạng thái Netcraft của từng check.

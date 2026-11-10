@@ -96,13 +96,16 @@ Extension 3.1.8 pins a committed manifest public key and shared unpacked ID aaod
 
 Netcraft status GET routes must reuse the authenticated request AsyncSession.
 Quick Report keeps all cards in a scrolling list after cache/history filtering.
-Defer action groups until near viewport; retain them once mounted. Fallback to
-full rendering without IntersectionObserver. Keep original numbering/progress.
+Render the original action/draft layout immediately, without new toggles or
+skeleton wrappers. Defer only data queries until near viewport; keep enabled
+once observed. Fallback to immediate data without IntersectionObserver.
+Keep original numbering/progress and original padding classes.
 Batch status reads per QueryClient/owner into sequential requests of at most 50;
 retain per-check query keys, fail closed on missing status and never batch mutations.
 Bulk GET reuses request session, scopes checks by owner/workflow and submissions
 by owner/day/hash, locks in stable ID order and returns no preview body/artifact.
-Draft queries are opt-in per card; autofill does not require comparison drafts.
+Comparison drafts display automatically near viewport, through a 2-slot request
+queue with cancellation. Autofill does not require comparison draft requests.
 Netcraft state still gates send buttons;
 server owner/intent/dedupe checks remain authoritative.
 QuickReportActions.get/find accept a caller-owned session without committing it;
