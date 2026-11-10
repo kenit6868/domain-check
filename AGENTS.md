@@ -1,5 +1,14 @@
 # Domain Check Tool — hướng dẫn dự án
 
+- 2026-11-10 — Quick Report giữ danh sách cuộn, tải thao tác gần viewport và draft
+  khi mở đối chiếu. Netcraft gộp tối đa 50 ID/request chạy lần lượt theo client/
+  owner; giữ cache từng check, khóa gửi và owner/day scope server. Cần BE + FE.
+
+- 2026-11-10 — Hai GET trạng thái Netcraft dùng lại session request/auth để tránh
+  giữ một pool slot rồi đợi slot thứ hai khi reload nhiều kết quả. get/find vẫn
+  hỗ trợ standalone transaction; giữ owner/day/lock/UNKNOWN và intent gửi.
+  Test PostgreSQL cô lập có burst 16 request/pool 1. Không cần migration/env/FE.
+
 - 2026-11-10 — Extension 3.1.7 tự kết nối exact production tool-check.camellrp.com
   và localhost/127.0.0.1 cổng 5173; tự tạo device ID, giữ ID/custom origin cũ.
   Options chỉ thêm origin ngoài mặc định. Task giữ apiOrigin riêng, không nhận

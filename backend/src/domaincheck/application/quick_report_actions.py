@@ -8,7 +8,8 @@ import re
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from domaincheck.application.quick_reports import QuickReportNotFound, QuickReportService
 from domaincheck.infrastructure.cache import business_day
@@ -135,23 +136,51 @@ class QuickReportActions:
             "fingerprint": row.fingerprint, "expires_at": row.expires_at.isoformat(),
             "payload": payload, "result": row.result_metadata}
 
-    async def get(self, row_id):
-        async with self.sessions() as session, session.begin():
-            row = await self._row(session, row_id)
-            return self.dto(row, await self._payload(session, row))
+    async def get(self, row_id, *, session: AsyncSession | None = None):
+        if session is None:
+            async with self.sessions() as owned_session, owned_session.begin():
+                return await self.get(row_id, session=owned_session)
+        row = await self._row(session, row_id)
+        return self.dto(row, await self._payload(session, row))
 
-    async def find(self, check_id):
-        async with self.sessions() as session, session.begin():
-            check = await self._check(session, check_id)
-            digest = hashlib.sha256(check.requested_url.encode()).hexdigest()
-            row = await session.scalar(select(ProviderSubmission).where(
-                ProviderSubmission.owner_user_id == self.owner, ProviderSubmission.provider == "netcraft",
-                ProviderSubmission.business_day == check.business_day, ProviderSubmission.url_hash == digest,
-            ).with_for_update())
-            if row is None:
-                return None
+    async def find(self, check_id, *, session: AsyncSession | None = None):
+        if session is None:
+            async with self.sessions() as owned_session, owned_session.begin():
+                return await self.find(check_id, session=owned_session)
+        check = await self._check(session, check_id)
+        digest = hashlib.sha256(check.requested_url.encode()).hexdigest()
+        row = await session.scalar(select(ProviderSubmission).where(
+            ProviderSubmission.owner_user_id == self.owner, ProviderSubmission.provider == "netcraft",
+            ProviderSubmission.business_day == check.business_day, ProviderSubmission.url_hash == digest,
+        ).with_for_update())
+        if row is None:
+            return None
+        self._recover(row)
+        return self.dto(row, await self._payload(session, row))
+
+    async def find_many(self, check_ids, *, session: AsyncSession):
+        identifiers = set(check_ids)
+        if not identifiers or len(check_ids) > 50:
+            raise ActionConflict("Request between 1 and 50 check identifiers")
+        checks = list(await session.scalars(select(Check).where(
+            Check.id.in_(identifiers), Check.owner_user_id == self.owner,
+            Check.workflow == 'quick_report')))
+        if len(checks) != len(identifiers):
+            raise QuickReportNotFound("Quick Report check not found")
+        if any(check.status != 'succeeded' for check in checks):
+            raise ActionConflict("Quick Report check is not complete")
+        identities = {check.id: (check.business_day, hashlib.sha256(check.requested_url.encode()).hexdigest())
+                      for check in checks}
+        rows = await session.scalars(select(ProviderSubmission).where(
+            ProviderSubmission.owner_user_id == self.owner, ProviderSubmission.provider == 'netcraft',
+            tuple_(ProviderSubmission.business_day, ProviderSubmission.url_hash).in_(set(identities.values())),
+        ).order_by(ProviderSubmission.id).with_for_update())
+        by_identity = {}
+        for row in rows:
             self._recover(row)
-            return self.dto(row, await self._payload(session, row))
+            # Status lists need no stored preview body or artifact reads.
+            by_identity[(row.business_day, row.url_hash)] = self.dto(row)
+        return {str(identifier): by_identity.get(identity) for identifier, identity in identities.items()}
 
     async def submit(self, row_id, *, fingerprint, revision, confirmed, retry=False):
         if not confirmed:

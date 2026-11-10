@@ -10,6 +10,13 @@ const submissionSchema = z.object({
 })
 export type NetcraftSubmission = z.infer<typeof submissionSchema>
 
+export async function getNetcraftStatuses(checkIds: string[]) {
+  const query = new URLSearchParams(checkIds.map(id => ['check_ids', id]))
+  return z.record(z.uuid(), submissionSchema.nullable()).parse(await request<unknown>({
+    url: `/quick-reports/netcraft-statuses?${query.toString()}`,
+  }))
+}
+
 export async function getNetcraft(checkId: string, signal?: AbortSignal) {
   const data = await request<unknown>({ url: `/quick-reports/checks/${checkId}/netcraft`, ...(signal ? { signal } : {}) })
   return data === null ? null : submissionSchema.parse(data)

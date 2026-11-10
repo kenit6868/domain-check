@@ -93,3 +93,20 @@ Extension 3.1.7: default exact application origins are https://tool-check.camell
 
 
 Extension 3.1.8 pins a committed manifest public key and shared unpacked ID aaodigjnbngpggpgkphmeaakpfhehcpb. Never regenerate/change this key on updates. No private key is stored. FE falls back to bundledExtensionId when env is empty; an existing env override must be changed once by the operator before building for the shared package. Users migrating from path-based IDs may need to remove/reload the old extension and create fresh tasks. Do not modify actual env files or Chrome profiles automatically. The key/ID is public identity, not authorization. Chrome Web Store migration requires a separate key/ID transition plan.
+
+Netcraft status GET routes must reuse the authenticated request AsyncSession.
+Quick Report keeps all cards in a scrolling list after cache/history filtering.
+Defer action groups until near viewport; retain them once mounted. Fallback to
+full rendering without IntersectionObserver. Keep original numbering/progress.
+Batch status reads per QueryClient/owner into sequential requests of at most 50;
+retain per-check query keys, fail closed on missing status and never batch mutations.
+Bulk GET reuses request session, scopes checks by owner/workflow and submissions
+by owner/day/hash, locks in stable ID order and returns no preview body/artifact.
+Draft queries are opt-in per card; autofill does not require comparison drafts.
+Netcraft state still gates send buttons;
+server owner/intent/dedupe checks remain authoritative.
+QuickReportActions.get/find accept a caller-owned session without committing it;
+standalone callers retain an owned transaction. Never acquire a second pool slot
+for these GETs while auth holds the first: concurrent per-card reads can exhaust
+the bounded 5+2 pool. Keep owner/day scope, row locking and UNKNOWN recovery;
+do not share request transactions with provider submit/intent network flows.

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from uuid import UUID
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,6 +50,19 @@ def action_error(exc):
     raise HTTPException(409, str(exc)) from exc
 
 
+@router.get('/netcraft-statuses')
+async def netcraft_statuses(check_ids: Annotated[list[UUID], Query(min_length=1, max_length=50)],
+    request: Request, response: Response, session: AsyncSession = Depends(get_db_session),
+    actor: AuthenticatedUser = Depends(require_permission('quick_report.submit_netcraft'))):
+    try:
+        rows = await actions(request, actor).find_many(check_ids, session=session)
+        response.headers['Cache-Control'] = 'private, no-store'
+        return {identifier: row | {'submit_enabled': request.app.state.settings.netcraft_submit_enabled}
+                if row else None for identifier, row in rows.items()}
+    except (QuickReportNotFound, ActionConflict) as exc:
+        action_error(exc)
+
+
 @router.post("/checks/{check_id}/netcraft/preview")
 async def netcraft_preview(check_id: UUID, request: Request,
     actor: AuthenticatedUser = Depends(require_permission("quick_report.submit_netcraft", csrf=True, configured_profile=True))):
@@ -61,18 +75,22 @@ async def netcraft_preview(check_id: UUID, request: Request,
 
 @router.get("/netcraft/{submission_id}")
 async def netcraft_status(submission_id: UUID, request: Request,
+    session: AsyncSession = Depends(get_db_session),
     actor: AuthenticatedUser = Depends(require_permission("quick_report.submit_netcraft"))):
     try:
-        return await actions(request, actor).get(submission_id)
+        return await actions(request, actor).get(submission_id, session=session)
     except (QuickReportNotFound, ActionConflict) as exc:
         action_error(exc)
 
 
 @router.get("/checks/{check_id}/netcraft")
 async def netcraft_for_check(check_id: UUID, request: Request,
+    session: AsyncSession = Depends(get_db_session),
     actor: AuthenticatedUser = Depends(require_permission("quick_report.submit_netcraft"))):
     try:
-        result = await actions(request, actor).find(check_id)
+        # Authentication already holds this request's connection. Reuse it rather
+        # than waiting for a second pool slot while every concurrent reader holds one.
+        result = await actions(request, actor).find(check_id, session=session)
         return result | {"submit_enabled": request.app.state.settings.netcraft_submit_enabled} if result else None
     except (QuickReportNotFound, ActionConflict) as exc:
         action_error(exc)

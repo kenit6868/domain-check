@@ -23,7 +23,8 @@ const ICONS: Partial<Record<FormProvider, ReactNode>> = {
 
 export function QuickReportProviderActions({ check, canOpenForm, extension }: { check: QuickReportCheck; canOpenForm: boolean; extension: ReturnTypeOfUseExtension }) {
   const [taskId, setTaskId] = useState<string | null>(null)
-  const drafts = useQuery({ queryKey: ['quick-report', check.id, 'all-form-drafts'], enabled: canOpenForm,
+  const [draftGroups, setDraftGroups] = useState<string[]>([])
+  const drafts = useQuery({ queryKey: ['quick-report', check.id, 'all-form-drafts'], enabled: canOpenForm && draftGroups.length > 0,
     queryFn: async ({ signal }) => z.array(z.object({ channel: z.string(), label: z.string(), form_url: z.string(), draft: z.string(), note: z.string(), autofill_provider: z.string().nullable() })).parse(await request<unknown>({ url: `/quick-reports/checks/${check.id}/form-drafts?include_providers=true`, signal })) })
   const task = useQuery({
     queryKey: queryKeys.formTask(taskId ?? 'none'),
@@ -89,7 +90,10 @@ export function QuickReportProviderActions({ check, canOpenForm, extension }: { 
           })}
         </div>}
         </div>
-        <QuickReportDraftPanel wide={group === 'general'} drafts={(drafts.data ?? []).filter((item) => item.channel === group)} loading={drafts.isPending} {...(drafts.error ? { error: drafts.error.message } : {})} />
+        <Button className="secondary-button mt-2" aria-expanded={draftGroups.includes(group)} onClick={() => { setDraftGroups((previous) => previous.includes(group) ? previous.filter((item) => item !== group) : [...previous, group]) }}>
+          {draftGroups.includes(group) ? 'Ẩn nội dung đối chiếu' : 'Xem nội dung đối chiếu'}
+        </Button>
+        {draftGroups.includes(group) && <QuickReportDraftPanel wide={group === 'general'} drafts={(drafts.data ?? []).filter((item) => item.channel === group)} loading={drafts.isPending} {...(drafts.error ? { error: drafts.error.message } : {})} />}
       </div>)}
       {!canOpenForm && <NetcraftAction checkId={check.id} compact />}
     </div>

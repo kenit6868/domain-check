@@ -164,6 +164,43 @@ Giữ giá trị đã điền; giá trị khác task, field thiếu, ngày khôn
 Build FE tạo `frontend/dist/downloads/web-form-assistant.zip` bản 3.1.5. Giải nén vào cùng thư mục extension đang dùng, Reload thủ công và chấp nhận quyền cho host Verisign nếu Chrome yêu cầu. API cần nạp code mới khi triển khai; payload mới giữ mặc định rỗng cho task cũ. Không cần migration/restart worker. Kiểm thử: xem `docs/testing/verisign-adapter-2026-11-10.md`.
 
 
+### Quick Report — Netcraft pending và QueuePool timeout
+
+FE giữ toàn bộ card trên một trang sau bộ lọc cache/cũ, giữ số thứ tự ban đầu
+và tổng tiến độ. IntersectionObserver tải nhóm thao tác khi card gần viewport
+(rootMargin 400px); sau khi tải giữ nguyên để không mất trạng thái thao tác.
+Nếu trình duyệt không có IntersectionObserver, vẫn hiển thị đầy đủ thao tác.
+Draft các nhóm general/CDN/registrar/registry chỉ tải sau khi người dùng mở
+Xem nội dung đối chiếu; các nhóm của cùng check dùng chung query và mở form
+extension không cần tải draft đối chiếu trước. Trạng thái Netcraft gộp qua GET
+`/quick-reports/netcraft-statuses?check_ids=UUID&check_ids=UUID`, tối đa 50 ID.
+Batcher tách theo QueryClient/owner, chạy lần lượt và chặn nút nếu thiếu trạng
+thái hoặc API lỗi. Mỗi check vẫn có cache riêng để mutation/polling cập nhật.
+API xác thực quyền/owner/workflow, giữ ngày và UNKNOWN recovery; không đọc body
+preview/artifact hoặc gửi report trong GET gộp. Một ID không hợp lệ hoặc không
+thuộc owner làm cả request bị từ chối, không trả kết quả một phần.
+Fixture 100 reader đồng thời tạo 2 request trạng thái, 0 draft; Chrome thường
+chỉ yêu cầu cho card gần viewport. Đây là giới hạn theo client, không phải cam
+kết năng lực phần cứng hoặc throttle toàn cục. Cần deploy BE trước/cùng FE.
+
+Khi reload danh sách nhiều kết quả, FE đọc trạng thái Netcraft của từng check.
+Hai GET Netcraft trước đây giữ kết nối xác thực trong transaction request rồi
+mở thêm transaction độc lập để đọc trạng thái. Khi pool 5+2 đã đầy, các request
+có thể giữ một kết nối và cùng chờ kết nối thứ hai đến timeout 30 giây; `/me`
+và form-drafts bị ảnh hưởng, dù readiness sau đó vẫn trả 200.
+
+Hai GET trạng thái hiện truyền session request vào QuickReportActions.get/find;
+standalone callers vẫn có transaction riêng. Owner/day scope, row lock và phục
+hồi SENDING hết hạn thành UNKNOWN giữ nguyên. Không tăng pool, không đổi grant,
+session token hoặc cơ chế gửi/intent. POST preview/submit vẫn giữ transaction
+riêng và checkpoint intent trước network như trước.
+
+Không cần migration hoặc env mới. Phần cuộn/API gộp cần cập nhật cả BE và FE.
+Sau cập nhật source, triển khai
+theo runbook aaPanel khi công việc đang chạy đã hoàn tất; không restart worker
+thật để kiểm thử. Reload Quick Report, thử mở task Google mới, xem `/me`,
+Netcraft và form-drafts không còn treo 30 giây; không Submit report để thử.
+
 ### Extension 3.1.8 — ID chung cho team
 
 Manifest public key cố định tạo ID `aaodigjnbngpggpgkphmeaakpfhehcpb`.

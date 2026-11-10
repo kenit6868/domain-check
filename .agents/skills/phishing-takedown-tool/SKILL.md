@@ -156,6 +156,21 @@ create/migrate runtime folders or write global CSV/JSON state.
 
 ## Validation and documentation
 
+Netcraft GET status routes reuse the authenticated request session for get/find.
+Quick Report keeps all cards in one scrolling list, defers action groups until
+near viewport and retains mounted groups. Preserve counts/progress/numbering.
+Batch status reads per QueryClient/owner into sequential requests of at most 50;
+retain per-check cache/mutation locks, reject missing responses, never batch sends.
+Bulk GET scopes every check by owner/workflow and every submission by owner/day/hash;
+reuse request session, lock in stable order, return no preview bodies/artifacts.
+Load comparison drafts only when opened; autofill does not require those reads.
+Do not hold one bounded DB pool slot for auth and acquire a second for each
+per-card status request. Caller-owned sessions are committed by their owner;
+standalone service callers retain their own transaction. Preserve owner/day
+scope, row locking and UNKNOWN recovery; do not merge submit intent/network
+transactions into request transactions. Cover this boundary with a real
+authenticated concurrent API burst on an isolated single-slot PostgreSQL pool.
+
 Run direct and full backend unittest for core/worker/mail/parser changes. Use
 isolated PostgreSQL/Redis and fresh-wheel smoke outside repo for architecture
 changes; FE test/build/lint, compileall and pip check as appropriate. Useful

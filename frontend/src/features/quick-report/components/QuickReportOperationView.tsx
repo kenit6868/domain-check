@@ -38,6 +38,7 @@ export function QuickReportOperationView({ operation, refreshing, onReset, canOp
   const hidden = daily ? hidePrevious : hideCached
   const complete = operation.checks.filter((check) => ['succeeded', 'failed'].includes(check.status)).length
   const active = ACTIVE_STATES.has(operation.state)
+  const visible = checks.map((check, index) => ({ check, index })).filter(({ check }) => !hidden || !isOld(check))
   return (
     <section className="mt-2 space-y-2" aria-live="polite">
       <div className="data-panel flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -54,7 +55,7 @@ export function QuickReportOperationView({ operation, refreshing, onReset, canOp
       {cached > 0 && <label className="flex items-center gap-2 text-xs text-slate-500"><input type="checkbox" checked={hidden} onChange={(event) => { if (daily) setHidePrevious(event.target.checked); else setHideCached(event.target.checked) }} />Ẩn kết quả đã check trong ngày ({cached})</label>}
       {hidden && cached === checks.length && cached > 0 && <p className="data-panel p-3 text-sm text-slate-500" role="status">Kết quả cũ đã được ẩn. Nhập URL mới để tiếp tục; muốn kiểm tra lại URL cũ, xoá cache hôm nay rồi nhập lại.</p>}
       {daily && checks.length === 0 && <p className="p-3 text-xs text-slate-500">Chưa có kết quả trong ngày. Nhập URL ở trên để bắt đầu.</p>}
-      <div className="space-y-2">{checks.map((check, index) => hidden && isOld(check) ? null : <QuickReportResultCard key={check.id} check={check} index={index} canOpenForm={canOpenForm} extension={extension} />)}</div>
+      <div className="space-y-2">{visible.map(({ check, index }) => <QuickReportResultCard key={check.id} check={check} index={index} canOpenForm={canOpenForm} extension={extension} />)}</div>
 
     </section>
   )

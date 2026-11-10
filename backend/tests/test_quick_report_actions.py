@@ -123,6 +123,106 @@ class QuickReportActionTests(unittest.IsolatedAsyncioTestCase):
         params.update(overrides)
         return await self.service().submit(UUID(preview["id"]), **params)
 
+    async def test_authenticated_status_burst_reuses_request_connection(self):
+        from httpx import ASGITransport, AsyncClient
+        from domaincheck.infrastructure.auth.sessions import hash_token
+        from domaincheck.infrastructure.db.models import Permission, Role, RolePermission, Session, UserRole
+        from domaincheck.infrastructure.db.seeds import sync_permission_catalog
+        from domaincheck.main import create_app
+        from domaincheck.settings import Settings
+
+        preview = await self.preview()
+        token = uuid4().hex
+        async with self.db.session_factory() as session, session.begin():
+            await sync_permission_catalog(session)
+            # Do not leave an extra active admin in the shared fixture database:
+            # last-admin invariants elsewhere in the suite require exact counts.
+            role = Role(key=f'pool-reader-{uuid4().hex}', name='Pool reader', description='Fixture')
+            session.add(role)
+            await session.flush()
+            codes = await session.scalars(select(Permission.id).where(Permission.code.in_(
+                ['quick_report.submit_netcraft', 'quick_report.open_form'])))
+            for permission_id in codes:
+                session.add(RolePermission(role_id=role.id, permission_id=permission_id))
+            session.add(UserRole(user_id=self.owner, role_id=role.id, assigned_by_user_id=self.owner))
+            profile = await session.get(UserSettings, self.owner)
+            profile.contact_name = 'Fixture Reporter'
+            session.add(Session(user_id=self.owner, token_hash=hash_token(token), csrf_hash=b'x' * 32,
+                authz_version=1, expires_at=datetime.now(UTC) + timedelta(hours=1)))
+
+        app = create_app(Settings(_env_file=None, database_url=DB, artifact_root=Path(self.temp.name)))
+        await app.state.database.dispose()
+        # A request must finish with only one pool slot, even while auth owns it.
+        app.state.database = Database(DB, pool_size=1, max_overflow=0, pool_timeout=3)
+        app.state.clock = SimpleNamespace(now=lambda: self.now)
+        try:
+            paths = [f'/quick-reports/checks/{self.check_id}/netcraft',
+                f'/quick-reports/netcraft/{preview["id"]}',
+                f'/quick-reports/checks/{self.check_id}/form-drafts?include_providers=true', '/me',
+                f'/quick-reports/netcraft-statuses?check_ids={self.check_id}'] * 4
+            async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test',
+                                   cookies={'dc_session': token}, timeout=10) as client:
+                with patch('requests.sessions.Session.request', side_effect=AssertionError('No provider network')):
+                    responses = await asyncio.wait_for(asyncio.gather(*[
+                        client.get('/api/v1' + path) for path in paths]), timeout=10)
+                self.assertEqual([response.status_code for response in responses], [200] * len(paths))
+                self.assertEqual(responses[0].json()['id'], preview['id'])
+                self.assertIsNone(responses[4].json()[str(self.check_id)]['payload'])
+                self.assertEqual(responses[4].headers['cache-control'], 'private, no-store')
+                missing = await client.get(f'/api/v1/quick-reports/checks/{uuid4()}/netcraft')
+                self.assertEqual(missing.status_code, 404)
+                missing = await client.get(f'/api/v1/quick-reports/netcraft-statuses?check_ids={uuid4()}')
+                self.assertEqual(missing.status_code, 404)
+                too_many = await client.get('/api/v1/quick-reports/netcraft-statuses?' + '&'.join(
+                    f'check_ids={self.check_id}' for _ in range(51)))
+                self.assertEqual(too_many.status_code, 422)
+            self.assertEqual(app.state.database.engine.pool.checkedout(), 0)
+        finally:
+            await app.state.database.dispose()
+            await app.state.redis.aclose()
+
+    async def test_nested_status_session_exhausts_a_single_slot_but_shared_session_does_not(self):
+        from sqlalchemy.exc import TimeoutError as PoolTimeout
+        db = Database(DB, pool_size=1, max_overflow=0, pool_timeout=0.1)
+        service = QuickReportActions(db.session_factory, self.store, owner=self.owner,
+            timezone='Asia/Bangkok', request_id='pool-regression', now=lambda: self.now)
+        try:
+            async with db.session_factory() as session, session.begin():
+                await session.get(User, self.owner)  # Same connection held by authentication.
+                with self.assertRaises(PoolTimeout):
+                    await service.find(self.check_id)  # Reproduce the previous API path.
+                self.assertIsNone(await service.find(self.check_id, session=session))
+                with self.assertRaises(QuickReportNotFound):
+                    other = QuickReportActions(db.session_factory, self.store, owner=self.other,
+                        timezone='Asia/Bangkok', request_id='pool-owner', now=lambda: self.now)
+                    await other.find(self.check_id, session=session)
+        finally:
+            await db.dispose()
+
+    async def test_bulk_status_preserves_owner_day_and_expired_intent_protection(self):
+        preview = await self.preview()
+        async with self.db.session_factory() as session, session.begin():
+            row = await session.get(ProviderSubmission, UUID(preview['id']))
+            row.state = 'SENDING'
+            row.claim_expires_at = self.now - timedelta(seconds=1)
+        async with self.db.session_factory() as session, session.begin():
+            values = await self.service().find_many([self.check_id, self.check_id], session=session)
+            self.assertEqual(values[str(self.check_id)]['state'], 'UNKNOWN')
+            self.assertIsNone(values[str(self.check_id)]['payload'])
+            with self.assertRaises(QuickReportNotFound):
+                await self.service(owner=self.other).find_many([self.check_id], session=session)
+        async with self.db.session_factory() as session:
+            row = await session.get(ProviderSubmission, UUID(preview['id']))
+            self.assertEqual(row.state, 'UNKNOWN')
+        async with self.db.session_factory() as session, session.begin():
+            row = await session.get(ProviderSubmission, UUID(preview['id']))
+            row.business_day = self.now.date() - timedelta(days=1)
+            await session.flush()
+            values = await self.service().find_many([self.check_id], session=session)
+            self.assertIsNone(values[str(self.check_id)])
+            await session.rollback()
+        self.assertEqual(self.calls, [])
+
     async def test_preview_exact_payload_intent_before_send_and_durable_dedupe(self):
         preview = await self.preview()
         self.assertEqual(self.calls, [])

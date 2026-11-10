@@ -77,6 +77,12 @@ Preview/draft tiếng Anh; evidence và SMTP ledger giữ scope user/account/ng�
 
 ## Extension Quick Report
 
+Quick Report hiển thị toàn bộ kết quả trên một trang để cuộn xem. Các nút báo cáo
+tải khi card gần vùng nhìn thấy; trạng thái Netcraft gộp tối đa 50 URL/request,
+chạy lần lượt. Tiến độ và tổng số vẫn tính cả lượt kiểm tra.
+Bấm **Xem nội dung đối chiếu** trong nhóm báo cáo để tải draft khi cần.
+Reload hoặc cuộn danh sách không tự gửi lại report.
+
 Bản **3.1.8** thêm public key cố định để mọi máy cài unpacked dùng chung ID
 `aaodigjnbngpggpgkphmeaakpfhehcpb`. Quản trị cập nhật ID cũ trong `frontend/.env`
 một lần rồi build FE; người dùng không nhập ID hoặc sửa env. Cài bản mới có thể

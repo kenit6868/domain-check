@@ -1,6 +1,6 @@
 import { Theme } from '@radix-ui/themes'
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -13,6 +13,10 @@ import * as extensionBridge from '../src/features/quick-report/extension/extensi
 // Existing action tests keep the independent daily request pending; daily scenarios mock it below.
 const installApiMock = (handler: Parameters<typeof installMock>[0]) => installMock((config) =>
   config.url === '/quick-reports/daily' ? new Promise(() => {}) : handler(config))
+
+function batchStatuses(url: string, value: unknown) {
+  return Object.fromEntries(new URL(url, 'http://test').searchParams.getAll('check_ids').map(id => [id, value]))
+}
 
 const me = {
   id: '11111111-1111-4111-8111-111111111111', display_name: 'Operator', telegram_username: 'operator',
@@ -45,7 +49,88 @@ function renderQuickReport() {
 }
 
 describe('Quick Report workflow', () => {
-  afterEach(() => { cleanup(); sessionStorage.clear(); vi.restoreAllMocks() })
+  afterEach(() => { cleanup(); sessionStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  it('keeps the full list visible but loads report actions only as cards enter the viewport', async () => {
+    const intersections: Array<() => void> = []
+    vi.stubGlobal('IntersectionObserver', class {
+      callback: IntersectionObserverCallback
+      constructor(callback: IntersectionObserverCallback) { this.callback = callback }
+      observe(target: Element) { intersections.push(() => { this.callback([{ target, isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver) }) }
+      disconnect() {}
+    })
+    const first = operation().checks[0]
+    if (!first) throw new Error('Missing fixture')
+    const checks = Array.from({ length: 20 }, (_, index) => ({ ...first,
+      id: `bbbbbbbb-bbbb-4bbb-8bbb-${String(index).padStart(12, '0')}`,
+      requested_url: `https://scroll${String(index)}.test/`, domain: `scroll${String(index)}.test`,
+    }))
+    const fixture = { ...operation(), checks, duplicates: [] }
+    sessionStorage.setItem(`domaincheck:v1:u:${me.id}:quick-report:active-operation`, fixture.id)
+    const batches: string[][] = []
+    const restore = installApiMock((config) => {
+      if (config.url === '/me') return { ...me, permissions: [...me.permissions, 'quick_report.submit_netcraft'] }
+      if (config.url === '/quick-reports/readiness') return { ready: true, missing: [] }
+      if (config.url?.startsWith('/quick-reports/netcraft-statuses?')) {
+        batches.push(new URL(config.url, 'http://test').searchParams.getAll('check_ids'))
+        return batchStatuses(config.url, null)
+      }
+      if (config.url?.startsWith('/quick-reports/checks/')) return fixture
+      throw new Error('Unexpected request')
+    })
+    renderQuickReport()
+    await screen.findByRole('heading', { name: 'https://scroll19.test/' })
+    await waitFor(() => { expect(intersections).toHaveLength(20) })
+    expect(screen.getAllByRole('article')).toHaveLength(20)
+    expect(batches).toEqual([])
+    act(() => { intersections[0]?.(); intersections[1]?.() })
+    await waitFor(() => { expect(batches).toHaveLength(1) })
+    expect(batches[0]).toEqual([checks[0]?.id, checks[1]?.id])
+    expect(screen.getAllByRole('button', { name: 'Gửi API Netcraft' })).toHaveLength(2)
+    act(() => { intersections[19]?.() })
+    await waitFor(() => { expect(batches).toHaveLength(2) })
+    expect(batches[1]).toEqual([checks[19]?.id])
+    restore()
+  })
+
+  it('shows all 100 restored domains with two status batches and on-demand drafts', async () => {
+    vi.spyOn(extensionBridge, 'pingExtension').mockResolvedValue({ deviceId: 'fixture-device', extensionVersion: '3.1.8' })
+    const first = operation().checks[0]
+    if (!first) throw new Error('Missing fixture')
+    const checks = Array.from({ length: 100 }, (_, index) => ({ ...first,
+      id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(index).padStart(12, '0')}`,
+      requested_url: `https://scale${String(index)}.test/`, domain: `scale${String(index)}.test`,
+    }))
+    const fixture = { ...operation(), checks, duplicates: [] }
+    sessionStorage.setItem(`domaincheck:v1:u:${me.id}:quick-report:active-operation`, fixture.id)
+    const reads: string[] = []
+    const restore = installApiMock((config) => {
+      if (config.method === 'post') throw new Error('Reload must not send or check again')
+      if (config.url === '/me') return { ...me, permissions: [...me.permissions, 'quick_report.open_form', 'quick_report.submit_netcraft'] }
+      if (config.url === '/quick-reports/readiness') return { ready: true, missing: [] }
+      if (config.url?.startsWith('/quick-reports/netcraft-statuses?')) { reads.push(config.url); return batchStatuses(config.url, null) }
+      if (config.url?.includes('/form-drafts?')) {
+        reads.push(config.url)
+        return [{ channel: 'general', label: 'Google', form_url: 'https://safebrowsing.google.com/',
+          draft: 'On-demand fixture draft', note: '', autofill_provider: 'google_gsb' }]
+      }
+      if (config.url?.startsWith('/quick-reports/checks/')) return fixture
+      throw new Error('Unexpected request')
+    })
+    renderQuickReport()
+    await screen.findByRole('heading', { name: 'https://scale99.test/' })
+    await waitFor(() => { expect(reads).toHaveLength(2) })
+    expect(reads.every(path => path.startsWith('/quick-reports/netcraft-statuses?'))).toBe(true)
+    expect(screen.getAllByRole('article')).toHaveLength(100)
+    expect(screen.queryByRole('button', { name: 'Trang sau' })).not.toBeInTheDocument()
+    const draftButton = screen.getAllByRole('button', { name: 'Xem nội dung đối chiếu' })[0]
+    if (!draftButton) throw new Error('Missing draft button')
+    await userEvent.click(draftButton)
+    expect(await screen.findByText('On-demand fixture draft')).toBeInTheDocument()
+    expect(reads.filter(path => path.includes('/form-drafts?'))).toHaveLength(1)
+    expect(screen.getByRole('heading', { name: 'https://scale99.test/' })).toBeInTheDocument()
+    restore()
+  }, 15_000)
 
   it('displays current input order and numbering even when daily history arrives in a different order', async () => {
     const first = operation().checks[0]
@@ -352,6 +437,7 @@ describe('Quick Report workflow', () => {
     await userEvent.click(goDaddy)
     await waitFor(() => { expect(openForm).toHaveBeenCalledWith('fixture-capability') })
     expect(submitted).toEqual(['godaddy_phishing'])
+    for (const button of screen.getAllByRole('button', { name: 'Xem nội dung đối chiếu' })) await userEvent.click(button)
     expect(await screen.findByText('General report fixture')).toBeInTheDocument()
     expect(screen.getByText('Infrastructure report fixture')).toBeInTheDocument()
     expect(screen.getByText('Routing report for Registry CO')).toBeInTheDocument()
@@ -376,6 +462,7 @@ describe('Quick Report workflow', () => {
     expect(await screen.findByRole('link', { name: 'Registrar · Dynadot LLC' })).toHaveAttribute('href', forms[0]?.form_url)
     expect(screen.getByRole('link', { name: 'Registry · Verisign' })).toHaveAttribute('href', forms[1]?.form_url)
     expect(screen.getByRole('link', { name: 'Registry · Verisign' })).toHaveAttribute('target', '_blank')
+    for (const button of screen.getAllByRole('button', { name: 'Xem nội dung đối chiếu' })) await userEvent.click(button)
     expect(await screen.findByText('Registrar draft fixture')).toBeInTheDocument()
     expect(screen.getByText('Registry draft fixture')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Registrar' })).toBeInTheDocument()
@@ -491,8 +578,8 @@ describe('Quick Report workflow', () => {
       if (config.url === '/quick-reports/readiness') return { ready: true, missing: [] }
       if (config.url === '/me') return { ...me, permissions: [...me.permissions, 'quick_report.submit_netcraft'] }
       if (config.method === 'post') { writes += 1; throw new Error('Must not send') }
-      if (config.url?.endsWith('/netcraft')) return { id: '44444444-4444-4444-8444-444444444444', state: state === 'DISABLED' ? 'PREVIEW' : state,
-        revision: 1, fingerprint: 'a'.repeat(64), expires_at: '2026-10-16T12:00:00Z', submit_enabled: state !== 'DISABLED', payload: null, result: {} }
+      if (config.url?.startsWith('/quick-reports/netcraft-statuses?')) return batchStatuses(config.url, { id: '44444444-4444-4444-8444-444444444444', state: state === 'DISABLED' ? 'PREVIEW' : state,
+        revision: 1, fingerprint: 'a'.repeat(64), expires_at: '2026-10-16T12:00:00Z', submit_enabled: state !== 'DISABLED', payload: null, result: {} })
       if (config.url?.startsWith('/quick-reports/checks/')) return operation()
       throw new Error('Unexpected request')
     })
@@ -516,7 +603,7 @@ describe('Quick Report workflow', () => {
       if (config.url === '/me') return { ...me, permissions: [...me.permissions, 'quick_report.submit_netcraft'] }
       if (config.url?.endsWith('/netcraft/preview')) { posts.push(config.url); return preview }
       if (config.url?.endsWith('/submit')) { posts.push(config.url); submitted = true; return { ...preview, state: 'SUBMITTED' } }
-      if (config.url?.endsWith('/netcraft')) return submitted ? { ...preview, state: 'SUBMITTED' } : null
+      if (config.url?.startsWith('/quick-reports/netcraft-statuses?')) return batchStatuses(config.url, submitted ? { ...preview, state: 'SUBMITTED' } : null)
       if (config.url?.startsWith('/quick-reports/checks/')) return operation()
       throw new Error(`Unexpected request ${config.url ?? ''}`)
     })
