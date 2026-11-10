@@ -44,3 +44,11 @@ Trên form thật, chạy adapter 1.0.1 trong isolated world với dữ liệu g
 - `observedDate` và `notifiedRegistrarDate`: 11/10/2026.
 
 Không bấm Next/Submit/CAPTCHA/upload. Fixture test bao gồm datepicker trong native shadow và synthetic light DOM, field brand xuất hiện sau chọn Phishing và giữ giá trị người dùng đã sửa. Bộ frontend mới: 178 test; adapter/background trực tiếp 11/11 đạt. Build/typecheck/lint đạt; ZIP 3.1.6 chứa đúng adapter/background nguồn. Lượt sửa này không đổi backend, không restart dịch vụ.
+
+## Nhãn tải và tương thích phiên bản trên FE
+
+Nhãn phiên bản từng lấy define khi Vite khởi động, có thể cũ hơn ZIP được tạo từ file nguồn mới. Đã thay bằng import manifest JSON theo dõi qua HMR. Kiểm tra HTTP vào server dev đang chạy: module compatibility trả 200 và import manifest; ZIP tải về có manifest 3.1.6. Production vẫn cần deploy build FE mới và tải lại trang.
+
+FE kiểm tra version theo provider, không chặn mọi form chỉ vì extension chưa phải bản mới nhất. Test UI với 3.1.4/3.1.5: Google dùng được, Verisign tắt tự điền và hiện link mở thủ công; click nút tắt không tạo task. Sau đổi handshake sang 3.1.6 và nhấn Kiểm tra lại, Verisign bật. Test 3.1.6 mở tự điền bình thường. So sánh số kiểm tra cả 3.10.0 và phiên bản không hợp lệ. Nhãn download không còn chịu ảnh hưởng của biến version startup cũ.
+
+Toàn bộ frontend **198/198 đạt, 31 file**; build/typecheck/lint đạt. Có một lỗi lint do biểu thức null fallback không còn cần thiết sau khi version là string từ manifest; đã sửa và chạy lại lint đạt. Chỉ đổi FE và tài liệu ở lượt này, không đổi backend/worker hoặc cơ chế phân quyền.

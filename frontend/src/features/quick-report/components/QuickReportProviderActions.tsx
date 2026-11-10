@@ -12,6 +12,7 @@ import type { ReturnTypeOfUseExtension } from './types'
 import { request } from '../../../lib/http/client'
 import { z } from 'zod'
 import { QuickReportDraftPanel } from './QuickReportDraftPanel'
+import { minimumExtensionVersion, supportsFormProvider } from '../extension/extensionCompatibility'
 
 const ACTIVE_STATES = new Set(['CREATED', 'EXCHANGED', 'WORKING'])
 const ORDER: FormProvider[] = ['google_gsb', 'microsoft_smartscreen', 'chongluadao', 'coccoc_safe', 'cloudflare']
@@ -33,6 +34,9 @@ export function QuickReportProviderActions({ check, canOpenForm, extension }: { 
     meta: { pendingMessage: 'Đang mở form qua extension…', successMessage: 'Đã mở form. Kiểm tra thông tin và gửi thủ công.' },
     mutationFn: async (provider: FormProvider) => {
       if (!extension.connection) throw new Error('Extension chưa kết nối.')
+      if (!supportsFormProvider(extension.connection.extensionVersion, provider)) {
+        throw new Error(`Form này cần Web Form Assistant v${minimumExtensionVersion[provider]} trở lên. Cập nhật extension rồi nhấn Kiểm tra lại.`)
+      }
       await registerExtensionDevice(extension.connection.deviceId, extension.connection.extensionVersion)
       const created = await createFormTask(check.id, provider, extension.connection.deviceId)
       setTaskId(created.id)
@@ -48,14 +52,18 @@ export function QuickReportProviderActions({ check, canOpenForm, extension }: { 
   const connected = extension.state === 'connected'
   const groups = (['general', 'infrastructure', 'registrar', 'registry'] as const).filter((group) =>
     group === 'general' || (group === 'infrastructure' ? providers.some((provider) => provider.id === 'cloudflare') : check.report_forms?.some((form) => form.channel === group)))
-  const autoButton = (provider: typeof providers[number], label: string, icon: ReactNode) => <Button key={provider.id}
+  const autoButton = (provider: typeof providers[number], label: string, icon: ReactNode) => {
+    const compatible = supportsFormProvider(extension.connection?.extensionVersion ?? '', provider.id)
+    const needsUpdate = connected && !compatible
+    return <div key={provider.id} className="flex max-w-64 flex-col gap-1"><Button
     className="primary-button report-action inline-flex items-center gap-2"
     data-provider={provider.id}
-    title={connected ? 'Tự điền qua extension; bạn kiểm tra và gửi thủ công' : 'Kết nối Web Form Assistant để tự điền'}
-    aria-label={`${label} — Mở và tự điền`} disabled={!connected || open.isPending}
+    title={needsUpdate ? `Cần extension v${minimumExtensionVersion[provider.id]} trở lên` : connected ? 'Tự điền qua extension; bạn kiểm tra và gửi thủ công' : 'Kết nối Web Form Assistant để tự điền'}
+    aria-label={`${label} — Mở và tự điền`} disabled={!connected || !compatible || open.isPending}
     loading={open.isPending && open.variables === provider.id} onClick={() => { open.mutate(provider.id) }}>
     {icon}<span className="text-left"><span className="block max-w-52 truncate">{label}</span><span className="block text-[10px] font-normal opacity-70">Mở và tự điền</span></span><Puzzle size={12} className="opacity-50" />
-  </Button>
+  </Button>{needsUpdate && <><span className="text-xs text-amber-700 dark:text-amber-300">Cần extension v{minimumExtensionVersion[provider.id]} trở lên</span><a className="text-xs underline" href={provider.form_url} target="_blank" rel="noopener noreferrer" aria-label={`${label} — Mở thủ công`}>Mở thủ công</a></>}</div>
+  }
   return <section className="border-t border-slate-100 px-3 py-2 dark:border-slate-800">
     <div className="grid items-start gap-2 md:grid-cols-[repeat(var(--report-columns),minmax(0,1fr))]" style={{ '--report-columns': Math.max(1, groups.length - 1) } as React.CSSProperties} aria-label="Kênh báo cáo">
       {canOpenForm && groups.map((group) => <div key={group} className={`min-w-0 rounded-lg border border-slate-200 p-2 dark:border-slate-800 ${group === 'general' ? 'md:col-span-full' : ''}`}>

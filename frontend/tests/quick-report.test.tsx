@@ -276,8 +276,43 @@ describe('Quick Report workflow', () => {
     restore()
   })
 
+  it.each(['3.1.4', '3.1.5', '3.1.6'])('keeps compatible forms usable and gates Verisign for installed %s', async (version) => {
+    const ping = vi.spyOn(extensionBridge, 'pingExtension').mockResolvedValue({ deviceId: 'fixture-device', extensionVersion: version })
+    const forms = [{ channel: 'registry', label: 'Verisign', form_url: 'https://verisign.my.site.com/DNSAbuse', autofill_provider: 'verisign_dns_abuse', note: '' }]
+    const providers = [{ id: 'google_gsb', label: 'Google', form_url: 'https://safebrowsing.google.com/' },
+      { id: 'verisign_dns_abuse', label: 'Verisign', form_url: forms[0]?.form_url }]
+    const fixture = { ...operation(), checks: operation().checks.map((check) => ({ ...check, report_forms: forms, providers })) }
+    sessionStorage.setItem(`domaincheck:v1:u:${me.id}:quick-report:active-operation`, fixture.id)
+    const taskRequests: string[] = []
+    const restore = installApiMock((config) => {
+      if (config.url === '/me') return { ...me, permissions: [...me.permissions, 'quick_report.open_form'] }
+      if (config.url === '/quick-reports/readiness') return { ready: true, missing: [] }
+      if (config.url?.endsWith('/form-tasks')) taskRequests.push(config.url)
+      if (config.url?.includes('/form-drafts?')) return forms.map((form) => ({ ...form, draft: 'English fixture' }))
+      if (config.url?.startsWith('/quick-reports/checks/')) return fixture
+      throw new Error('Unexpected request')
+    })
+    renderQuickReport()
+    const verisign = await screen.findByRole('button', { name: 'Registry · Verisign — Mở và tự điền' })
+    await waitFor(() => { expect(screen.getByRole('button', { name: 'Google — Mở và tự điền' })).toBeEnabled() })
+    if (version === '3.1.6') {
+      expect(verisign).toBeEnabled()
+      expect(screen.queryByRole('link', { name: 'Registry · Verisign — Mở thủ công' })).not.toBeInTheDocument()
+    } else {
+      expect(verisign).toBeDisabled()
+      expect(screen.getByRole('link', { name: 'Registry · Verisign — Mở thủ công' })).toHaveAttribute('href', forms[0]?.form_url)
+      expect(screen.getByText('Cần extension v3.1.6 trở lên')).toBeInTheDocument()
+      await userEvent.click(verisign)
+      expect(taskRequests).toEqual([])
+      ping.mockResolvedValue({ deviceId: 'fixture-device', extensionVersion: '3.1.6' })
+      await userEvent.click(screen.getByRole('button', { name: 'Kiểm tra lại' }))
+      await waitFor(() => { expect(verisign).toBeEnabled() })
+    }
+    restore()
+  })
+
   it('orders provider buttons and uses only the correct extension action for supported routing forms', async () => {
-    vi.spyOn(extensionBridge, 'pingExtension').mockResolvedValue({ deviceId: 'fixture-device', extensionVersion: '3.0.0' })
+    vi.spyOn(extensionBridge, 'pingExtension').mockResolvedValue({ deviceId: 'fixture-device', extensionVersion: '3.1.6' })
     const taskId = '33333333-3333-4333-8333-333333333333'
     const openForm = vi.spyOn(extensionBridge, 'openExtensionForm').mockResolvedValue({ taskId, tabId: 12 })
     const providers = [

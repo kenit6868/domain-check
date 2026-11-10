@@ -169,3 +169,10 @@ Build FE tạo `frontend/dist/downloads/web-form-assistant.zip` bản 3.1.5. Gi�
 Sau chọn Phishing, field `phishingDetails` (Brand name or website being impersonated) xuất hiện và nhận `brand_name` từ hồ sơ. Bản 3.1.5 đã bỏ sót field động này. Background phải trả registrar/target_domain từ session storage cho `form-task-for-tab`; bản 3.1.6 đã sửa đường truyền này. Calendar cần tìm qua cả physical parent và shadow host vì Lightning synthetic shadow hiển thị thành light DOM trong môi trường cô lập của Chrome extension. Đã xác minh bốn field bằng dữ liệu mẫu trên form thật trong CDP isolated world. Không bấm Next hoặc gửi báo cáo.
 
 Tải ZIP 3.1.6, giải nén vào cùng thư mục extension, Reload thủ công rồi mở task Verisign mới từ Quick Report; task cũ có thể chưa có registrar trong snapshot. Registrar chỉ được điền khi check có dữ liệu này. Bản sửa không đổi backend; backend vẫn cần đã nạp phần task payload của 3.1.5. Không cần restart worker.
+
+
+### Phiên bản extension và khả năng tự điền trong Quick Report
+
+Nhãn tải ZIP lấy từ import manifest JSON, không lấy biến define tại thời điểm Vite khởi động; HMR theo dõi manifest trong dev. Production vẫn cần build/deploy FE và tải lại trang để nhận bản web mới. ZIP tải qua đường dẫn có query version. Bản đang cài thấp hơn bản đi kèm web hiển thị cảnh báo cập nhật; phiên bản không hợp lệ không được coi là tương thích.
+
+Kiểm tra tương thích theo provider tại `extensionCompatibility.ts`: luồng web fill-only tối thiểu 3.1.0; UDR 3.1.1, CentralNic 3.1.2, GoDaddy 3.1.3, Dynadot 3.1.4, Verisign 3.1.6. Form tương thích vẫn dùng được khi extension chưa phải bản mới nhất. Form không tương thích tắt nút tự điền, hiện version tối thiểu và liên kết mở thủ công; không tạo task. Mutation kiểm tra lại điều kiện trước gọi API. Quyền backend/owner/device/CSRF vẫn giữ nguyên; kiểm tra version FE chỉ phục vụ tương thích giao diện. Sau cập nhật extension và Reload, bấm Kiểm tra lại để FE nhận handshake mới và bật form tương ứng. Không tự cài/reload extension hoặc restart worker.

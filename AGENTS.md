@@ -127,3 +127,5 @@ Final validation: clean PostgreSQL/Redis + fresh wheel backend 402/402 (zero ski
 - 2026-11-10 — Extension 3.1.5 thêm Verisign DNS Abuse fill-only, hỗ trợ redirect /ReportAbuse/ và Lightning shadow DOM. Chọn DNS Abuse/Phishing/TLD, Today cho hai ngày; registrar từ check, email/draft từ hồ sơ. Giữ giá trị người dùng; Next/CAPTCHA/upload/Submit thủ công. Task thêm registrar/target_domain với mặc định tương thích; không migration hoặc restart worker.
 
 - 2026-11-10 — Extension 3.1.6 sửa Verisign: chờ field phishingDetails sau Phishing để điền brand_name; trả registrar/target_domain từ background cho content script. Datepicker tìm qua parentElement và shadow host để hỗ trợ Lightning synthetic light DOM trong isolated world. Đã tái hiện lỗi và xác minh bốn field trên form thật bằng dữ liệu mẫu, không Next/Submit. Không đổi backend/restart dịch vụ.
+
+- 2026-11-10 — Quick Report đồng bộ nhãn tải extension bằng import manifest (Vite HMR). Cảnh báo bản cũ, kiểm tra version tối thiểu theo provider và giữ link mở thủ công cho form chưa tương thích; Verisign cần 3.1.6. Bấm Kiểm tra lại sau cập nhật để bật form. Không đổi API/worker/quyền hoặc tự reload extension.

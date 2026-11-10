@@ -137,3 +137,6 @@ Extension **3.1.5** bổ sung Verisign DNS Abuse trong Quick Report cho các reg
 
 
 Extension **3.1.6** sửa Verisign: điền Brand name or website being impersonated từ brand_name sau khi chọn Phishing, chuyển registrar tới content script và chọn Today cho hai ngày trong môi trường cô lập của extension. Tải ZIP mới, giải nén đè trong cùng thư mục extension, Reload rồi mở một task Verisign mới. Giữ giá trị người dùng; Next/CAPTCHA/upload/Submit vẫn thủ công. Không cần migration hay restart worker cho bản sửa extension này.
+
+
+Quick Report lấy nhãn phiên bản extension trực tiếp từ manifest để đồng bộ với ZIP và cập nhật qua Vite HMR. Bản cũ vẫn kết nối và dùng được form phù hợp phiên bản; form cần bản mới sẽ tắt tự điền, ghi rõ version tối thiểu và có liên kết Mở thủ công. Verisign yêu cầu 3.1.6; sau cập nhật extension, nhấn Kiểm tra lại. Bản web production cần build/deploy FE mới và tải lại trang.

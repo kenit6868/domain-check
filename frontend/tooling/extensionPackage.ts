@@ -3,7 +3,6 @@ import { fileURLToPath } from 'node:url'
 import type { Plugin } from 'vite'
 
 const source = new URL('../extensions/cloudflare-profile-worker/', import.meta.url)
-export const extensionVersion = (JSON.parse(readFileSync(new URL('manifest.json', source), 'utf8')) as { version: string }).version
 const downloadPath = '/downloads/web-form-assistant.zip'
 
 function crc32(data: Buffer) {
